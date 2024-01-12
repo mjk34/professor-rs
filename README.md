@@ -11,7 +11,7 @@ Professor bot is a developing agent that is used to incentivise members with rew
 ---
 
 ## Current Development Branches:
-  - [ ] main
+  - [-] main
 
 ## Past Development Branches:
   - [-] main     # transition from python to rust

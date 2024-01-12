@@ -1,53 +1,76 @@
-use anyhow::anyhow;
+mod basic;
 
-use serenity::async_trait;
-use serenity::model::channel::Message;
-use serenity::model::gateway::Ready;
-use serenity::prelude::*;
-
-use shuttle_secrets::SecretStore;
 use tracing::{error, info};
+use std::env;
+use tokio;
+
+use poise::async_trait;
+use poise::serenity_prelude as serenity;
 
 struct Bot;
 
+struct Data {} // User data, which is stored and accessible in all command invocations
+type Error = Box<dyn std::error::Error + Send + Sync>;
+type Context<'a> = poise::Context<'a, Data, Error>;
+
+#[poise::command(prefix_command)]
+async fn register(ctx: Context<'_>) -> Result<(), Error> {
+    poise::builtins::register_application_commands_buttons(ctx).await?;
+    Ok(())
+}
+
 #[async_trait]
-impl EventHandler for Bot {
-    async fn message(&self, ctx: Context, msg: Message) {
+impl serenity::EventHandler for Bot {
+    async fn message(&self, ctx: serenity::Context, msg: serenity::Message) {
         
         //same as on_message function in main.py
-        println!("{:?}", msg);
-        if msg.content == "!hello" {
-            if let Err(e) = msg.channel_id.say(&ctx.http, "world!").await {
+        // println!("{:?}", msg);
+        if msg.content == "yo" {
+            if let Err(e) = msg.channel_id.say(&ctx.http, "mama").await {
                 error!("Error sending message: {:?}", e);
             }
         }
     }
 
-    async fn ready(&self, _: Context, ready: Ready) {
+    async fn ready(&self, _: serenity::Context, ready: serenity::Ready) {
         info!("{} is connected!", ready.user.name);
     }
 }
 
-#[shuttle_runtime::main]
-async fn serenity(
-    #[shuttle_secrets::Secrets] secret_store: SecretStore,
-) -> shuttle_serenity::ShuttleSerenity {
+#[tokio::main]
+async fn main() {
 
-    // Get the discord token set in `Secrets.toml`
-    let token = if let Some(token) = secret_store.get("DISCORD_TOKEN") {
-        token
-    } else {
-        return Err(anyhow!("'DISCORD_TOKEN' was not found").into());
-    };
+    dotenv::dotenv().expect("Failed to read .env file");
+    let token = env::var("DISCORD_TOKEN").expect("missing DISCORD_TOKEN");
+    let intents = serenity::GatewayIntents::GUILD_MESSAGES
+                                | serenity::GatewayIntents::DIRECT_MESSAGES
+                                | serenity::GatewayIntents::MESSAGE_CONTENT
+                                | serenity::GatewayIntents::GUILDS;
 
-    // Set gateway intents, which decides what events the bot will be notified about
-    // look inyo client.framework to add in poise capabilities
-    let intents = GatewayIntents::GUILD_MESSAGES | GatewayIntents::MESSAGE_CONTENT;
+    let framework = poise::Framework::builder()
+        .options(poise::FrameworkOptions {
+            commands: vec![
+                register(),
+                basic::ping(),
+            ],
+            prefix_options: poise::PrefixFrameworkOptions { 
+                prefix: Some("~".into()), 
+                ..Default::default() 
+            },
+            ..Default::default()
+        })
+        .setup(|ctx, _ready, framework| {
+            Box::pin(async move {
+                poise::builtins::register_globally(ctx, &framework.options().commands).await?;
+                Ok(Data {})
+            })
+        })
+        .build();
 
-    let client = Client::builder(&token, intents)
+    let client = serenity::Client::builder(&token, intents)
         .event_handler(Bot)
-        .await
-        .expect("Err creating client");
+        .framework(framework)
+        .await;
 
-    Ok(client.into())
+    client.unwrap().start().await.unwrap();
 }
