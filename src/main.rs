@@ -51,7 +51,9 @@ async fn main() {
         .options(poise::FrameworkOptions {
             commands: vec![
                 register(),
+                
                 basic::ping(),
+                basic::gpt_string(),
             ],
             prefix_options: poise::PrefixFrameworkOptions { 
                 prefix: Some("~".into()), 
@@ -59,9 +61,9 @@ async fn main() {
             },
             ..Default::default()
         })
-        .setup(|ctx, _ready, framework| {
+        .setup(|_, _ready, _| {//|ctx, _ready, framework| {
             Box::pin(async move {
-                poise::builtins::register_globally(ctx, &framework.options().commands).await?;
+                // poise::builtins::register_globally(ctx, &framework.options().commands).await?;
                 Ok(Data {})
             })
         })
