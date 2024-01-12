@@ -1,14 +1,13 @@
 mod basic;
 mod data;
 
-use std::{env, fs};
+use std::env;
 use tokio;
 use tracing::{error, info};
 
 use poise::async_trait;
 pub use poise::serenity_prelude as serenity;
 
-use chrono::prelude::{DateTime, Utc};
 
 struct Bot;
 
@@ -43,6 +42,8 @@ async fn main() {
     dotenv::dotenv().expect("Failed to read .env file");
     let token = env::var("DISCORD_TOKEN").expect("missing DISCORD_TOKEN");
 
+    let data = data::Data::load();
+
     let intents = serenity::GatewayIntents::GUILD_MESSAGES
         | serenity::GatewayIntents::DIRECT_MESSAGES
         | serenity::GatewayIntents::MESSAGE_CONTENT
@@ -61,12 +62,19 @@ async fn main() {
             //|ctx, _ready, framework| {
             Box::pin(async move {
                 // poise::builtins::register_globally(ctx, &framework.options().commands).await?;
-                Ok(data::Data::default())
+                Ok(data)
             })
         })
         .build();
 
     let client = serenity::Client::builder(&token, intents)
+        .activity(serenity::ActivityData {
+            name: "Coding Rust".to_string(),
+            kind: serenity::ActivityType::Custom,
+            state: Some("Coding".to_string()),
+            url: None,
+        })
+        .status(serenity::OnlineStatus::Online)
         .event_handler(Bot)
         .framework(framework)
         .await;
