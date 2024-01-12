@@ -1,3 +1,5 @@
 /target
 .shuttle-storage
 .env
+data.bin
+.vscode/
