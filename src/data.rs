@@ -118,6 +118,9 @@ impl UserData {
         self.creds = -creds;
         return true;
     }
+    pub fn get_creds(&self) -> i32 {
+        return self.creds;
+    }
 
     pub fn add_submit(&mut self, new_submit: ClipData) {
         self.submits.push(new_submit);

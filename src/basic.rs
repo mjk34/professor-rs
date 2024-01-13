@@ -81,3 +81,25 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
 
     Ok(())
 }
+
+#[poise::command(slash_command)]
+pub async fn wallet(ctx: Context<'_>) -> Result<(), Error> {
+    let user = ctx.author();
+    let data = ctx.data().users.lock().await;
+    let user_data = data.get(&user.id).unwrap();
+
+    let desc = format!("Total Creds: **{}**", user_data.get_creds());
+
+    ctx.send(
+        poise::CreateReply::default().embed(
+            serenity::CreateEmbed::new()
+                .title("Wallet")
+                .description(desc)
+                .thumbnail(format!("{}", user.avatar_url().unwrap_or_default()))
+                .color(Color::GOLD),
+        ),
+    )
+    .await?;
+
+    Ok(())
+}
