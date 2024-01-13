@@ -8,7 +8,6 @@ use tracing::{error, info};
 use poise::async_trait;
 pub use poise::serenity_prelude as serenity;
 
-
 struct Bot;
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
@@ -51,6 +50,18 @@ async fn main() {
 
     let framework = poise::Framework::builder()
         .options(poise::FrameworkOptions {
+            // Check and create a user account before each command
+            pre_command: |ctx: Context<'_>| {
+                Box::pin(async move {
+                    ctx.data().check_or_create_user(ctx).await.unwrap();
+                })
+            },
+            // Save all data after running a command
+            post_command: |ctx: Context<'_>| {
+                Box::pin(async move {
+                    ctx.data().save().await;
+                })
+            },
             commands: vec![register(), basic::ping(), basic::gpt_string()],
             prefix_options: poise::PrefixFrameworkOptions {
                 prefix: Some("~".into()),

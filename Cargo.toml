@@ -4,7 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-poise = { path = "../poise-0.6.1" }
+poise = "0.6.1"
+#poise = { path = "../poise-0.6.1" }
 #poise = {git = "https://github.com/kangalioo/poise", features=["collector"]}
 
 tokio = { version ="1.4.0", features = ["rt-multi-thread", "macros"] }

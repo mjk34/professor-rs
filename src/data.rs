@@ -1,11 +1,11 @@
 use crate::serenity;
 use chrono::prelude::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serenity::Color;
 use std::collections::HashMap;
 use std::fs;
 use std::ops::Index;
 use tokio::sync::Mutex;
-use serenity::Color;
 
 // General Structures
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
@@ -74,14 +74,18 @@ impl UserData {
         self.level = self.level + 1;
     }
     pub fn update_xp(&mut self, xp: i32) -> bool {
-        if xp < 0 {return false;}
+        if xp < 0 {
+            return false;
+        }
 
         self.xp = xp;
         return true;
     }
 
-    pub fn update_name(&mut self, name: String) -> bool{
-        if name == "" {return false;}
+    pub fn update_name(&mut self, name: String) -> bool {
+        if name == "" {
+            return false;
+        }
 
         self.name = name;
         return true;
@@ -94,13 +98,17 @@ impl UserData {
     }
 
     pub fn add_creds(&mut self, creds: i32) -> bool {
-        if creds < 0 {return false;}
-        
+        if creds < 0 {
+            return false;
+        }
+
         self.creds = creds;
         return true;
     }
     pub fn sub_creds(&mut self, creds: i32) -> bool {
-        if creds > 0 {return false;}
+        if creds > 0 {
+            return false;
+        }
 
         self.creds = -creds;
         return true;
@@ -178,7 +186,6 @@ impl UserData {
         self.wish.wishes = wish_count;
         return true;
     }
-
 }
 
 #[derive(Default)]
@@ -206,7 +213,9 @@ impl Data {
                 serenity::CreateEmbed::new()
                     .title("Account Created!")
                     .description(format!("{}", ctx.author().name))
-                    .image("https://gifdb.com/images/high/anime-girl-okay-sign-b5zlye5h8mnjhdg2.gif")
+                    .image(
+                        "https://gifdb.com/images/high/anime-girl-okay-sign-b5zlye5h8mnjhdg2.gif",
+                    )
                     .thumbnail(ctx.author().avatar_url().unwrap())
                     .color(Color::GOLD),
             ),
