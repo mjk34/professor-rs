@@ -62,7 +62,7 @@ async fn main() {
                     ctx.data().save().await;
                 })
             },
-            commands: vec![register(), basic::ping(), basic::gpt_string()],
+            commands: vec![register(), basic::ping(), basic::gpt_string(), basic::uwu()],
             prefix_options: poise::PrefixFrameworkOptions {
                 prefix: Some("~".into()),
                 ..Default::default()

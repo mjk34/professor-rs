@@ -919,6 +919,7 @@ dependencies = [
  "chrono",
  "dotenv",
  "poise",
+ "rand",
  "serde",
  "serde_json",
  "tokio",

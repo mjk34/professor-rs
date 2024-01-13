@@ -5,6 +5,7 @@ use serenity::Color;
 use std::collections::HashMap;
 use std::fs;
 use std::ops::Index;
+use tokio::fs::read;
 use tokio::sync::Mutex;
 
 // General Structures
@@ -92,6 +93,10 @@ impl UserData {
     }
     pub fn update_daily(&mut self) {
         self.last_daily = Utc::now();
+    }
+    pub fn check_daily(&self) -> bool {
+        let diff = self.last_daily - Utc::now();
+        return diff.num_hours() > 24;
     }
     pub fn update_claimed_bonus(&mut self) {
         self.claimed_bonus = Utc::now();
@@ -192,6 +197,9 @@ impl UserData {
 pub struct Data {
     /// User data, which is stored and accessible in all command invocations
     pub users: Mutex<HashMap<serenity::UserId, UserData>>,
+    pub meme: Vec<String>,
+    pub ponder: Vec<String>,
+    pub pong: Vec<String>,
 }
 impl Data {
     pub async fn check_or_create_user<'a>(
@@ -241,8 +249,27 @@ impl Data {
         } else {
             HashMap::default()
         };
+
+        let meme = read_lines("reference/meme.txt");
+        let ponder = read_lines("reference/ponder.txt");
+        let pong = read_lines("reference/pong.txt");
         return Data {
             users: Mutex::new(users),
+            meme,
+            ponder,
+            pong,
         };
     }
+}
+
+fn read_lines(filename: &str) -> Vec<String> {
+    let lines: Vec<String> = fs::read_to_string(filename)
+        .unwrap()
+        .lines()
+        .map(String::from)
+        .collect();
+
+    println!("{}: loaded {} lines", filename, lines.len());
+
+    return lines;
 }
