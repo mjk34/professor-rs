@@ -96,7 +96,7 @@ impl UserData {
         self.last_daily = Utc::now();
     }
     pub fn check_daily(&self) -> bool {
-        let diff = self.last_daily - Utc::now();
+        let diff = Utc::now() - self.last_daily;
         return diff.num_hours() > 24;
     }
     pub fn update_claimed_bonus(&mut self) {
@@ -108,7 +108,7 @@ impl UserData {
             return false;
         }
 
-        self.creds = creds;
+        self.creds += creds;
         return true;
     }
     pub fn sub_creds(&mut self, creds: i32) -> bool {
@@ -116,7 +116,7 @@ impl UserData {
             return false;
         }
 
-        self.creds = -creds;
+        self.creds -= creds;
         return true;
     }
     pub fn get_creds(&self) -> i32 {
