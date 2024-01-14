@@ -103,7 +103,6 @@ pub async fn wallet(ctx: Context<'_>) -> Result<(), Error> {
 
     Ok(())
 }
-
 #[poise::command(slash_command)]
 pub async fn voice_status(ctx: Context<'_>) -> Result<(), Error> {
     let data = ctx.data().voice_users.lock().await;
@@ -112,46 +111,46 @@ pub async fn voice_status(ctx: Context<'_>) -> Result<(), Error> {
     out.sort_by(|a, b| a.1.joined.cmp(&b.1.joined));
 
     let now = chrono::Utc::now();
-    let mut desc = "".to_string();
 
-    if out.len() > 0 {
+    let embed = if !out.is_empty() {
+        let mut embed = serenity::CreateEmbed::new()
+            .title("Voice Status")
+            .color(Color::GOLD)
+            .thumbnail(ctx.guild().unwrap().icon_url().unwrap_or_default());
+
         for (a, b) in out.iter() {
             let u = a.to_user(&ctx).await?;
             let diff = now - b.joined;
             let minutes = ((diff.num_seconds()) / 60) % 60;
             let hours = (diff.num_seconds() / 60) / 60;
-            desc += &format!("**{}**: {:0>2}:{:0>2}", u.name, hours, minutes);
+
+            let mut user_info = format!("{:0>2}:{:0>2}", hours, minutes);
 
             if let Some(mute_time) = b.mute {
                 let mute_duration = now - mute_time;
                 let mute_minutes = ((mute_duration.num_seconds()) / 60) % 60;
                 let mute_hours = (mute_duration.num_seconds() / 60) / 60;
-                desc += &format!(" | Mute: {:0>2}:{:0>2}", mute_hours, mute_minutes);
+                user_info += &format!(" | Mute: {:0>2}:{:0>2}", mute_hours, mute_minutes);
             }
             if let Some(deaf_time) = b.deaf {
                 let deaf_duration = now - deaf_time;
                 let deaf_minutes = ((deaf_duration.num_seconds()) / 60) % 60;
                 let deaf_hours = (deaf_duration.num_seconds() / 60) / 60;
-                desc += &format!(" | Deaf: {:0>2}:{:0>2}", deaf_hours, deaf_minutes);
+                user_info += &format!(" | Deaf: {:0>2}:{:0>2}", deaf_hours, deaf_minutes);
             }
-            desc += "\n";
+
+            embed = embed.field(u.name, user_info, false);
         }
+
+        embed
     } else {
-        desc = "No one in voice".to_string();
-    }
+        serenity::CreateEmbed::new()
+            .title("Voice Status")
+            .description("No one in voice")
+            .color(Color::GOLD)
+    };
 
-    let icon = ctx.guild().unwrap().icon_url().unwrap_or_default();
-
-    ctx.send(
-        poise::CreateReply::default().embed(
-            serenity::CreateEmbed::new()
-                .title("Voice Status")
-                .description(desc)
-                .color(Color::GOLD)
-                .thumbnail(icon),
-        ),
-    )
-    .await?;
+    ctx.send(poise::CreateReply::default().embed(embed)).await?;
 
     Ok(())
 }

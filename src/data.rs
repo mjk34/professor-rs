@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serenity::Color;
 use std::collections::HashMap;
 
-use std::{fs};
+use std::fs;
 
 use tokio::sync::Mutex;
 

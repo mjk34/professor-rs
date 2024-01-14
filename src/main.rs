@@ -1,13 +1,11 @@
 mod basic;
 mod data;
 
-
-use std::{env};
+use std::env;
 use tokio;
-use tracing::{error};
+use tracing::error;
 
 pub use poise::serenity_prelude as serenity;
-
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 type Context<'a> = poise::Context<'a, data::Data, Error>;
