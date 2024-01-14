@@ -1,10 +1,11 @@
 use crate::serenity;
 use chrono::prelude::{DateTime, Utc};
+use chrono::Date;
 use serde::{Deserialize, Serialize};
 use serenity::Color;
 use std::collections::HashMap;
-use std::fs;
 use std::ops::Index;
+use std::{default, fs};
 use tokio::fs::read;
 use tokio::sync::Mutex;
 
@@ -196,10 +197,43 @@ impl UserData {
     }
 }
 
+#[derive(Default, Debug)]
+pub struct VoiceUser {
+    pub joined: DateTime<Utc>,
+    pub mute: Option<DateTime<Utc>>,
+    pub deaf: Option<DateTime<Utc>>,
+}
+
+impl VoiceUser {
+    pub fn new() -> VoiceUser {
+        return VoiceUser {
+            joined: Utc::now(),
+            mute: None,
+            deaf: None,
+        };
+    }
+    pub fn update_mute(&mut self, b: bool) {
+        if b {
+            self.mute = Some(Utc::now());
+        } else {
+            self.mute = None;
+        }
+    }
+    pub fn update_deaf(&mut self, b: bool) {
+        if b {
+            self.deaf = Some(Utc::now());
+        } else {
+            self.deaf = None;
+        }
+    }
+}
+/// User data, which is stored and accessible in all command invocations
 #[derive(Default)]
 pub struct Data {
-    /// User data, which is stored and accessible in all command invocations
+    /// Persistent data of users
     pub users: Mutex<HashMap<serenity::UserId, UserData>>,
+    /// Duration of users in voice channel, updates by events
+    pub voice_users: Mutex<HashMap<serenity::UserId, VoiceUser>>,
     pub meme: Vec<String>,
     pub ponder: Vec<String>,
     pub pong: Vec<String>,
@@ -258,6 +292,7 @@ impl Data {
         let pong = read_lines("reference/pong.txt");
         return Data {
             users: Mutex::new(users),
+            voice_users: Mutex::new(HashMap::new()),
             meme,
             ponder,
             pong,

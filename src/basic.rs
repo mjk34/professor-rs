@@ -103,3 +103,52 @@ pub async fn wallet(ctx: Context<'_>) -> Result<(), Error> {
 
     Ok(())
 }
+
+#[poise::command(slash_command)]
+pub async fn voice_status(ctx: Context<'_>) -> Result<(), Error> {
+    let data = ctx.data().voice_users.lock().await;
+
+    let mut out: Vec<_> = data.iter().collect();
+    out.sort_by(|a, b| a.1.joined.cmp(&b.1.joined));
+
+    let now = chrono::Utc::now();
+    let mut desc = "".to_string();
+
+    if out.len() > 0 {
+        for (a, b) in out.iter() {
+            let u = a.to_user(&ctx).await?;
+            let diff = now - b.joined;
+            let minutes = ((diff.num_seconds()) / 60) % 60;
+            let hours = (diff.num_seconds() / 60) / 60;
+            desc += &format!("**{}**: {:0>2}:{:0>2}", u.name, hours, minutes);
+
+            if let Some(mute_time) = b.mute {
+                let mute_duration = now - mute_time;
+                let mute_minutes = ((mute_duration.num_seconds()) / 60) % 60;
+                let mute_hours = (mute_duration.num_seconds() / 60) / 60;
+                desc += &format!(" | Mute: {:0>2}:{:0>2}", mute_hours, mute_minutes);
+            }
+            if let Some(deaf_time) = b.deaf {
+                let deaf_duration = now - deaf_time;
+                let deaf_minutes = ((deaf_duration.num_seconds()) / 60) % 60;
+                let deaf_hours = (deaf_duration.num_seconds() / 60) / 60;
+                desc += &format!(" | Deaf: {:0>2}:{:0>2}", deaf_hours, deaf_minutes);
+            }
+            desc += "\n";
+        }
+    } else {
+        desc = "No one in voice".to_string();
+    }
+
+    ctx.send(
+        poise::CreateReply::default().embed(
+            serenity::CreateEmbed::new()
+                .title("Voice Status")
+                .description(desc)
+                .color(Color::GOLD),
+        ),
+    )
+    .await?;
+
+    Ok(())
+}
