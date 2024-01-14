@@ -140,12 +140,66 @@ pub async fn voice_status(ctx: Context<'_>) -> Result<(), Error> {
         desc = "No one in voice".to_string();
     }
 
+    let icon = ctx.guild().unwrap().icon_url().unwrap_or_default();
+
     ctx.send(
         poise::CreateReply::default().embed(
             serenity::CreateEmbed::new()
                 .title("Voice Status")
                 .description(desc)
-                .color(Color::GOLD),
+                .color(Color::GOLD)
+                .thumbnail(icon),
+        ),
+    )
+    .await?;
+
+    Ok(())
+}
+
+#[poise::command(slash_command)]
+pub async fn info(ctx: Context<'_>) -> Result<(), Error> {
+    let guild = match ctx.guild() {
+        Some(guild) => guild.clone(),
+        None => return Ok(()), // Exit if not in a guild
+    };
+
+    // Extract necessary data
+    let guild_name = guild.name.clone();
+    let icon_url = guild.icon_url().unwrap_or_default();
+    let banner_url = guild.banner_url().unwrap_or_default();
+    let member_count = guild.member_count;
+    let creation_date = guild.id.created_at().format("%Y-%m-%d").to_string();
+    let num_roles = guild.roles.len();
+    let num_channels = guild.channels.len();
+    let verification_level = format!("{:?}", guild.verification_level);
+    let boost_level = format!("{:?}", guild.premium_tier);
+    let num_boosts = guild.premium_subscription_count.unwrap_or(0);
+    let emojis = guild
+        .emojis
+        .values()
+        .map(|e| e.to_string())
+        .collect::<Vec<String>>()
+        .join(" ");
+
+    ctx.send(
+        poise::CreateReply::default().embed(
+            serenity::CreateEmbed::default()
+                .title(&guild.name)
+                .thumbnail(&icon_url)
+                .image(&banner_url)
+                .description(format!(
+                    "Welcome to **{}**!\n\n**Member Count:** {}\n**Created On:** {}\n**Roles:** {}\n**Channels:** {}\n**Verification Level:** {}\n**Boost Level:** {}\n**Number of Boosts:** {}\n\n**Emojis:**\n{}",
+                    guild_name,
+                    member_count,
+                    creation_date,
+                    num_roles,
+                    num_channels,
+                    verification_level,
+                    boost_level,
+                    num_boosts,
+                    emojis
+                ))
+                .colour(Color::DARK_BLUE),
         ),
     )
     .await?;
