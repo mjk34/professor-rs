@@ -1,12 +1,12 @@
 use crate::serenity;
 use chrono::prelude::{DateTime, Utc};
-use chrono::Date;
+
 use serde::{Deserialize, Serialize};
 use serenity::Color;
 use std::collections::HashMap;
-use std::ops::Index;
-use std::{default, fs};
-use tokio::fs::read;
+
+use std::{fs};
+
 use tokio::sync::Mutex;
 
 // General Structures

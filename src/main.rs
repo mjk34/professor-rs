@@ -1,13 +1,13 @@
 mod basic;
 mod data;
 
-use chrono::NaiveDateTime;
-use std::{default, env};
+
+use std::{env};
 use tokio;
-use tracing::{error, info};
+use tracing::{error};
 
 pub use poise::serenity_prelude as serenity;
-use poise::{async_trait, serenity_prelude::UserId};
+
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 type Context<'a> = poise::Context<'a, data::Data, Error>;
