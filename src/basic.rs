@@ -1,5 +1,7 @@
+
 use rand::seq::SliceRandom;
 use rand::{thread_rng, Rng};
+use chrono::prelude::Utc;
 
 use crate::serenity;
 use crate::{Context, Error};
@@ -10,13 +12,15 @@ use serenity::Color;
 pub async fn ping(ctx: Context<'_>) -> Result<(), Error> {
     let author = ctx.author();
     let pong_image = ctx.data().pong.choose(&mut thread_rng()).unwrap();
+    let latency: f32 = (ctx.created_at().time() - Utc::now().time()).num_milliseconds() as f32 / 1000.0;
+
     ctx.send(
         poise::CreateReply::default()
             // .content("Pong!")
             .embed(
                 serenity::CreateEmbed::new()
                     .title("Pong!")
-                    .description(format!("{}", author.name))
+                    .description(format!("Right back at you <@{}>! ProfessorBot is live! ({}s)", author.id, latency))
                     .image(pong_image),
             ),
     )

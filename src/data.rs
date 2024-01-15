@@ -72,26 +72,26 @@ pub struct UserData {
 }
 
 impl UserData {
-    pub fn update_level(&mut self) {
-        self.level = self.level + 1;
-    }
-    pub fn update_xp(&mut self, xp: i32) -> bool {
-        if xp < 0 {
-            return false;
-        }
+    // pub fn update_level(&mut self) {
+    //     self.level = self.level + 1;
+    // }
+    // pub fn update_xp(&mut self, xp: i32) -> bool {
+    //     if xp < 0 {
+    //         return false;
+    //     }
 
-        self.xp = xp;
-        return true;
-    }
+    //     self.xp = xp;
+    //     return true;
+    // }
 
-    pub fn update_name(&mut self, name: String) -> bool {
-        if name == "" {
-            return false;
-        }
+    // pub fn update_name(&mut self, name: String) -> bool {
+    //     if name == "" {
+    //         return false;
+    //     }
 
-        self.name = name;
-        return true;
-    }
+    //     self.name = name;
+    //     return true;
+    // }
     pub fn update_daily(&mut self) {
         self.last_daily = Utc::now();
     }
@@ -99,9 +99,9 @@ impl UserData {
         let diff = Utc::now() - self.last_daily;
         return diff.num_hours() > 24;
     }
-    pub fn update_claimed_bonus(&mut self) {
-        self.claimed_bonus = Utc::now();
-    }
+    // pub fn update_claimed_bonus(&mut self) {
+    //     self.claimed_bonus = Utc::now();
+    // }
 
     pub fn add_creds(&mut self, creds: i32) -> bool {
         if creds < 0 {
@@ -111,90 +111,90 @@ impl UserData {
         self.creds += creds;
         return true;
     }
-    pub fn sub_creds(&mut self, creds: i32) -> bool {
-        if creds > 0 {
-            return false;
-        }
+    // pub fn sub_creds(&mut self, creds: i32) -> bool {
+    //     if creds > 0 {
+    //         return false;
+    //     }
 
-        self.creds -= creds;
-        return true;
-    }
+    //     self.creds -= creds;
+    //     return true;
+    // }
     pub fn get_creds(&self) -> i32 {
         return self.creds;
     }
 
-    pub fn add_submit(&mut self, new_submit: ClipData) {
-        self.submits.push(new_submit);
-    }
-    pub fn get_submit_index(&self, clip_id: usize) -> Option<usize> {
-        // cycles through self.submits, get the index
-        // associated with the clip id
-        if self.submits.len() <= 0 {
-            return None;
-        }
+    // pub fn add_submit(&mut self, new_submit: ClipData) {
+    //     self.submits.push(new_submit);
+    // }
+    // pub fn get_submit_index(&self, clip_id: usize) -> Option<usize> {
+    //     // cycles through self.submits, get the index
+    //     // associated with the clip id
+    //     if self.submits.len() <= 0 {
+    //         return None;
+    //     }
 
-        for i in 0..self.submits.len() {
-            if self.submits[i].id == clip_id {
-                return Some(i);
-            }
-        }
+    //     for i in 0..self.submits.len() {
+    //         if self.submits[i].id == clip_id {
+    //             return Some(i);
+    //         }
+    //     }
 
-        return None;
-    }
-    pub fn remove_submit(&mut self, submit_index: usize) -> bool {
-        if submit_index >= self.submits.len() {
-            return false;
-        }
-        if submit_index < 0 {
-            return false;
-        }
-        if self.submits.len() <= 0 {
-            return false;
-        }
+    //     return None;
+    // }
+    // pub fn remove_submit(&mut self, submit_index: usize) -> bool {
+    //     if submit_index >= self.submits.len() {
+    //         return false;
+    //     }
+    //     if submit_index < 0 {
+    //         return false;
+    //     }
+    //     if self.submits.len() <= 0 {
+    //         return false;
+    //     }
 
-        self.submits.remove(submit_index);
-        return true;
-    }
-    pub fn get_submissions(&self) -> Option<Vec<String>> {
-        let mut submissions: Vec<String> = vec![];
-        let mut counter = 0;
+    //     self.submits.remove(submit_index);
+    //     return true;
+    // }
+    // pub fn get_submissions(&self) -> Option<Vec<String>> {
+    //     let mut submissions: Vec<String> = vec![];
+    //     let mut counter = 0;
 
-        for clip in &self.submits {
-            let clip_string = format!("{} - {} {}", clip.id, clip.date.date_naive(), clip.title);
-            submissions.push(clip_string);
-            counter += 1;
-        }
+    //     for clip in &self.submits {
+    //         let clip_string = format!("{} - {} {}", clip.id, clip.date.date_naive(), clip.title);
+    //         submissions.push(clip_string);
+    //         counter += 1;
+    //     }
 
-        return match counter {
-            0 => None,
-            _ => Some(submissions),
-        };
-    }
+    //     return match counter {
+    //         0 => None,
+    //         _ => Some(submissions),
+    //     };
+    // }
 
-    pub fn update_small_pity(&mut self, small_pity: i32) -> bool {
-        if small_pity < 0 {
-            return false;
-        }
+    // pub fn update_small_pity(&mut self, small_pity: i32) -> bool {
+    //     if small_pity < 0 {
+    //         return false;
+    //     }
 
-        self.wish.small_pity = small_pity;
-        return true;
-    }
-    pub fn update_big_pity(&mut self, big_pity: i32) -> bool {
-        if big_pity < 0 {
-            return false;
-        }
+    //     self.wish.small_pity = small_pity;
+    //     return true;
+    // }
+    // pub fn update_big_pity(&mut self, big_pity: i32) -> bool {
+    //     if big_pity < 0 {
+    //         return false;
+    //     }
 
-        self.wish.big_pity = big_pity;
-        return true;
-    }
-    pub fn update_wishes(&mut self, wish_count: i32) -> bool {
-        if wish_count < 0 {
-            return false;
-        }
+    //     self.wish.big_pity = big_pity;
+    //     return true;
+    // }
+    // pub fn update_wishes(&mut self, wish_count: i32) -> bool {
+    //     if wish_count < 0 {
+    //         return false;
+    //     }
 
-        self.wish.wishes = wish_count;
-        return true;
-    }
+    //     self.wish.wishes = wish_count;
+    //     return true;
+    // }
 }
 
 #[derive(Default, Debug)]
