@@ -49,6 +49,7 @@ async fn main() {
                 basic::wallet(),
                 basic::voice_status(),
                 basic::info(),
+                basic::leaderboard(),
             ],
             prefix_options: poise::PrefixFrameworkOptions {
                 prefix: Some("~".into()),

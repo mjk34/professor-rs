@@ -236,6 +236,42 @@ pub async fn wallet(ctx: Context<'_>) -> Result<(), Error> {
 }
 
 #[poise::command(slash_command)]
+pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
+    let data = ctx.data().users.lock().await;
+
+    let mut sorted: Vec<_> = data.iter().collect();
+    sorted.sort_by(|a, b| b.1.get_creds().cmp(&a.1.get_creds()));
+
+    let mut leaderboard_text = String::new();
+    for (index, (id, u)) in sorted.iter().enumerate().take(10) {
+        let user_name = id.to_user(ctx).await?.name;
+        let score = if index == 0 {
+            format!("- {}", u.get_creds())
+        } else {
+            "".to_string()
+        };
+        leaderboard_text.push_str(&format!("**#{}**: {} {}\n", index + 1, user_name, score));
+    }
+
+    let embed = serenity::CreateEmbed::new()
+        .title("Leaderboard")
+        .color(Color::TEAL)
+        .thumbnail(
+            sorted[0]
+                .0
+                .to_user(ctx)
+                .await?
+                .avatar_url()
+                .unwrap_or_default(),
+        )
+        .field("Rankings", leaderboard_text, false);
+
+    ctx.send(poise::CreateReply::default().embed(embed)).await?;
+
+    Ok(())
+}
+
+#[poise::command(slash_command)]
 pub async fn voice_status(ctx: Context<'_>) -> Result<(), Error> {
     let data = ctx.data().voice_users.lock().await;
 
