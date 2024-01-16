@@ -1,7 +1,8 @@
+use std::collections::HashMap;
 
+use chrono::prelude::Utc;
 use rand::seq::SliceRandom;
 use rand::{thread_rng, Rng};
-use chrono::prelude::Utc;
 
 use crate::serenity;
 use crate::{Context, Error};
@@ -12,7 +13,8 @@ use serenity::Color;
 pub async fn ping(ctx: Context<'_>) -> Result<(), Error> {
     let author = ctx.author();
     let pong_image = ctx.data().pong.choose(&mut thread_rng()).unwrap();
-    let latency: f32 = (ctx.created_at().time() - Utc::now().time()).num_milliseconds() as f32 / 1000.0;
+    let latency: f32 =
+        (ctx.created_at().time() - Utc::now().time()).num_milliseconds() as f32 / 1000.0;
 
     ctx.send(
         poise::CreateReply::default()
@@ -20,7 +22,10 @@ pub async fn ping(ctx: Context<'_>) -> Result<(), Error> {
             .embed(
                 serenity::CreateEmbed::new()
                     .title("Pong!")
-                    .description(format!("Right back at you <@{}>! ProfessorBot is live! ({}s)", author.id, latency))
+                    .description(format!(
+                        "Right back at you <@{}>! ProfessorBot is live! ({}s)",
+                        author.id, latency
+                    ))
                     .image(pong_image),
             ),
     )
@@ -173,7 +178,12 @@ pub async fn info(ctx: Context<'_>) -> Result<(), Error> {
     let member_count = guild.member_count;
     let creation_date = guild.id.created_at().format("%Y-%m-%d").to_string();
     let num_roles = guild.roles.len();
-    let num_channels = guild.channels.len();
+    let pub_channels: HashMap<&serenity::ChannelId, &serenity::GuildChannel> = guild
+        .channels
+        .iter()
+        .filter(|(_, b)| b.permission_overwrites.len() == 0)
+        .collect();
+    let num_channels = pub_channels.len();
     let verification_level = format!("{:?}", guild.verification_level);
     let boost_level = format!("{:?}", guild.premium_tier);
     let num_boosts = guild.premium_subscription_count.unwrap_or(0);
