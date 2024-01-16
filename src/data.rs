@@ -60,7 +60,6 @@ pub struct UserData {
     level: i32,
     xp: i32,
 
-    name: String,
     creds: i32,
     last_daily: DateTime<Utc>,
     claimed_bonus: DateTime<Utc>,
