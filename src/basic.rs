@@ -8,6 +8,10 @@ use crate::serenity;
 use crate::{Context, Error};
 use serenity::Color;
 
+use openai_api_rs::v1::api::Client;
+use openai_api_rs::v1::chat_completion::{self, ChatCompletionRequest};
+use openai_api_rs::v1::common::GPT3_5_TURBO_16K;
+
 // Ping the bot to see if its alive or to play ping pong
 #[poise::command(prefix_command, slash_command)]
 pub async fn ping(ctx: Context<'_>) -> Result<(), Error> {
@@ -35,9 +39,31 @@ pub async fn ping(ctx: Context<'_>) -> Result<(), Error> {
 }
 
 // Use gpt-3.5-turbo to generate fun responses to user prompts
-#[poise::command(prefix_command, slash_command, track_edits)]
-pub async fn gpt_string(_ctx: Context<'_>) -> Result<(), Error> {
-    Ok(())
+async fn gpt_string(ctx: Context<'_>, prompt: String) -> String {
+    let api_key = &ctx.data().gpt_key;
+    let client = Client::new(api_key.to_string());
+
+    let req = ChatCompletionRequest::new(
+        GPT3_5_TURBO_16K.to_string(),
+        vec![chat_completion::ChatCompletionMessage {
+            role: chat_completion::MessageRole::user,
+            content: chat_completion::Content::Text(String::from(prompt)),
+            name: None,
+        }],
+    );
+
+    let result = client.chat_completion(req).unwrap();
+    let desc = format!(
+        "{:?}",
+        result.choices[0]
+            .message
+            .content
+            .as_ref()
+            .unwrap()
+            .to_string()
+    );
+
+    return desc.replace("\"", "").replace("\\", "");
 }
 
 #[poise::command(slash_command)]
@@ -49,44 +75,101 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
     let ponder_image = ctx.data().ponder.choose(&mut thread_rng()).unwrap();
 
     //TODO: match original
-    let num = thread_rng().gen_range(0..100);
+    // if !user_data.check_daily() {
+    //     ctx.send(
+    //         poise::CreateReply::default().embed(
+    //             serenity::CreateEmbed::new()
+    //                 .title("Daily")
+    //                 .description("Your next **/uwu** is tomorrow")
+    //                 .thumbnail(format!("{}", user.avatar_url().unwrap_or_default())),
+    //         ),
+    //     )
+    //     .await?;
+    //     return Ok(());
+    // }
 
-    if !user_data.check_daily() {
-        ctx.send(
+    let d20 = thread_rng().gen_range(1..21);
+    let check = thread_rng().gen_range(6..15);
+
+    let bonus = 0; // change this to scale with level
+
+    let low = (check - 1) * 50;
+    let high = check * 50;
+    let fortune = thread_rng().gen_range(low..high);
+
+    let total: i32;
+    let roll_str: String;
+    let roll_context: String;
+
+    if d20 == 20 {
+        total = 1200;
+        roll_str = "**Critical Success!!**".to_string();
+        roll_context = "**+".to_string();
+    } else if d20 == 1 {
+        total = -fortune;
+        roll_str = "**Critical Failure!**".to_string();
+        roll_context = "**-".to_string();
+    } else if d20 >= check {
+        total = fortune;
+        roll_str = "Yippee, you passed.".to_string();
+        roll_context = "**+".to_string();
+    } else {
+        total = fortune / 2;
+        roll_str = "*oof*, you failed... ".to_string();
+        roll_context = "**+".to_string();
+    };
+
+    user_data.add_creds(total);
+    user_data.update_daily();
+
+    let base_ref = ctx.data().d20f.get(21);
+    let roll_ref = if d20 == 20 || d20 == 1 {
+        ctx.data().d20f.get((d20 - 1) as usize)
+    } else {
+        ctx.data().d20f.get((d20 + bonus - 1) as usize)
+    };
+
+    let desc = format!("---\n\nYou needed a **{}** to pass...", check);
+
+    let reply = ctx
+        .send(
             poise::CreateReply::default().embed(
                 serenity::CreateEmbed::new()
                     .title("Daily")
-                    .description("Your next **/uwu** is tomorrow")
-                    .thumbnail(format!("{}", user.avatar_url().unwrap_or_default())),
+                    .description(&desc)
+                    .thumbnail(format!("{}", base_ref.unwrap()))
+                    .color(Color::GOLD)
+                    .image(ponder_image),
             ),
         )
         .await?;
-        return Ok(());
-    }
-    user_data.add_creds(num);
-    user_data.update_daily();
 
-    let pog_str = if num > 70 {
-        "Super Pog!"
-    } else if num > 50 {
-        "Pog!"
+    // stuff
+    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+    let reading: String = if d20 == 1 {
+        gpt_string(ctx, "give me a bad fortune that's funny, only the fortune, no quotes, like a fortune cookie".to_string()).await
     } else {
-        "Sadge..."
+        gpt_string(ctx, "give me a good fortune that's funny, only the fortune, no quotes, like a fortune cookie".to_string()).await
     };
 
-    let desc = format!("**{} +{}** added to your Wallet!", pog_str, num);
+    let desc = format!(
+        "{} {}{}** creds.\nYou needed a **{}** to pass, you rolled a **{}**.\n\n{:?}",
+        roll_str, roll_context, total, check, d20, reading,
+    );
 
-    ctx.send(
-        poise::CreateReply::default().embed(
-            serenity::CreateEmbed::new()
-                .title("Daily")
-                .description(desc)
-                .thumbnail(format!("{}", user.avatar_url().unwrap_or_default()))
-                .color(Color::GOLD)
-                .image(ponder_image),
-        ),
-    )
-    .await?;
+    reply
+        .edit(
+            ctx,
+            poise::CreateReply::default().embed(
+                serenity::CreateEmbed::new()
+                    .title("Daily")
+                    .description(&desc)
+                    .thumbnail(format!("{}", roll_ref.unwrap()))
+                    .color(Color::GOLD)
+                    .image(ponder_image),
+            ),
+        )
+        .await?;
 
     Ok(())
 }

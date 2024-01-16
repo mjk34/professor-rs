@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use serenity::Color;
 use std::collections::HashMap;
 
+use std::env;
 use std::fs;
 
 use tokio::sync::Mutex;
@@ -237,6 +238,8 @@ pub struct Data {
     pub meme: Vec<String>,
     pub ponder: Vec<String>,
     pub pong: Vec<String>,
+    pub d20f: Vec<String>,
+    pub gpt_key: String,
 }
 impl Data {
     pub async fn check_or_create_user<'a>(
@@ -290,12 +293,18 @@ impl Data {
         let meme = read_lines("reference/meme.txt");
         let ponder = read_lines("reference/ponder.txt");
         let pong = read_lines("reference/pong.txt");
+        let d20f = read_lines("reference/d20.txt");
+
+        let gpt_key = env::var("API_KEY").expect("missing DISCORD_TOKEN");
+
         return Data {
             users: Mutex::new(users),
             voice_users: Mutex::new(HashMap::new()),
             meme,
             ponder,
             pong,
+            d20f,
+            gpt_key,
         };
     }
 }

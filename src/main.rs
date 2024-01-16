@@ -20,7 +20,6 @@ async fn register(ctx: Context<'_>) -> Result<(), Error> {
 async fn main() {
     dotenv::dotenv().expect("Failed to read .env file");
     let token = env::var("DISCORD_TOKEN").expect("missing DISCORD_TOKEN");
-
     let data = data::Data::load();
 
     let intents = serenity::GatewayIntents::GUILD_MESSAGES
@@ -46,7 +45,6 @@ async fn main() {
             commands: vec![
                 register(),
                 basic::ping(),
-                basic::gpt_string(),
                 basic::uwu(),
                 basic::wallet(),
                 basic::voice_status(),
