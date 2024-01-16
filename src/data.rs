@@ -108,6 +108,7 @@ impl UserData {
         self.rolls += roll;
         return true;
     }
+    
     // pub fn check_daily(&self) -> bool {
     //     let diff = Utc::now() - self.last_daily;
     //     return diff.num_hours() > 24;
@@ -116,13 +117,8 @@ impl UserData {
     //     self.claimed_bonus = Utc::now();
     // }
 
-    pub fn add_creds(&mut self, creds: i32) -> bool {
-        if creds < 0 {
-            return false;
-        }
-
+    pub fn add_creds(&mut self, creds: i32) {
         self.creds += creds;
-        return true;
     }
     // pub fn sub_creds(&mut self, creds: i32) -> bool {
     //     if creds > 0 {

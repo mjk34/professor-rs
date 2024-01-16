@@ -34,7 +34,6 @@ pub async fn ping(ctx: Context<'_>) -> Result<(), Error> {
         ),
     )
     .await?;
-
     Ok(())
 }
 
