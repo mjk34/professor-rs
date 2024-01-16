@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use chrono::prelude::Utc;
+use openai_api_rs::v1::error::APIError;
 use rand::seq::SliceRandom;
 use rand::{random, thread_rng, Rng};
 
@@ -38,7 +39,7 @@ pub async fn ping(ctx: Context<'_>) -> Result<(), Error> {
 }
 
 // Use gpt-3.5-turbo to generate fun responses to user prompts
-async fn gpt_string(ctx: Context<'_>, prompt: String) -> String {
+async fn gpt_string(ctx: Context<'_>, prompt: String) -> Result<String, APIError> {
     let api_key = &ctx.data().gpt_key;
     let client = Client::new(api_key.to_string());
 
@@ -51,7 +52,7 @@ async fn gpt_string(ctx: Context<'_>, prompt: String) -> String {
         }],
     );
 
-    let result = client.chat_completion(req).unwrap();
+    let result = client.chat_completion(req)?;
     let desc = format!(
         "{:?}",
         result.choices[0]
@@ -62,7 +63,7 @@ async fn gpt_string(ctx: Context<'_>, prompt: String) -> String {
             .to_string()
     );
 
-    return desc.replace("\"", "").replace("\\", "");
+    Ok(desc.replace("\"", "").replace("\\", ""))
 }
 
 #[poise::command(slash_command)]
@@ -159,13 +160,31 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
         .await?;
 
     tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-    let reading: String = if d20 == 1 {
-        gpt_string(ctx, "give me a bad fortune that's funny, only the fortune, no quotes, like a fortune cookie, less than 20 words".to_string()).await
+
+    let prompt = if d20 == 1 {
+        "give me a bad fortune that's funny, only the fortune, no quotes, like a fortune cookie, less than 20 words"
     } else {
-        gpt_string(ctx, "give me a good fortune that's funny, only the fortune, no quotes, like a fortune cookie, less than 20 words".to_string()).await
+        "give me a good fortune that's funny, only the fortune, no quotes, like a fortune cookie, less than 20 words"
     };
 
-    println!("gpt: {}", reading);
+    let mut tries = 0;
+    let reading;
+    loop {
+        match gpt_string(ctx, prompt.to_string()).await {
+            Ok(result) => {
+                reading = result;
+                break;
+            }
+            Err(e) => {
+                println!("An error occurred: {:?}, retrying...", e);
+                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                if tries > 5 {
+                    return Err(Box::new(e));
+                }
+            }
+        }
+        tries += 1;
+    }
 
     let desc = format!(
         "{} **{}{}** creds.\nYou needed a **{}** to pass, you rolled a **{}**.\n\n{:?}",
