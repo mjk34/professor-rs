@@ -72,7 +72,7 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
     let mut data = ctx.data().users.lock().await;
     let user_data = data.get_mut(&user.id).unwrap();
 
-    //TODO: match original
+    // check if daily is available
     // if !user_data.check_daily() {
     //     ctx.send(
     //         poise::CreateReply::default().embed(
@@ -119,10 +119,11 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
         total = fortune / 2;
         roll_str = "*oof*, you failed...".to_string();
         roll_context = "+".to_string();
-        roll_color = Color::DARK_RED;
+        roll_color = Color::DARK_GREY;
     };
 
     user_data.add_creds(total);
+    user_data.add_rolls(d20);
     user_data.update_daily();
 
     let base_ref = ctx.data().d20f.get(21);
@@ -132,7 +133,7 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
         ctx.data().d20f.get((d20 + bonus - 1) as usize)
     };
 
-    // let ponder_image = ctx.data().ponder.choose(&mut thread_rng()).unwrap();
+    // generate daily orb/animeme
     let random_meme = thread_rng().gen_range(0..100);
     let ponder_image = if random_meme < 50 {
         "https://cdn.discordapp.com/attachments/1196582162057662484/1196877964642623509/pondering-my-orb-header-art.png?ex=65b93a77&is=65a6c577&hm=9dcde7ef0ecd61463f39f2077311bbb52db20b4416609cbbe2c5028510f2047c&"
@@ -142,6 +143,7 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
         ctx.data().meme.choose(&mut thread_rng()).unwrap()
     };
 
+    // temporary message to roll the dice
     let desc = format!("---\nYou needed a **{}** to pass...\n\n---\n---", check);
     let reply = ctx
         .send(
@@ -159,8 +161,8 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
         )
         .await?;
 
+    // generate fortune readings with gpt3.5
     tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-
     let prompt = if d20 == 1 {
         "give me a bad fortune that's funny, only the fortune, no quotes, like a fortune cookie, less than 20 words"
     } else {
@@ -186,6 +188,7 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
         tries += 1;
     }
 
+    // final message with updated dice roll, creds earned and fortune reading
     let desc = format!(
         "{} **{}{}** creds.\nYou needed a **{}** to pass, you rolled a **{}**.\n\n{:?}",
         roll_str, roll_context, total, check, d20, reading,

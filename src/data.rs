@@ -65,6 +65,9 @@ pub struct UserData {
     last_daily: DateTime<Utc>,
     claimed_bonus: DateTime<Utc>,
 
+    rolls: i32,
+    daily_count: i32,
+
     submits: Vec<ClipData>,
     wish: WishData,
 
@@ -95,11 +98,21 @@ impl UserData {
     // }
     pub fn update_daily(&mut self) {
         self.last_daily = Utc::now();
+        self.daily_count += 1;
     }
-    pub fn check_daily(&self) -> bool {
-        let diff = Utc::now() - self.last_daily;
-        return diff.num_hours() > 24;
+
+    pub fn add_rolls(&mut self, roll: i32) -> bool {
+        if roll < 1 {
+            return false;
+        }
+
+        self.rolls += roll;
+        return true;
     }
+    // pub fn check_daily(&self) -> bool {
+    //     let diff = Utc::now() - self.last_daily;
+    //     return diff.num_hours() > 24;
+    // }
     // pub fn update_claimed_bonus(&mut self) {
     //     self.claimed_bonus = Utc::now();
     // }
@@ -265,7 +278,7 @@ impl Data {
                         "https://gifdb.com/images/high/anime-girl-okay-sign-b5zlye5h8mnjhdg2.gif",
                     )
                     .thumbnail(ctx.author().avatar_url().unwrap())
-                    .color(Color::GOLD),
+                    .color(Color::new(16119285)),
             ),
         )
         .await?;
