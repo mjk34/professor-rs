@@ -263,7 +263,11 @@ pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
                 .avatar_url()
                 .unwrap_or_default(),
         )
-        .field("Rankings", leaderboard_text, false);
+        .description("Here lists the most active students in UwUversity!")
+        .field("Rankings", leaderboard_text, false)
+        .footer(serenity::CreateEmbedFooter::new(
+            "@~ powered by UwUntu & RustyBamboo",
+        ));
 
     ctx.send(poise::CreateReply::default().embed(embed)).await?;
 
