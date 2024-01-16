@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use chrono::prelude::Utc;
 use rand::seq::SliceRandom;
-use rand::{thread_rng, Rng};
+use rand::{random, thread_rng, Rng};
 
 use crate::serenity;
 use crate::{Context, Error};
@@ -21,17 +21,16 @@ pub async fn ping(ctx: Context<'_>) -> Result<(), Error> {
         (ctx.created_at().time() - Utc::now().time()).num_milliseconds() as f32 / 1000.0;
 
     ctx.send(
-        poise::CreateReply::default()
-            // .content("Pong!")
-            .embed(
-                serenity::CreateEmbed::new()
-                    .title("Pong!")
-                    .description(format!(
-                        "Right back at you <@{}>! ProfessorBot is live! ({}s)",
-                        author.id, latency
-                    ))
-                    .image(pong_image),
-            ),
+        poise::CreateReply::default().embed(
+            serenity::CreateEmbed::new()
+                .title("Pong!")
+                .description(format!(
+                    "Right back at you <@{}>! ProfessorBot is live! ({}s)",
+                    author.id, latency
+                ))
+                .color(Color::new(16119285))
+                .image(pong_image),
+        ),
     )
     .await?;
 
@@ -72,8 +71,6 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
     let mut data = ctx.data().users.lock().await;
     let user_data = data.get_mut(&user.id).unwrap();
 
-    let ponder_image = ctx.data().ponder.choose(&mut thread_rng()).unwrap();
-
     //TODO: match original
     // if !user_data.check_daily() {
     //     ctx.send(
@@ -100,23 +97,28 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
     let total: i32;
     let roll_str: String;
     let roll_context: String;
+    let roll_color: Color;
 
     if d20 == 20 {
         total = 1200;
         roll_str = "**Critical Success!!**".to_string();
-        roll_context = "**+".to_string();
+        roll_context = "+".to_string();
+        roll_color = Color::GOLD;
     } else if d20 == 1 {
         total = -fortune;
         roll_str = "**Critical Failure!**".to_string();
-        roll_context = "**-".to_string();
+        roll_context = "".to_string();
+        roll_color = Color::RED;
     } else if d20 >= check {
         total = fortune;
         roll_str = "Yippee, you passed.".to_string();
-        roll_context = "**+".to_string();
+        roll_context = "+".to_string();
+        roll_color = Color::new(65280);
     } else {
         total = fortune / 2;
-        roll_str = "*oof*, you failed... ".to_string();
-        roll_context = "**+".to_string();
+        roll_str = "*oof*, you failed...".to_string();
+        roll_context = "+".to_string();
+        roll_color = Color::DARK_RED;
     };
 
     user_data.add_creds(total);
@@ -129,8 +131,17 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
         ctx.data().d20f.get((d20 + bonus - 1) as usize)
     };
 
-    let desc = format!("---\n\nYou needed a **{}** to pass...", check);
+    // let ponder_image = ctx.data().ponder.choose(&mut thread_rng()).unwrap();
+    let random_meme = thread_rng().gen_range(0..100);
+    let ponder_image = if random_meme < 50 {
+        "https://cdn.discordapp.com/attachments/1196582162057662484/1196877964642623509/pondering-my-orb-header-art.png?ex=65b93a77&is=65a6c577&hm=9dcde7ef0ecd61463f39f2077311bbb52db20b4416609cbbe2c5028510f2047c&"
+    } else if random_meme >= 50 && random_meme < 75 {
+        ctx.data().ponder.choose(&mut thread_rng()).unwrap()
+    } else {
+        ctx.data().meme.choose(&mut thread_rng()).unwrap()
+    };
 
+    let desc = format!("---\nYou needed a **{}** to pass...\n\n---\n---", check);
     let reply = ctx
         .send(
             poise::CreateReply::default().embed(
@@ -138,22 +149,26 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
                     .title("Daily")
                     .description(&desc)
                     .thumbnail(format!("{}", base_ref.unwrap()))
-                    .color(Color::GOLD)
-                    .image(ponder_image),
+                    .color(Color::new(16119285))
+                    .image(ponder_image)
+                    .footer(serenity::CreateEmbedFooter::new(
+                        "@~ powered by UwUntu & RustyBamboo",
+                    )),
             ),
         )
         .await?;
 
-    // stuff
     tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
     let reading: String = if d20 == 1 {
-        gpt_string(ctx, "give me a bad fortune that's funny, only the fortune, no quotes, like a fortune cookie".to_string()).await
+        gpt_string(ctx, "give me a bad fortune that's funny, only the fortune, no quotes, like a fortune cookie, less than 20 words".to_string()).await
     } else {
-        gpt_string(ctx, "give me a good fortune that's funny, only the fortune, no quotes, like a fortune cookie".to_string()).await
+        gpt_string(ctx, "give me a good fortune that's funny, only the fortune, no quotes, like a fortune cookie, less than 20 words".to_string()).await
     };
 
+    println!("gpt: {}", reading);
+
     let desc = format!(
-        "{} {}{}** creds.\nYou needed a **{}** to pass, you rolled a **{}**.\n\n{:?}",
+        "{} **{}{}** creds.\nYou needed a **{}** to pass, you rolled a **{}**.\n\n{:?}",
         roll_str, roll_context, total, check, d20, reading,
     );
 
@@ -165,12 +180,14 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
                     .title("Daily")
                     .description(&desc)
                     .thumbnail(format!("{}", roll_ref.unwrap()))
-                    .color(Color::GOLD)
-                    .image(ponder_image),
+                    .color(roll_color)
+                    .image(ponder_image)
+                    .footer(serenity::CreateEmbedFooter::new(
+                        "@~ powered by UwUntu & RustyBamboo",
+                    )),
             ),
         )
         .await?;
-
     Ok(())
 }
 
@@ -195,6 +212,7 @@ pub async fn wallet(ctx: Context<'_>) -> Result<(), Error> {
 
     Ok(())
 }
+
 #[poise::command(slash_command)]
 pub async fn voice_status(ctx: Context<'_>) -> Result<(), Error> {
     let data = ctx.data().voice_users.lock().await;

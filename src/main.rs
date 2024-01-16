@@ -90,7 +90,7 @@ async fn event_handler(
 ) -> Result<(), Error> {
     match event {
         serenity::FullEvent::Ready { data_about_bot, .. } => {
-            println!("Logged in as {}", data_about_bot.user.name);
+            println!("Logged in as {}\n\n", data_about_bot.user.name);
         }
         serenity::FullEvent::Message { new_message } => {
             if new_message.content == "yo" {
