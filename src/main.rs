@@ -47,6 +47,7 @@ async fn main() {
                 basic::ping(),
                 basic::uwu(),
                 basic::wallet(),
+                basic::claim_bonus(),
                 basic::voice_status(),
                 basic::info(),
                 basic::leaderboard(),

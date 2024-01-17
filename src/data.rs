@@ -61,11 +61,10 @@ pub struct UserData {
     xp: i32,
 
     creds: i32,
-    last_daily: DateTime<Utc>,
-    claimed_bonus: DateTime<Utc>,
-
     rolls: i32,
     daily_count: i32,
+    bonus_count: i32,
+    last_daily: DateTime<Utc>,
 
     submits: Vec<ClipData>,
     wish: WishData,
@@ -75,26 +74,28 @@ pub struct UserData {
 }
 
 impl UserData {
-    // pub fn update_level(&mut self) {
-    //     self.level = self.level + 1;
-    // }
-    // pub fn update_xp(&mut self, xp: i32) -> bool {
-    //     if xp < 0 {
-    //         return false;
-    //     }
+    pub fn update_level(&mut self) {
+        self.level = self.level + 1;
+    }
 
-    //     self.xp = xp;
-    //     return true;
-    // }
+    pub fn update_xp(&mut self, xp: i32) -> bool {
+        if xp < 0 {
+            return false;
+        }
 
-    // pub fn update_name(&mut self, name: String) -> bool {
-    //     if name == "" {
-    //         return false;
-    //     }
+        self.xp += xp;
+        let xp_cap = self.get_level() * 80;
 
-    //     self.name = name;
-    //     return true;
-    // }
+        if self.xp > xp_cap {
+            self.xp -= xp_cap;
+            self.update_level();
+            self.add_wishes(3);
+
+            return true;
+        }
+        return false;
+    }
+
     pub fn update_daily(&mut self) {
         self.last_daily = Utc::now();
         self.daily_count += 1;
@@ -108,48 +109,110 @@ impl UserData {
         self.rolls += roll;
         return true;
     }
-    
-    // pub fn check_daily(&self) -> bool {
-    //     let diff = Utc::now() - self.last_daily;
-    //     return diff.num_hours() > 24;
-    // }
-    // pub fn update_claimed_bonus(&mut self) {
-    //     self.claimed_bonus = Utc::now();
-    // }
 
-    pub fn add_creds(&mut self, creds: i32) {
-        self.creds += creds;
+    pub fn check_daily(&self) -> bool {
+        let diff = Utc::now() - self.last_daily;
+        return diff.num_hours() >= 24;
     }
-    // pub fn sub_creds(&mut self, creds: i32) -> bool {
-    //     if creds > 0 {
-    //         return false;
-    //     }
 
-    //     self.creds -= creds;
-    //     return true;
-    // }
+    pub fn add_bonus(&mut self) {
+        if self.bonus_count == 3 {
+            self.bonus_count = 3;
+        } else {
+            self.bonus_count += 1;
+        }
+    }
+
+    pub fn reset_bonus(&mut self) {
+        self.bonus_count = 0;
+    }
+
+    pub fn check_claim(&self) -> bool {
+        if self.bonus_count == 3 {
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    pub fn add_creds(&mut self, creds: i32) -> bool {
+        if creds < 0 {
+            return false;
+        }
+
+        self.creds += creds;
+        return true;
+    }
+
+    pub fn sub_creds(&mut self, creds: i32) -> bool {
+        if creds < 0 {
+            return false;
+        }
+        self.creds -= creds;
+        return true;
+    }
+
+    pub fn add_wishes(&mut self, wishes: i32) -> bool {
+        if wishes < 1 {
+            return false;
+        }
+
+        self.wish.wishes = wishes;
+        return true;
+    }
+
     pub fn get_creds(&self) -> i32 {
         return self.creds;
+    }
+
+    pub fn get_luck(&self) -> String {
+        if self.daily_count == 0 {
+            return "---".to_string();
+        }
+
+        let average = self.rolls / self.daily_count;
+        let luck: String;
+        if average < 6 {
+            luck = "Horrible".to_string();
+        } else if average >= 6 && average < 9 {
+            luck = "Below Average".to_string();
+        } else if average >= 9 && average < 12 {
+            luck = "Average".to_string();
+        } else if average >= 12 && average < 15 {
+            luck = "Above Average".to_string();
+        } else {
+            luck = "Blessed".to_string();
+        }
+
+        return luck;
+    }
+
+    pub fn get_bonus(&self) -> i32 {
+        return self.bonus_count;
+    }
+
+    pub fn get_level(&self) -> i32 {
+        return self.level;
     }
 
     // pub fn add_submit(&mut self, new_submit: ClipData) {
     //     self.submits.push(new_submit);
     // }
+
     // pub fn get_submit_index(&self, clip_id: usize) -> Option<usize> {
     //     // cycles through self.submits, get the index
     //     // associated with the clip id
     //     if self.submits.len() <= 0 {
     //         return None;
     //     }
-
     //     for i in 0..self.submits.len() {
     //         if self.submits[i].id == clip_id {
     //             return Some(i);
     //         }
     //     }
-
     //     return None;
     // }
+
     // pub fn remove_submit(&mut self, submit_index: usize) -> bool {
     //     if submit_index >= self.submits.len() {
     //         return false;
@@ -160,20 +223,18 @@ impl UserData {
     //     if self.submits.len() <= 0 {
     //         return false;
     //     }
-
     //     self.submits.remove(submit_index);
     //     return true;
     // }
+
     // pub fn get_submissions(&self) -> Option<Vec<String>> {
     //     let mut submissions: Vec<String> = vec![];
     //     let mut counter = 0;
-
     //     for clip in &self.submits {
     //         let clip_string = format!("{} - {} {}", clip.id, clip.date.date_naive(), clip.title);
     //         submissions.push(clip_string);
     //         counter += 1;
     //     }
-
     //     return match counter {
     //         0 => None,
     //         _ => Some(submissions),
@@ -184,23 +245,22 @@ impl UserData {
     //     if small_pity < 0 {
     //         return false;
     //     }
-
     //     self.wish.small_pity = small_pity;
     //     return true;
     // }
+
     // pub fn update_big_pity(&mut self, big_pity: i32) -> bool {
     //     if big_pity < 0 {
     //         return false;
     //     }
-
     //     self.wish.big_pity = big_pity;
     //     return true;
     // }
+
     // pub fn update_wishes(&mut self, wish_count: i32) -> bool {
     //     if wish_count < 0 {
     //         return false;
     //     }
-
     //     self.wish.wishes = wish_count;
     //     return true;
     // }

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use chrono::prelude::Utc;
 use openai_api_rs::v1::error::APIError;
 use rand::seq::SliceRandom;
-use rand::{random, thread_rng, Rng};
+use rand::{thread_rng, Rng};
 
 use crate::serenity;
 use crate::{Context, Error};
@@ -13,7 +13,7 @@ use openai_api_rs::v1::api::Client;
 use openai_api_rs::v1::chat_completion::{self, ChatCompletionRequest};
 use openai_api_rs::v1::common::GPT3_5_TURBO_16K;
 
-// Ping the bot to see if its alive or to play ping pong
+/// Ping the bot to see if its alive or to play ping pong
 #[poise::command(prefix_command, slash_command)]
 pub async fn ping(ctx: Context<'_>) -> Result<(), Error> {
     let author = ctx.author();
@@ -30,7 +30,10 @@ pub async fn ping(ctx: Context<'_>) -> Result<(), Error> {
                     author.id, latency
                 ))
                 .color(Color::new(16119285))
-                .image(pong_image),
+                .image(pong_image)
+                .footer(serenity::CreateEmbedFooter::new(
+                    "@~ powered by UwUntu & RustyBamboo",
+                )),
         ),
     )
     .await?;
@@ -65,6 +68,7 @@ async fn gpt_string(ctx: Context<'_>, prompt: String) -> Result<String, APIError
     Ok(desc.replace("\"", "").replace("\\", ""))
 }
 
+/// Claim your daily, 500xp, and 2 wishes (Once a day)
 #[poise::command(slash_command)]
 pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
     let user = ctx.author();
@@ -105,9 +109,9 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
         roll_context = "+".to_string();
         roll_color = Color::GOLD;
     } else if d20 == 1 {
-        total = -fortune;
+        total = fortune;
         roll_str = "**Critical Failure!**".to_string();
-        roll_context = "".to_string();
+        roll_context = "-".to_string();
         roll_color = Color::RED;
     } else if d20 >= check {
         total = fortune;
@@ -118,14 +122,10 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
         total = fortune / 2;
         roll_str = "*oof*, you failed...".to_string();
         roll_context = "+".to_string();
-        roll_color = Color::DARK_GREY;
+        roll_color = Color::new(6053215);
     };
 
-    user_data.add_creds(total);
-    user_data.add_rolls(d20);
-    user_data.update_daily();
-
-    let base_ref = ctx.data().d20f.get(21);
+    let base_ref = ctx.data().d20f.get(28);
     let roll_ref = if d20 == 20 || d20 == 1 {
         ctx.data().d20f.get((d20 - 1) as usize)
     } else {
@@ -209,16 +209,153 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
             ),
         )
         .await?;
+
+    if d20 == 1 {
+        user_data.sub_creds(total);
+    } else {
+        user_data.add_creds(total);
+    }
+
+    user_data.update_xp(500);
+    user_data.add_rolls(d20);
+    user_data.add_bonus();
+    user_data.update_daily();
+
     Ok(())
 }
 
+/// Claim bonus creds for every three dailies
+#[poise::command(slash_command)]
+pub async fn claim_bonus(ctx: Context<'_>) -> Result<(), Error> {
+    // update this to implement a d20 dice roll + bonus from level
+
+    let user = ctx.author();
+    let mut data = ctx.data().users.lock().await;
+    let user_data = data.get_mut(&user.id).unwrap();
+
+    let bonus = user_data.get_bonus();
+    if user_data.check_claim() {
+        let d20 = thread_rng().gen_range(1..21);
+        let proficiency = 2 + user_data.get_level() / 8;
+        let base_ref = ctx.data().d20f.get(28);
+
+        // temporary message to roll the dice
+        let desc = format!(
+            "Rolling for Bonus loot, you get a **+{}** fortune modifier.\n---\n",
+            proficiency
+        );
+        let reply = ctx
+            .send(
+                poise::CreateReply::default().embed(
+                    serenity::CreateEmbed::new()
+                        .title("Claim Bonus")
+                        .description(&desc)
+                        .thumbnail(format!("{}", base_ref.unwrap()))
+                        .color(Color::new(16119285))
+                        .image("https://cdn.discordapp.com/attachments/1196582162057662484/1197008145868918854/de6b5df29abaf7124387b9c86ca46a29.gif?ex=65b9b3b5&is=65a73eb5&hm=b36eb6f0e235b2ca8d37339cd541e55ea397cdf4be5cc080da4bd37cd99c6c3d&")
+                        .footer(serenity::CreateEmbedFooter::new(
+                            "@~ powered by UwUntu & RustyBamboo",
+                        )),
+                ),
+            )
+            .await?;
+
+        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+        let low = (d20 + proficiency - 1) * 40;
+        let high = (d20 + proficiency) * 40;
+        let fortune = thread_rng().gen_range(low..high);
+        let roll_ref = ctx.data().d20f.get((d20 + proficiency - 1) as usize); // make more dice face
+
+        // final message with updated dice roll and creds
+        let desc = format!(
+            "You rolled a **{}** and obtained **+{}** creds.",
+            d20 + proficiency,
+            fortune
+        );
+
+        reply
+            .edit(
+                ctx,
+                poise::CreateReply::default().embed(
+                    serenity::CreateEmbed::new()
+                        .title("Claim Bonus")
+                        .description(&desc)
+                        .thumbnail(format!("{}", roll_ref.unwrap()))
+                        .color(Color::new(6943230))
+                        .image("https://cdn.discordapp.com/attachments/1196582162057662484/1197008145868918854/de6b5df29abaf7124387b9c86ca46a29.gif?ex=65b9b3b5&is=65a73eb5&hm=b36eb6f0e235b2ca8d37339cd541e55ea397cdf4be5cc080da4bd37cd99c6c3d&")
+                        .footer(serenity::CreateEmbedFooter::new(
+                            "@~ powered by UwUntu & RustyBamboo",
+                        )),
+                ),
+            )
+            .await?;
+
+        user_data.add_creds(fortune);
+        user_data.reset_bonus();
+
+        return Ok(());
+    } else {
+        let desc: String = match bonus {
+            2 => {
+                format!(
+                    "The ***Bonus*** will be ready after your next `/uwu`! (Claim Bonus: {})",
+                    bonus
+                )
+            }
+            _ => {
+                format!("The ***Bonus*** is not ready! (Claim Bonus: {})", bonus)
+            }
+        };
+
+        ctx.send(
+            poise::CreateReply::default().embed(
+                serenity::CreateEmbed::new()
+                    .title("Claim Bonus")
+                    .description(desc)
+                    .color(Color::new(6053215))
+                    .footer(serenity::CreateEmbedFooter::new(
+                        "@~ powered by UwUntu & RustyBamboo",
+                    ))
+                    .thumbnail(format!("{}", "https://cdn.discordapp.com/attachments/1196582162057662484/1197004718631833650/tenor.gif?ex=65b9b084&is=65a73b84&hm=0368979e5bdf0c258f6b344ec2b79826459b3ec4c937374e05ec77f131adf37f&")),
+            ),
+        )
+        .await?;
+        return Ok(());
+    }
+}
+
+/// Check how many creds, wishes, or submits you have
 #[poise::command(slash_command)]
 pub async fn wallet(ctx: Context<'_>) -> Result<(), Error> {
     let user = ctx.author();
     let data = ctx.data().users.lock().await;
     let user_data = data.get(&user.id).unwrap();
 
-    let desc = format!("Total Creds: **{}**", user_data.get_creds());
+    // get user info
+    let user_luck: String = if user_data.get_luck() == "" {
+        "---".to_string()
+    } else {
+        user_data.get_luck()
+    };
+
+    let has_daily: String = if user_data.check_daily() {
+        "Available".to_string()
+    } else {
+        "Not Available".to_string()
+    };
+
+    let has_claim: String = if user_data.check_claim() {
+        "Available".to_string()
+    } else {
+        format!("{} / 3", user_data.get_bonus())
+    };
+
+    let user_creds: i32 = user_data.get_creds();
+
+    let desc = format!(
+        "Daily UwU........... . . **{}**\nAverage Luck..... . . **{}**\nClaim Bonus....... . . **{}**\n\nTotal Creds: **{}**\n", 
+        has_daily, user_luck, has_claim, user_creds
+    );
 
     ctx.send(
         poise::CreateReply::default().embed(
@@ -226,14 +363,17 @@ pub async fn wallet(ctx: Context<'_>) -> Result<(), Error> {
                 .title("Wallet")
                 .description(desc)
                 .thumbnail(format!("{}", user.avatar_url().unwrap_or_default()))
-                .color(Color::GOLD),
+                .color(Color::new(16119285))
+                .footer(serenity::CreateEmbedFooter::new(
+                    "@~ powered by UwUntu & RustyBamboo",
+                )),
         ),
     )
     .await?;
-
     Ok(())
 }
 
+/// Show the top wealthiest users in the server
 #[poise::command(slash_command)]
 pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
     let data = ctx.data().users.lock().await;
@@ -374,7 +514,10 @@ pub async fn info(ctx: Context<'_>) -> Result<(), Error> {
                     num_boosts,
                     emojis
                 ))
-                .colour(Color::DARK_BLUE),
+                .colour(Color::DARK_BLUE)
+                .footer(serenity::CreateEmbedFooter::new(
+                    "@~ powered by UwUntu & RustyBamboo",
+                )),
         ),
     )
     .await?;
