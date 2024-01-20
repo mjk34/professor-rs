@@ -7,7 +7,6 @@ use std::collections::HashMap;
 
 use std::env;
 use std::fs;
-use std::str::Split;
 
 use tokio::sync::Mutex;
 
@@ -67,7 +66,28 @@ pub struct PokeData {
     nickname: Option<String>,
     sprite: String,
     health: Option<i32>,
-    types: (String, Option<String>),
+    types: String,
+}
+
+impl PokeData {
+    pub fn get_name(&self) -> String {
+        return self.name.clone();
+    }
+    pub fn get_desc(&self) -> String {
+        return self.desc.clone();
+    }
+    // pub fn get_nickname(&self) -> Option<String> {
+    //     return self.nickname.clone();
+    // }
+    pub fn get_sprite(&self) -> String {
+        return self.sprite.clone();
+    }
+    // pub fn get_health(&self) -> Option<i32> {
+    //     return self.health.clone();
+    // }
+    pub fn get_types(&self) -> String {
+        return self.types.clone();
+    }
 }
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
@@ -258,7 +278,12 @@ impl UserData {
         let mut submissions: Vec<String> = vec![];
         for (id, clip) in self.submits.iter().enumerate() {
             if let Some(clip) = clip {
-                let clip_string = format!("{} - {} {}", NUMBER_EMOJS[id], clip.date.date_naive(), clip.title);
+                let clip_string = format!(
+                    "{} - {} {}",
+                    NUMBER_EMOJS[id],
+                    clip.date.date_naive(),
+                    clip.title
+                );
                 submissions.push(clip_string);
             }
         }
@@ -391,24 +416,54 @@ impl Data {
 
         let gpt_key = env::var("API_KEY").expect("missing DISCORD_TOKEN");
 
+        // EVENT DATA ////////////////////////////////////////////////////////////////////////////////////////
         let poke_string = read_lines("event/pokemon.txt");
-        let mut pokedex= Vec::new();
+        let mut pokedex = Vec::new();
         let missing_no = PokeData {
             name: "MissingNo.".to_string(),
             desc: "????????????".to_string(),
-            types: ("Bird".to_string(), Some("Normal".to_string())),
-            sprite: "https://archives.bulbagarden.net/media/upload/9/98/Missingno_RB.png".to_string(),
+            types: "Bird/Normal".to_string(),
+            sprite: "https://archives.bulbagarden.net/media/upload/9/98/Missingno_RB.png"
+                .to_string(),
             nickname: None,
             health: None,
         };
-
         pokedex.push(missing_no);
 
-        // name=desc=type=sprite
+        let mut poke_counter = 1;
         for poke_line in poke_string {
-            let line_split = poke_line.split("=");
-            println!("{:?}", line_split);
+            let line_split: Vec<&str> = poke_line.split("=").collect();
+
+            let name: String = line_split
+                .get(0)
+                .expect(format!("Failed to load Name for No. {}", poke_counter).as_str())
+                .to_string();
+            let desc: String = line_split
+                .get(1)
+                .expect(format!("Failed to load Description for No. {}", poke_counter).as_str())
+                .to_string();
+            let types: String = line_split
+                .get(2)
+                .expect(format!("Failed to load typing for No. {}", poke_counter).as_str())
+                .to_string();
+            let sprite: String = line_split
+                .get(3)
+                .expect(format!("Failed to load Sprite for No. {}", poke_counter).as_str())
+                .to_string();
+
+            let pokemon_info = PokeData {
+                name: name,
+                desc: desc,
+                types: types,
+                sprite: sprite,
+                nickname: None,
+                health: None,
+            };
+
+            pokedex.push(pokemon_info);
+            poke_counter += 1;
         }
+        // EVENT DATA ////////////////////////////////////////////////////////////////////////////////////////
 
         return Data {
             users: Mutex::new(users),

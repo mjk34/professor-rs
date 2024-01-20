@@ -1,5 +1,6 @@
 mod basic;
 mod clips;
+mod event;
 
 mod data;
 
@@ -57,6 +58,7 @@ async fn main() {
                 clips::submit_clip(),
                 clips::submit_list(),
                 clips::edit_list(),
+                event::search_pokemon(),
             ],
             prefix_options: poise::PrefixFrameworkOptions {
                 prefix: Some("~".into()),
