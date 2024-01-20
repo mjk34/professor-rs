@@ -7,6 +7,7 @@ use std::collections::HashMap;
 
 use std::env;
 use std::fs;
+use std::str::Split;
 
 use tokio::sync::Mutex;
 
@@ -40,9 +41,9 @@ pub struct ItemData {
 pub struct PokeData {
     name: String,
     desc: String,
-    nickname: String,
+    nickname: Option<String>,
     sprite: String,
-    health: i32,
+    health: Option<i32>,
     types: (String, Option<String>),
 }
 
@@ -308,7 +309,9 @@ pub struct Data {
     pub pong: Vec<String>,
     pub d20f: Vec<String>,
     pub gpt_key: String,
+    pub pokedex: Vec<PokeData>,
 }
+
 impl Data {
     pub async fn check_or_create_user<'a>(
         &self,
@@ -365,6 +368,25 @@ impl Data {
 
         let gpt_key = env::var("API_KEY").expect("missing DISCORD_TOKEN");
 
+        let poke_string = read_lines("event/pokemon.txt");
+        let mut pokedex= Vec::new();
+        let missing_no = PokeData {
+            name: "MissingNo.".to_string(),
+            desc: "????????????".to_string(),
+            types: ("Bird".to_string(), Some("Normal".to_string())),
+            sprite: "https://archives.bulbagarden.net/media/upload/9/98/Missingno_RB.png".to_string(),
+            nickname: None,
+            health: None,
+        };
+
+        pokedex.push(missing_no);
+
+        // name=desc=type=sprite
+        for poke_line in poke_string {
+            let line_split = poke_line.split("=");
+            println!("{:?}", line_split);
+        }
+
         return Data {
             users: Mutex::new(users),
             voice_users: Mutex::new(HashMap::new()),
@@ -373,6 +395,7 @@ impl Data {
             pong,
             d20f,
             gpt_key,
+            pokedex,
         };
     }
 }

@@ -1,0 +1,151 @@
+Bulbasaur=A small, quadrupedal Pokémon with a plant bulb on its back=Grass/Poison=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_001.png
+Ivysaur=The evolved form of Bulbasaur. The bulb on its back blooms into a large flower.=Grass/Poison=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_002.png
+Venusaur=The final evolution of Bulbasaur. It has a large flower on its back and is a powerful and imposing Pokémon.=Grass/Poison=https://www.pokencyclopedia.info/sprites/gen3/ani_emerald/ani_e_003.gif
+Charmander=A small, flame-tailed Pokémon.=Fire=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_004.png
+Charmeleon=The evolved form of Charmander. It has a more aggressive and fiery demeanor.=Fire=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_005.png
+Charizard=The final evolution of Charmander. A powerful, dragon-like Pokémon with wings and a flaming tail.=Fire/Flying=https://www.pokencyclopedia.info/sprites/gen3/ani_emerald/ani_e_006.gif
+Squirtle=A small, turtle Pokémon with a squirting water cannon on its back.=Water=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_007.png
+Wartortle=The evolved form of Squirtle. It has a more developed shell and water cannons.=Water=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_008.png
+Blastoise=The final evolution of Squirtle. A large, turtle-like Pokémon with powerful water cannons on its back.=Water=https://www.pokencyclopedia.info/sprites/gen3/ani_emerald/ani_e_009.gif
+Caterpie=A small, caterpillar Pokémon.=Bug=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_010.png
+Metapod=The evolved form of Caterpie. It has a chrysalis-like appearance.=Bug=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_011.png
+Butterfree=The final evolution of Caterpie. A butterfly Pokémon with colorful wings.=Bug/Flying=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_012.png
+Weedle=A small, stinger Pokémon.=Bug/Poison=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_013.png
+Kakuna=The evolved form of Weedle. It has a hardened shell.=Bug/Poison=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_014.png
+Beedrill=The final evolution of Weedle. A large, bee-like Pokémon with a sharp stinger.=Bug/Poison=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_015.png
+Pidgey=A small, bird Pokémon.=Normal/Flying=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_016.png
+Pidgeotto=The evolved form of Pidgey. A larger bird with more developed wings.=Normal/Flying=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_017.png
+Pidgeot=The final evolution of Pidgey. A majestic bird with powerful wings.=Normal/Flying=https://www.pokencyclopedia.info/sprites/gen3/ani_emerald/ani_e_018.gif
+Rattata=A small, rodent Pokémon.=Normal=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_019.png
+Raticate=The evolved form of Rattata. A larger, more aggressive rodent.=Normal=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_020.png
+Spearow=A bird Pokémon with a pointed beak.=Normal/Flying=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_021.png
+Fearow=The evolved form of Spearow. A large bird with a long neck and sharp beak.=Normal/Flying=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_022.png
+Ekans=A snake Pokémon known for its coiled appearance.=Poison=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_023.png
+Arbok=The evolved form of Ekans. A larger, cobra-like Pokémon with a hood.=Poison=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_024.png
+Pikachu=A small, electric rodent Pokémon with a lightning bolt-shaped tail.=Electric=https://www.pokencyclopedia.info/sprites/gen3/ani_emerald/ani_e_025.gif
+Raichu=The evolved form of Pikachu. A larger, more powerful electric rodent.=Electric=https://www.pokencyclopedia.info/sprites/gen3/ani_emerald/ani_e_026.gif
+Sandshrew=A small, ground-type Pokémon with a tough outer shell.=Ground=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_027.png
+Sandslash=The evolved form of Sandshrew. A spiky, ground-type Pokémon.=Ground=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_028.png
+Nidoran♀=A small, poison-type Pokémon.=Poison=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_029.png
+Nidorina=The evolved form of Nidoran♀. A more mature poison-type Pokémon.=Poison=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_030.png
+Nidoqueen=The final evolution of Nidoran♀. A powerful, queen-like Pokémon with both poison and ground types.=Poison/Ground=https://www.pokencyclopedia.info/sprites/gen3/ani_emerald/ani_e_031.gif
+Nidoran♂=A small, poison-type Pokémon.=Poison=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_032.png
+Nidorino=The evolved form of Nidoran♂. A more mature poison-type Pokémon.=Poison=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_033.png
+Nidoking=The final evolution of Nidoran♂. A powerful, king-like Pokémon with both poison and ground types.=Poison/Ground=https://www.pokencyclopedia.info/sprites/gen3/ani_emerald/ani_e_034.gif
+Clefairy=A fairy-type Pokémon with a cute appearance.=Fairy=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_035.png
+Clefable=The evolved form of Clefairy. A larger and more majestic fairy-type Pokémon.=Fairy=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_036.png
+Vulpix=A small, fox-like Pokémon with fire-type attributes.=Fire=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_037.png
+Ninetales=The evolved form of Vulpix. A mystical fox with nine beautiful tails.=Fire=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_038.png
+Jigglypuff=A round, balloon-like Pokémon known for its singing abilities.=Normal/Fairy=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_039.png
+Wigglytuff=The evolved form of Jigglypuff. A larger and more majestic fairy-type Pokémon.=Normal/Fairy=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_040.png
+Zubat=A bat Pokémon known for its ability to navigate in darkness.=Poison/Flying=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_041.png
+Golbat=The evolved form of Zubat. A larger bat Pokémon with sharp fangs.=Poison/Flying=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_042.png
+Oddish=A small, plant-like Pokémon.=Grass/Poison=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_043.png
+Gloom=The evolved form of Oddish. It has a droopy appearance and emits a foul odor.=Grass/Poison=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_044.png
+Vileplume=The final evolution of Oddish. A large, flower-like Pokémon that releases pleasant aromas.=Grass/Poison=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_045.png
+Paras=A bug and grass-type Pokémon with mushrooms on its back.=Bug/Grass=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_046.png
+Parasect=The evolved form of Paras. The mushrooms on its back have fully grown.=Bug/Grass=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_047.png
+Venonat=A bug and poison-type Pokémon with large, round eyes.=Bug/Poison=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_048.png
+Venomoth=The evolved form of Venonat. A larger and more majestic bug and poison-type Pokémon.=Bug/Poison=https://www.pokencyclopedia.info/sprites/gen3/ani_emerald/ani_e_049.gif
+Diglett=A small, mole-like Pokémon known for digging.=Ground=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_050.png
+Dugtrio=The evolved form of Diglett. Three Diglett join together to form this Pokémon.=Ground=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_051.png
+Meowth=A cat Pokémon known for its mischievous behavior.=Normal=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_052.png
+Persian=The evolved form of Meowth. A larger and more elegant cat Pokémon.=Normal=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_053.png
+Psyduck=A water-type Pokémon with psychic abilities triggered by headaches.=Water=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_054.png
+Golduck=The evolved form of Psyduck. A more powerful water-type Pokémon with enhanced psychic abilities.=Water=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_055.png
+Mankey=A small, monkey Pokémon known for its energetic and aggressive nature.=Fighting=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_056.png
+Primeape=The evolved form of Mankey. A larger and more aggressive fighting-type Pokémon.=Fighting=https://www.pokencyclopedia.info/sprites/gen3/ani_emerald/ani_e_057.gif
+Growlithe=A dog-like Pokémon with fire-type attributes.=Fire=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_058.png
+Arcanine=The evolved form of Growlithe. A majestic and powerful fire-type Pokémon.=Fire=https://www.pokencyclopedia.info/sprites/gen3/ani_emerald/ani_e_059.gif
+Poliwag=A water-type Pokémon with a swirl pattern on its abdomen.=Water=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_060.png
+Poliwhirl=The evolved form of Poliwag. A more mature water-type Pokémon.=Water=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_061.png
+Poliwrath=The final evolution of Poliwag. A powerful water and fighting-type Pokémon.=Water/Fighting=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_062.png
+Abra=A psychic-type Pokémon known for its ability to teleport away from danger.=Psychic=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_063.png
+Kadabra=The evolved form of Abra. A more powerful psychic-type Pokémon with a spoon.=Psychic=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_064.png
+Alakazam=The final evolution of Abra. A highly intelligent and powerful psychic-type Pokémon.=Psychic=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_065.png
+Machop=A fighting-type Pokémon with a muscular appearance.=Fighting=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_066.png
+Machoke=The evolved form of Machop. A larger and more powerful fighting-type Pokémon.=Fighting=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_067.png
+Machamp=The final evolution of Machop. A four-armed, powerhouse fighting-type Pokémon.=Fighting=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_068.png
+Bellsprout=A plant-like Pokémon with bell-shaped appendages.=Grass/Poison=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_069.png
+Weepinbell=The evolved form of Bellsprout. A larger and more dangerous plant Pokémon.=Grass/Poison=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_070.png
+Victreebel=The final evolution of Bellsprout. A large, predatory plant Pokémon.=Grass/Poison=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_071.png
+Tentacool=A jellyfish Pokémon that floats in the ocean.=Water/Poison=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_072.png
+Tentacruel=The evolved form of Tentacool. A larger and more menacing jellyfish Pokémon.=Water/Poison=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_073.png
+Geodude=A rock and ground-type Pokémon known for its rocky appearance.=Rock/Ground=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_074.png
+Graveler=The evolved form of Geodude. A larger and more rugged rock Pokémon.=Rock/Ground=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_075.png
+Golem=The final evolution of Geodude. A powerful and sturdy rock and ground-type Pokémon.=Rock/Ground=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_076.png
+Ponyta=A horse-like Pokémon with fire-type attributes.=Fire=https://www.pokencyclopedia.info/sprites/gen3/ani_emerald/ani_e_077.gif
+Rapidash=The evolved form of Ponyta. A majestic and fast fire-type Pokémon.=Fire=https://www.pokencyclopedia.info/sprites/gen3/ani_emerald/ani_e_078.gif
+Slowpoke=A water and psychic-type Pokémon known for its slow movements.=Water/Psychic=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_079.png
+Slowbro=The evolved form of Slowpoke. A water and psychic-type Pokémon with a Shellder attached to its tail.=Water/Psychic=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_080.png
+Magnemite=A magnet Pokémon known for its ability to generate magnetic fields.=Electric/Steel=https://www.pokencyclopedia.info/sprites/gen3/ani_emerald/ani_e_081.gif
+Magneton=The evolved form of Magnemite. Three Magnemite join together to form this Pokémon.=Electric/Steel=https://www.pokencyclopedia.info/sprites/gen3/ani_emerald/ani_e_082.gif
+Farfetch'd=A bird Pokémon known for wielding a leek as a weapon.=Normal/Flying=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_083.png
+Doduo=A bird Pokémon with two heads.=Normal/Flying=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_084.png
+Dodrio=The evolved form of Doduo. A larger bird Pokémon with three heads.=Normal/Flying=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_085.png
+Seel=A water-type Pokémon resembling a seal.=Water=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_086.png
+Dewgong=The evolved form of Seel. A larger and more majestic water-type Pokémon.=Water/Ice=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_087.png
+Grimer=A sludge Pokémon with a toxic appearance.=Poison=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_088.png
+Muk=The evolved form of Grimer. A larger and more menacing sludge Pokémon.=Poison=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_089.png
+Shellder=A shellfish Pokémon with a protective shell.=Water=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_090.png
+Cloyster=The evolved form of Shellder. A clam-like Pokémon with a powerful defensive shell.=Water/Ice=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_091.png
+Gastly=A ghost and poison-type Pokémon known for its mischievous behavior.=Ghost/Poison=https://www.pokencyclopedia.info/sprites/gen3/ani_emerald/ani_e_092.gif
+Haunter=The evolved form of Gastly. A more menacing ghost Pokémon.=Ghost/Poison=https://www.pokencyclopedia.info/sprites/gen3/ani_emerald/ani_e_093.gif
+Gengar=The final evolution of Gastly. A powerful and mischievous ghost Pokémon.=Ghost/Poison=https://www.pokencyclopedia.info/sprites/gen3/ani_emerald/ani_e_094.gif
+Onix=A rock and ground-type Pokémon with a serpentine appearance.=Rock/Ground=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_095.png
+Drowzee=A psychic-type Pokémon known for its ability to induce sleep in others.=Psychic=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_096.png
+Hypno=The evolved form of Drowzee. A more powerful psychic-type Pokémon with hypnotic abilities.=Psychic=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_097.png
+Krabby=A crab Pokémon with pincers.=Water=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_098.png
+Kingler=The evolved form of Krabby. A larger and more powerful crab Pokémon.=Water=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_099.png
+Voltorb=An electric-type Pokémon that resembles a Poké Ball.=Electric=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_100.png
+Electrode=The evolved form of Voltorb. A larger and more energetic electric-type Pokémon.=Electric=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_101.png
+Exeggcute=A group of small, egg-like Pokémon.=Grass/Psychic=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_102.png
+Exeggutor=The evolved form of Exeggcute. A large, palm tree-like Pokémon with psychic abilities.=Grass/Psychic=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_103.png
+Cubone=A small, ground-type Pokémon known for wearing the skull of its deceased mother.=Ground=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_104.png
+Marowak=The evolved form of Cubone. A larger and more powerful ground-type Pokémon.=Ground=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_105.png
+Hitmonlee=A fighting-type Pokémon known for its powerful kicking abilities.=Fighting=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_106.png
+Hitmonchan=A fighting-type Pokémon known for its exceptional punching abilities.=Fighting=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_107.png
+Lickitung=Has a long tongue it uses to gather food. It evolves into Lickilicky.=Normal=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_108.png
+Koffing=Produces poisonous gas. It evolves into Weezing.=Poison=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_109.png
+Weezing=The evolved form of Koffing. It has two heads and emits noxious gases.=Poison=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_110.png
+Rhyhorn=Covered in rugged armor. It evolves into Rhydon.=Ground/Rock=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_111.png
+Rhydon=The evolved form of Rhyhorn. A powerful and sturdy Pokémon with a drill on its nose.=Ground/Rock=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_112.png
+Chansey=Known for its kind and nurturing nature. It is a rare and sought-after Pokémon.=Normal=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_113.png
+Tangela=A Pokémon covered in vines. Its appearance is mysterious and hard to understand.=Grass=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_114.png
+Kangaskhan=The female Kangaskhan protects its young in a pouch. It is known for its maternal instincts.=Normal=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_115.png
+Horsea=A small, seahorse-like Pokémon. It evolves into Seadra.=Water=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_116.png
+Seadra=The evolved form of Horsea. It has a more developed and powerful body.=Water=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_117.png
+Goldeen=A fish Pokémon with a distinctive horn on its head. It evolves into Seaking.=Water=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_118.png
+Seaking=The evolved form of Goldeen. It is known for its elegant swimming.=Water=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_119.png
+Staryu=A star-shaped Pokémon. It evolves into Starmie.=Water=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_120.png
+Starmie=The evolved form of Staryu. It has a core that emits psychic energy.=Water/Psychic=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_121.png
+Mr. Mime=A humanoid Pokémon with mime-like gestures. It can create invisible walls.=Psychic/Fairy=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_122.png
+Scyther=A fast and agile Pokémon with scythe-like blades for hands. It evolves into Scizor.=Bug/Flying=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_123.png
+Jynx=Known for its seductive and alluring dance. It has psychic and ice powers.=Ice/Psychic=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_124.png
+Electabuzz=An Electric-type Pokémon known for its speed. It evolves into Electivire.=Electric=https://www.pokencyclopedia.info/sprites/gen3/ani_emerald/ani_e_125.gif
+Magmar=A Fire-type Pokémon with a fiery appearance. It evolves into Magmortar.=Fire=https://www.pokencyclopedia.info/sprites/gen3/ani_emerald/ani_e_126.gif
+Pinsir=A powerful bug Pokémon with large pincers. It is known for its strength.=Bug=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_127.png
+Tauros=A wild bull Pokémon known for its aggressiveness. It is hard to tame.=Normal=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_128.png
+Magikarp=A weak and feeble fish Pokémon. It evolves into Gyarados.=Water=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_129.png
+Gyarados=The evolved form of Magikarp. A powerful and intimidating sea serpent.=Water/Flying=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_130.png
+Lapras=A gentle giant of the seas. It is known for its musical and soothing cries.=Water/Ice=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_131.png
+Ditto=Can transform into any Pokémon. It is known for its ability to mimic others.=Normal=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_132.png
+Eevee=An adorable and versatile Pokémon. It has multiple evolution options.=Normal=https://www.pokencyclopedia.info/sprites/gen3/ani_emerald/ani_e_133.gif
+Vaporeon=The Water-type evolution of Eevee. It has the ability to control water.=Water=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_134.png
+Jolteon=The Electric-type evolution of Eevee. It has sharp, electric spines.=Electric=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_135.png
+Flareon=The Fire-type evolution of Eevee. It has a fiery mane and tail.=Fire=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_136.png
+Porygon=A virtual Pokémon created through computer programming.=Normal=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_137.png
+Omanyte=A prehistoric Pokémon that resembles a spiral-shelled ammonite.=Rock/Water=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_138.png
+Omastar=The evolved form of Omanyte. It has a large and imposing shell.=Rock/Water=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_139.png
+Kabuto=A prehistoric Pokémon resembling a trilobite. It evolves into Kabutops.=Rock/Water=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_140.png
+Kabutops=The evolved form of Kabuto. It is a swift and powerful predator.=Rock/Water=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_141.png
+Aerodactyl=A prehistoric and powerful flying Pokémon. It is known for its speed.=Rock/Flying=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_142.png
+Snorlax=A large and lazy Pokémon that loves to sleep and block paths.=Normal=https://www.pokencyclopedia.info/sprites/gen3/ani_emerald/ani_e_143.gif
+Articuno=A legendary Ice/Flying Pokémon with control over ice. One of the legendary birds.=Ice/Flying=https://www.pokencyclopedia.info/sprites/gen3/ani_emerald/ani_e_144.gif
+Zapdos=A legendary Electric/Flying Pokémon with control over electricity. One of the legendary birds.=Electric/Flying=https://www.pokencyclopedia.info/sprites/gen3/ani_emerald/ani_e_145.gif
+Moltres=A legendary Fire/Flying Pokémon with control over fire. One of the legendary birds.=Fire/Flying=https://www.pokencyclopedia.info/sprites/gen3/ani_emerald/ani_e_146.gif
+Dratini=A small, dragon Pokémon. It evolves into Dragonair.=Dragon=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_147.png
+Dragonair=The evolved form of Dratini. It is a serpent-like dragon Pokémon.=Dragon=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_148.png
+Dragonite=The final evolution of Dratini. A powerful and friendly dragon Pokémon.=Dragon/Flying=https://www.pokencyclopedia.info/sprites/gen3/spr_firered-leafgreen/spr_frlg_149.png
+Mewtwo=A powerful and psychic Legendary Pokémon created through genetic manipulation.=Psychic=https://www.pokencyclopedia.info/sprites/gen3/ani_emerald/ani_e_150.gif
+Mew=A mythical and rare Pokémon with the ability to learn any move. It is said to contain the genetic code of all Pokémon.=Psychic=https://www.pokencyclopedia.info/sprites/gen3/ani_emerald/ani_e_151.gif
