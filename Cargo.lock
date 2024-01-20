@@ -947,6 +947,7 @@ dependencies = [
  "openai-api-rs",
  "poise",
  "rand",
+ "regex",
  "serde",
  "serde_json",
  "tokio",

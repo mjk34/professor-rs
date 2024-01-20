@@ -1,4 +1,6 @@
 mod basic;
+mod clips;
+
 mod data;
 
 use std::env;
@@ -24,6 +26,7 @@ async fn main() {
 
     let intents = serenity::GatewayIntents::GUILD_MESSAGES
         | serenity::GatewayIntents::DIRECT_MESSAGES
+        | serenity::GatewayIntents::GUILD_MESSAGE_REACTIONS
         | serenity::GatewayIntents::MESSAGE_CONTENT
         | serenity::GatewayIntents::GUILDS
         | serenity::GatewayIntents::GUILD_VOICE_STATES;
@@ -51,6 +54,9 @@ async fn main() {
                 basic::voice_status(),
                 basic::info(),
                 basic::leaderboard(),
+                clips::submit_clip(),
+                clips::submit_list(),
+                clips::edit_list(),
             ],
             prefix_options: poise::PrefixFrameworkOptions {
                 prefix: Some("~".into()),
