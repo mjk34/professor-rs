@@ -11,14 +11,37 @@ use std::str::Split;
 
 use tokio::sync::Mutex;
 
+pub const NUMBER_EMOJS: [&str; 10] = [
+    "\u{0030}\u{FE0F}\u{20E3}",
+    "\u{0031}\u{FE0F}\u{20E3}",
+    "\u{0032}\u{FE0F}\u{20E3}",
+    "\u{0033}\u{FE0F}\u{20E3}",
+    "\u{0034}\u{FE0F}\u{20E3}",
+    "\u{0035}\u{FE0F}\u{20E3}",
+    "\u{0036}\u{FE0F}\u{20E3}",
+    "\u{0037}\u{FE0F}\u{20E3}",
+    "\u{0038}\u{FE0F}\u{20E3}",
+    "\u{0039}\u{FE0F}\u{20E3}",
+];
+
 // General Structures
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct ClipData {
-    id: usize,
     title: String,
     link: String,
     date: DateTime<Utc>,
-    rating: i32,
+    rating: Option<u8>,
+}
+
+impl ClipData {
+    pub fn new(title: String, link: String) -> Self {
+        ClipData {
+            title,
+            link,
+            date: Utc::now(),
+            rating: None,
+        }
+    }
 }
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
@@ -67,7 +90,7 @@ pub struct UserData {
     bonus_count: i32,
     last_daily: DateTime<Utc>,
 
-    submits: Vec<ClipData>,
+    pub submits: Vec<Option<ClipData>>,
     wish: WishData,
 
     event: EventData,
@@ -196,9 +219,21 @@ impl UserData {
         return self.level;
     }
 
-    // pub fn add_submit(&mut self, new_submit: ClipData) {
-    //     self.submits.push(new_submit);
-    // }
+    pub fn add_submit(&mut self, new_submit: ClipData) -> bool {
+        for i in 0..3 {
+            let s = self.submits.get_mut(i);
+            if let Some(s) = s {
+                if s.is_none() {
+                    *s = Some(new_submit);
+                    return true;
+                }
+            } else {
+                self.submits.push(Some(new_submit));
+                return true;
+            }
+        }
+        false
+    }
 
     // pub fn get_submit_index(&self, clip_id: usize) -> Option<usize> {
     //     // cycles through self.submits, get the index
@@ -214,33 +249,21 @@ impl UserData {
     //     return None;
     // }
 
-    // pub fn remove_submit(&mut self, submit_index: usize) -> bool {
-    //     if submit_index >= self.submits.len() {
-    //         return false;
-    //     }
-    //     if submit_index < 0 {
-    //         return false;
-    //     }
-    //     if self.submits.len() <= 0 {
-    //         return false;
-    //     }
-    //     self.submits.remove(submit_index);
-    //     return true;
-    // }
+    pub fn remove_submit(&mut self, submit_index: usize) -> bool {
+        let res = self.submits.remove(submit_index);
+        return res.is_some();
+    }
 
-    // pub fn get_submissions(&self) -> Option<Vec<String>> {
-    //     let mut submissions: Vec<String> = vec![];
-    //     let mut counter = 0;
-    //     for clip in &self.submits {
-    //         let clip_string = format!("{} - {} {}", clip.id, clip.date.date_naive(), clip.title);
-    //         submissions.push(clip_string);
-    //         counter += 1;
-    //     }
-    //     return match counter {
-    //         0 => None,
-    //         _ => Some(submissions),
-    //     };
-    // }
+    pub fn get_submissions(&self) -> Vec<String> {
+        let mut submissions: Vec<String> = vec![];
+        for (id, clip) in self.submits.iter().enumerate() {
+            if let Some(clip) = clip {
+                let clip_string = format!("{} - {} {}", NUMBER_EMOJS[id], clip.date.date_naive(), clip.title);
+                submissions.push(clip_string);
+            }
+        }
+        submissions
+    }
 
     // pub fn update_small_pity(&mut self, small_pity: i32) -> bool {
     //     if small_pity < 0 {
