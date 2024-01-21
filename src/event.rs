@@ -3,9 +3,8 @@ use crate::serenity;
 use crate::{Context, Error};
 use serenity::Color;
 
-#[poise::command(prefix_command, slash_command)]
+#[poise::command(slash_command)]
 pub async fn search_pokemon(ctx: Context<'_>, pokedex_no: usize) -> Result<(), Error> {
-
     if pokedex_no > 152 {
         let msg_txt = format!("Entry {} does not exist.", pokedex_no);
 
@@ -53,6 +52,42 @@ pub async fn search_pokemon(ctx: Context<'_>, pokedex_no: usize) -> Result<(), E
         )
         .await?;
     }
+
+    Ok(())
+}
+
+#[poise::command(slash_command)]
+pub async fn test_type_matchup(ctx: Context<'_>, type1: String, type2: String)  -> Result<(), Error> {
+
+    // let pokemon = ctx
+    //         .data()
+    //         .pokedex
+    //         .get(pokedex_no)
+    //         .expect(format!("Could not find Pokemon no.{}", pokedex_no).as_str());
+
+    let matrix = &ctx.data().type_matrix;
+    let names = &ctx.data().type_name;
+
+    let type1_index = names.iter().position(|x| x == type1.as_str()).unwrap();
+    let type2_index = names.iter().position(|x| x == type2.as_str()).unwrap();
+
+    let value = matrix.get(type1_index).unwrap().get(type2_index).unwrap();
+
+    let msg_txt = format!("{} ---> {} is {}", type1, type2, value);
+    
+    ctx.send(
+        poise::CreateReply::default().embed(
+            serenity::CreateEmbed::new()
+                .title("Type Match Up")
+                .description(msg_txt)
+                .color(Color::new(16760399))
+                .thumbnail("https://archives.bulbagarden.net/media/upload/3/37/RG_Pok%C3%A9dex.png")
+                .footer(serenity::CreateEmbedFooter::new(
+                    "@~ powered by UwUntu & RustyBamboo",
+                )),
+        ),
+    )
+    .await?;
 
     Ok(())
 }
