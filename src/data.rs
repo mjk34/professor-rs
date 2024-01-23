@@ -71,22 +71,22 @@ pub struct PokeData {
 
 impl PokeData {
     pub fn get_name(&self) -> String {
-        return self.name.clone();
+        self.name.clone()
     }
     pub fn get_desc(&self) -> String {
-        return self.desc.clone();
+        self.desc.clone()
     }
     // pub fn get_nickname(&self) -> Option<String> {
     //     return self.nickname.clone();
     // }
     pub fn get_sprite(&self) -> String {
-        return self.sprite.clone();
+        self.sprite.clone()
     }
     // pub fn get_health(&self) -> Option<i32> {
     //     return self.health.clone();
     // }
     pub fn get_types(&self) -> String {
-        return self.types.clone();
+        self.types.clone()
     }
 }
 
@@ -119,7 +119,7 @@ pub struct UserData {
 
 impl UserData {
     pub fn update_level(&mut self) {
-        self.level = self.level + 1;
+        self.level += 1;
     }
 
     pub fn update_xp(&mut self, xp: i32) -> bool {
@@ -137,7 +137,7 @@ impl UserData {
 
             return true;
         }
-        return false;
+        false
     }
 
     pub fn update_daily(&mut self) {
@@ -151,12 +151,12 @@ impl UserData {
         }
 
         self.rolls += roll;
-        return true;
+        true
     }
 
     pub fn check_daily(&self) -> bool {
         let diff = Utc::now() - self.last_daily;
-        return diff.num_hours() >= 24;
+        diff.num_hours() >= 24
     }
 
     pub fn add_bonus(&mut self) {
@@ -172,11 +172,7 @@ impl UserData {
     }
 
     pub fn check_claim(&self) -> bool {
-        if self.bonus_count == 3 {
-            return true;
-        } else {
-            return false;
-        }
+        matches!(self.bonus_count, 3)
     }
 
     pub fn add_creds(&mut self, creds: i32) -> bool {
@@ -185,7 +181,7 @@ impl UserData {
         }
 
         self.creds += creds;
-        return true;
+        true
     }
 
     pub fn sub_creds(&mut self, creds: i32) -> bool {
@@ -193,7 +189,7 @@ impl UserData {
             return false;
         }
         self.creds -= creds;
-        return true;
+        true
     }
 
     pub fn add_wishes(&mut self, wishes: i32) -> bool {
@@ -202,11 +198,11 @@ impl UserData {
         }
 
         self.wish.wishes = wishes;
-        return true;
+        true
     }
 
     pub fn get_creds(&self) -> i32 {
-        return self.creds;
+        self.creds
     }
 
     pub fn get_luck(&self) -> String {
@@ -218,25 +214,25 @@ impl UserData {
         let luck: String;
         if average < 6 {
             luck = "Horrible".to_string();
-        } else if average >= 6 && average < 9 {
+        } else if (6..9).contains(&average) {
             luck = "Below Average".to_string();
-        } else if average >= 9 && average < 12 {
+        } else if (9..12).contains(&average) {
             luck = "Average".to_string();
-        } else if average >= 12 && average < 15 {
+        } else if (12..15).contains(&average) {
             luck = "Above Average".to_string();
         } else {
             luck = "Blessed".to_string();
         }
 
-        return luck;
+        luck
     }
 
     pub fn get_bonus(&self) -> i32 {
-        return self.bonus_count;
+        self.bonus_count
     }
 
     pub fn get_level(&self) -> i32 {
-        return self.level;
+        self.level
     }
 
     pub fn add_submit(&mut self, new_submit: ClipData) -> bool {
@@ -271,7 +267,7 @@ impl UserData {
 
     pub fn remove_submit(&mut self, submit_index: usize) -> bool {
         let res = self.submits.remove(submit_index);
-        return res.is_some();
+        res.is_some()
     }
 
     pub fn get_submissions(&self) -> Vec<String> {
@@ -324,11 +320,11 @@ pub struct VoiceUser {
 
 impl VoiceUser {
     pub fn new() -> VoiceUser {
-        return VoiceUser {
+        VoiceUser {
             joined: Utc::now(),
             mute: None,
             deaf: None,
-        };
+        }
     }
     pub fn update_mute(&mut self, b: bool) {
         if b {
@@ -359,7 +355,7 @@ pub struct Data {
     pub gpt_key: String,
     pub pokedex: Vec<PokeData>,
     pub type_matrix: Vec<Vec<f32>>,
-    pub type_name: Vec<String>
+    pub type_name: Vec<String>,
 }
 
 impl Data {
@@ -381,7 +377,7 @@ impl Data {
             poise::CreateReply::default().embed(
                 serenity::CreateEmbed::new()
                     .title("Account Created!")
-                    .description(format!("{}", ctx.author().name))
+                    .description(ctx.author().name.to_string())
                     .image(
                         "https://gifdb.com/images/high/anime-girl-okay-sign-b5zlye5h8mnjhdg2.gif",
                     )
@@ -436,28 +432,28 @@ impl Data {
         for poke_line in poke_string {
             let line_split: Vec<&str> = poke_line.split("=").collect();
 
-            let name: String = line_split
-                .get(0)
+            let poke_name: String = line_split
+                .first()
                 .expect(format!("Failed to load Name for No. {}", poke_counter).as_str())
                 .to_string();
-            let desc: String = line_split
+            let poke_desc: String = line_split
                 .get(1)
                 .expect(format!("Failed to load Description for No. {}", poke_counter).as_str())
                 .to_string();
-            let types: String = line_split
+            let poke_types: String = line_split
                 .get(2)
                 .expect(format!("Failed to load typing for No. {}", poke_counter).as_str())
                 .to_string();
-            let sprite: String = line_split
+            let poke_sprite: String = line_split
                 .get(3)
                 .expect(format!("Failed to load Sprite for No. {}", poke_counter).as_str())
                 .to_string();
 
             let pokemon_info = PokeData {
-                name: name,
-                desc: desc,
-                types: types,
-                sprite: sprite,
+                name: poke_name,
+                desc: poke_desc,
+                types: poke_types,
+                sprite: poke_sprite,
                 nickname: None,
                 health: None,
             };
@@ -467,24 +463,78 @@ impl Data {
         }
 
         let type_matrix = vec![
-            vec![1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,0.5,0.0,1.0,1.0,0.5,1.0], //normal
-            vec![1.0,0.5,0.5,1.0,2.0,2.0,1.0,1.0,1.0,1.0,1.0,2.0,0.5,1.0,0.5,1.0,2.0,1.0], //fire
-            vec![1.0,2.0,0.5,1.0,0.5,1.0,1.0,1.0,2.0,1.0,1.0,1.0,2.0,1.0,0.5,1.0,1.0,1.0], //water
-            vec![1.0,1.0,2.0,0.5,0.5,1.0,1.0,1.0,0.0,2.0,1.0,1.0,1.0,1.0,0.5,1.0,1.0,1.0], //electric
-            vec![1.0,0.5,2.0,1.0,0.5,1.0,1.0,0.5,2.0,0.5,1.0,0.5,2.0,1.0,0.5,1.0,0.5,1.0], //grass
-            vec![1.0,0.5,0.5,1.0,2.0,0.5,1.0,1.0,2.0,2.0,1.0,1.0,1.0,1.0,2.0,1.0,0.5,1.0], //ice
-            vec![2.0,1.0,1.0,1.0,1.0,2.0,1.0,0.5,1.0,0.5,0.5,0.5,2.0,0.0,1.0,2.0,2.0,0.5], //fighting
-            vec![1.0,1.0,1.0,1.0,2.0,1.0,1.0,0.5,0.5,1.0,1.0,1.0,0.5,0.5,1.0,1.0,0.0,2.0], //poison
-            vec![1.0,2.0,1.0,2.0,0.5,1.0,1.0,2.0,1.0,1.0,1.0,0.5,2.0,1.0,1.0,1.0,2.0,1.0], //ground
-            vec![1.0,1.0,1.0,0.5,2.0,1.0,2.0,1.0,1.0,1.0,1.0,2.0,0.5,1.0,1.0,1.0,0.5,1.0], //flying
-            vec![1.0,1.0,1.0,1.0,1.0,1.0,2.0,2.0,1.0,1.0,0.5,1.0,1.0,1.0,1.0,0.0,0.5,1.0], //psychic
-            vec![1.0,0.5,1.0,1.0,2.0,1.0,0.5,0.5,1.0,0.5,2.0,1.0,1.0,0.5,1.0,2.0,0.5,0.5], //bug
-            vec![1.0,2.0,1.0,1.0,1.0,2.0,0.5,1.0,0.5,2.0,1.0,2.0,1.0,1.0,1.0,1.0,0.5,1.0], //rock
-            vec![0.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,2.0,1.0,1.0,2.0,1.0,0.5,1.0,1.0], //ghost
-            vec![1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,2.0,1.0,0.5,0.0], //dragon
-            vec![1.0,1.0,1.0,1.0,1.0,1.0,0.5,1.0,1.0,1.0,2.0,1.0,1.0,2.0,1.0,0.5,1.0,0.5], //dark
-            vec![1.0,0.5,0.5,0.5,1.0,2.0,1.0,1.0,1.0,1.0,1.0,1.0,2.0,1.0,1.0,1.0,0.5,2.0], //steel
-            vec![1.0,0.5,1.0,1.0,1.0,1.0,2.0,0.5,1.0,1.0,1.0,1.0,1.0,1.0,2.0,2.0,0.5,1.0], //fairy
+            vec![
+                1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.5, 0.0, 1.0, 1.0,
+                0.5, 1.0,
+            ],
+            vec![
+                1.0, 0.5, 0.5, 1.0, 2.0, 2.0, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 0.5, 1.0, 0.5, 1.0,
+                2.0, 1.0,
+            ],
+            vec![
+                1.0, 2.0, 0.5, 1.0, 0.5, 1.0, 1.0, 1.0, 2.0, 1.0, 1.0, 1.0, 2.0, 1.0, 0.5, 1.0,
+                1.0, 1.0,
+            ],
+            vec![
+                1.0, 1.0, 2.0, 0.5, 0.5, 1.0, 1.0, 1.0, 0.0, 2.0, 1.0, 1.0, 1.0, 1.0, 0.5, 1.0,
+                1.0, 1.0,
+            ],
+            vec![
+                1.0, 0.5, 2.0, 1.0, 0.5, 1.0, 1.0, 0.5, 2.0, 0.5, 1.0, 0.5, 2.0, 1.0, 0.5, 1.0,
+                0.5, 1.0,
+            ],
+            vec![
+                1.0, 0.5, 0.5, 1.0, 2.0, 0.5, 1.0, 1.0, 2.0, 2.0, 1.0, 1.0, 1.0, 1.0, 2.0, 1.0,
+                0.5, 1.0,
+            ],
+            vec![
+                2.0, 1.0, 1.0, 1.0, 1.0, 2.0, 1.0, 0.5, 1.0, 0.5, 0.5, 0.5, 2.0, 0.0, 1.0, 2.0,
+                2.0, 0.5,
+            ],
+            vec![
+                1.0, 1.0, 1.0, 1.0, 2.0, 1.0, 1.0, 0.5, 0.5, 1.0, 1.0, 1.0, 0.5, 0.5, 1.0, 1.0,
+                0.0, 2.0,
+            ],
+            vec![
+                1.0, 2.0, 1.0, 2.0, 0.5, 1.0, 1.0, 2.0, 1.0, 1.0, 1.0, 0.5, 2.0, 1.0, 1.0, 1.0,
+                2.0, 1.0,
+            ],
+            vec![
+                1.0, 1.0, 1.0, 0.5, 2.0, 1.0, 2.0, 1.0, 1.0, 1.0, 1.0, 2.0, 0.5, 1.0, 1.0, 1.0,
+                0.5, 1.0,
+            ],
+            vec![
+                1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 2.0, 1.0, 1.0, 0.5, 1.0, 1.0, 1.0, 1.0, 0.0,
+                0.5, 1.0,
+            ],
+            vec![
+                1.0, 0.5, 1.0, 1.0, 2.0, 1.0, 0.5, 0.5, 1.0, 0.5, 2.0, 1.0, 1.0, 0.5, 1.0, 2.0,
+                0.5, 0.5,
+            ],
+            vec![
+                1.0, 2.0, 1.0, 1.0, 1.0, 2.0, 0.5, 1.0, 0.5, 2.0, 1.0, 2.0, 1.0, 1.0, 1.0, 1.0,
+                0.5, 1.0,
+            ],
+            vec![
+                0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 1.0, 1.0, 2.0, 1.0, 0.5,
+                1.0, 1.0,
+            ],
+            vec![
+                1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 1.0,
+                0.5, 0.0,
+            ],
+            vec![
+                1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.5, 1.0, 1.0, 1.0, 2.0, 1.0, 1.0, 2.0, 1.0, 0.5,
+                1.0, 0.5,
+            ],
+            vec![
+                1.0, 0.5, 0.5, 0.5, 1.0, 2.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 1.0, 1.0, 1.0,
+                0.5, 2.0,
+            ],
+            vec![
+                1.0, 0.5, 1.0, 1.0, 1.0, 1.0, 2.0, 0.5, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 2.0,
+                0.5, 1.0,
+            ],
         ];
 
         let type_name: Vec<String> = vec![
@@ -507,9 +557,10 @@ impl Data {
             "Steel".to_string(),
             "Fairy".to_string(),
         ];
+
         // EVENT DATA ////////////////////////////////////////////////////////////////////////////////////////
 
-        return Data {
+        Data {
             users: Mutex::new(users),
             voice_users: Mutex::new(HashMap::new()),
             meme,
@@ -519,8 +570,8 @@ impl Data {
             gpt_key,
             pokedex,
             type_matrix,
-            type_name
-        };
+            type_name,
+        }
     }
 }
 
@@ -532,6 +583,5 @@ fn read_lines(filename: &str) -> Vec<String> {
         .collect();
 
     println!("{}: loaded {} lines", filename, lines.len());
-
-    return lines;
+    lines
 }

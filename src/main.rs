@@ -1,11 +1,9 @@
 mod basic;
 mod clips;
+mod data;
 mod event;
 
-mod data;
-
 use std::env;
-use tokio;
 use tracing::error;
 
 pub use poise::serenity_prelude as serenity;
@@ -114,7 +112,7 @@ async fn event_handler(
             let mut voice_users = data.voice_users.lock().await;
 
             // Someone left the channel
-            if new.channel_id == None {
+            if new.channel_id.is_none() {
                 voice_users.remove(&new.user_id);
                 return Ok(());
             }

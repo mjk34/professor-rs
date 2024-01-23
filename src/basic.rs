@@ -49,7 +49,7 @@ async fn gpt_string(ctx: Context<'_>, prompt: String) -> Result<String, APIError
         GPT3_5_TURBO_16K.to_string(),
         vec![chat_completion::ChatCompletionMessage {
             role: chat_completion::MessageRole::user,
-            content: chat_completion::Content::Text(String::from(prompt)),
+            content: chat_completion::Content::Text(prompt),
             name: None,
         }],
     );
@@ -65,7 +65,7 @@ async fn gpt_string(ctx: Context<'_>, prompt: String) -> Result<String, APIError
             .to_string()
     );
 
-    Ok(desc.replace("\"", "").replace("\\", ""))
+    Ok(desc.replace(['\"', '\\'], ""))
 }
 
 /// Claim your daily, 500xp, and 2 wishes (Once a day)
@@ -136,7 +136,7 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
     let random_meme = thread_rng().gen_range(0..100);
     let ponder_image = if random_meme < 50 {
         "https://cdn.discordapp.com/attachments/1196582162057662484/1196877964642623509/pondering-my-orb-header-art.png?ex=65b93a77&is=65a6c577&hm=9dcde7ef0ecd61463f39f2077311bbb52db20b4416609cbbe2c5028510f2047c&"
-    } else if random_meme >= 50 && random_meme < 75 {
+    } else if (50..75).contains(&random_meme) {
         ctx.data().ponder.choose(&mut thread_rng()).unwrap()
     } else {
         ctx.data().meme.choose(&mut thread_rng()).unwrap()
@@ -150,7 +150,7 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
                 serenity::CreateEmbed::new()
                     .title("Daily")
                     .description(&desc)
-                    .thumbnail(format!("{}", base_ref.unwrap()))
+                    .thumbnail(base_ref.unwrap().to_string())
                     .color(Color::new(16119285))
                     .image(ponder_image)
                     .footer(serenity::CreateEmbedFooter::new(
@@ -200,7 +200,7 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
                 serenity::CreateEmbed::new()
                     .title("Daily")
                     .description(&desc)
-                    .thumbnail(format!("{}", roll_ref.unwrap()))
+                    .thumbnail(roll_ref.unwrap().to_string())
                     .color(roll_color)
                     .image(ponder_image)
                     .footer(serenity::CreateEmbedFooter::new(
@@ -250,7 +250,7 @@ pub async fn claim_bonus(ctx: Context<'_>) -> Result<(), Error> {
                     serenity::CreateEmbed::new()
                         .title("Claim Bonus")
                         .description(&desc)
-                        .thumbnail(format!("{}", base_ref.unwrap()))
+                        .thumbnail(base_ref.unwrap().to_string())
                         .color(Color::new(16119285))
                         .image("https://cdn.discordapp.com/attachments/1196582162057662484/1197008145868918854/de6b5df29abaf7124387b9c86ca46a29.gif?ex=65b9b3b5&is=65a73eb5&hm=b36eb6f0e235b2ca8d37339cd541e55ea397cdf4be5cc080da4bd37cd99c6c3d&")
                         .footer(serenity::CreateEmbedFooter::new(
@@ -280,7 +280,7 @@ pub async fn claim_bonus(ctx: Context<'_>) -> Result<(), Error> {
                     serenity::CreateEmbed::new()
                         .title("Claim Bonus")
                         .description(&desc)
-                        .thumbnail(format!("{}", roll_ref.unwrap()))
+                        .thumbnail(roll_ref.unwrap().to_string())
                         .color(Color::new(6943230))
                         .image("https://cdn.discordapp.com/attachments/1196582162057662484/1197008145868918854/de6b5df29abaf7124387b9c86ca46a29.gif?ex=65b9b3b5&is=65a73eb5&hm=b36eb6f0e235b2ca8d37339cd541e55ea397cdf4be5cc080da4bd37cd99c6c3d&")
                         .footer(serenity::CreateEmbedFooter::new(
@@ -292,8 +292,6 @@ pub async fn claim_bonus(ctx: Context<'_>) -> Result<(), Error> {
 
         user_data.add_creds(fortune);
         user_data.reset_bonus();
-
-        return Ok(());
     } else {
         let desc: String = match bonus {
             2 => {
@@ -316,12 +314,12 @@ pub async fn claim_bonus(ctx: Context<'_>) -> Result<(), Error> {
                     .footer(serenity::CreateEmbedFooter::new(
                         "@~ powered by UwUntu & RustyBamboo",
                     ))
-                    .thumbnail(format!("{}", "https://cdn.discordapp.com/attachments/1196582162057662484/1197004718631833650/tenor.gif?ex=65b9b084&is=65a73b84&hm=0368979e5bdf0c258f6b344ec2b79826459b3ec4c937374e05ec77f131adf37f&")),
+                    .thumbnail("https://cdn.discordapp.com/attachments/1196582162057662484/1197004718631833650/tenor.gif?ex=65b9b084&is=65a73b84&hm=0368979e5bdf0c258f6b344ec2b79826459b3ec4c937374e05ec77f131adf37f&"),
             ),
         )
         .await?;
-        return Ok(());
     }
+    Ok(())
 }
 
 /// Check how many creds, wishes, or submits you have
@@ -362,7 +360,7 @@ pub async fn wallet(ctx: Context<'_>) -> Result<(), Error> {
             serenity::CreateEmbed::new()
                 .title("Wallet")
                 .description(desc)
-                .thumbnail(format!("{}", user.avatar_url().unwrap_or_default()))
+                .thumbnail(user.avatar_url().unwrap_or_default().to_string())
                 .color(Color::new(16119285))
                 .footer(serenity::CreateEmbedFooter::new(
                     "@~ powered by UwUntu & RustyBamboo",
@@ -483,7 +481,7 @@ pub async fn info(ctx: Context<'_>) -> Result<(), Error> {
     let pub_channels: HashMap<&serenity::ChannelId, &serenity::GuildChannel> = guild
         .channels
         .iter()
-        .filter(|(_, b)| b.permission_overwrites.len() == 0)
+        .filter(|(_, b)| b.permission_overwrites.is_empty())
         .collect();
     let num_channels = pub_channels.len();
     let verification_level = format!("{:?}", guild.verification_level);
