@@ -13,7 +13,7 @@ use openai_api_rs::v1::api::Client;
 use openai_api_rs::v1::chat_completion::{self, ChatCompletionRequest};
 use openai_api_rs::v1::common::GPT3_5_TURBO_16K;
 
-/// Ping the bot to see if its alive or to play ping pong
+/// ping the bot to see if its alive or to play ping pong
 #[poise::command(prefix_command, slash_command)]
 pub async fn ping(ctx: Context<'_>) -> Result<(), Error> {
     let author = ctx.author();
@@ -40,7 +40,7 @@ pub async fn ping(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-// Use gpt-3.5-turbo to generate fun responses to user prompts
+// use gpt-3.5-turbo to generate fun responses to user prompts
 async fn gpt_string(ctx: Context<'_>, prompt: String) -> Result<String, APIError> {
     let api_key = &ctx.data().gpt_key;
     let client = Client::new(api_key.to_string());
@@ -68,7 +68,7 @@ async fn gpt_string(ctx: Context<'_>, prompt: String) -> Result<String, APIError
     Ok(desc.replace(['\"', '\\'], ""))
 }
 
-/// Claim your daily, 500xp, and 2 wishes (Once a day)
+/// claim your daily, 500xp, and 2 wishes (Once a day)
 #[poise::command(slash_command)]
 pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
     let user = ctx.author();
@@ -76,18 +76,18 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
     let user_data = data.get_mut(&user.id).unwrap();
 
     // check if daily is available
-    // if !user_data.check_daily() {
-    //     ctx.send(
-    //         poise::CreateReply::default().embed(
-    //             serenity::CreateEmbed::new()
-    //                 .title("Daily")
-    //                 .description("Your next **/uwu** is tomorrow")
-    //                 .thumbnail(format!("{}", user.avatar_url().unwrap_or_default())),
-    //         ),
-    //     )
-    //     .await?;
-    //     return Ok(());
-    // }
+    if !user_data.check_daily() {
+        ctx.send(
+            poise::CreateReply::default().embed(
+                serenity::CreateEmbed::new()
+                    .title("Daily")
+                    .description("Your next **/uwu** is tomorrow")
+                    .thumbnail(user.avatar_url().unwrap_or_default()),
+            ),
+        )
+        .await?;
+        return Ok(());
+    }
 
     let d20 = thread_rng().gen_range(1..21);
     let check = thread_rng().gen_range(6..15);
@@ -224,7 +224,7 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-/// Claim bonus creds for every three dailies
+/// claim bonus creds for every three dailies
 #[poise::command(slash_command)]
 pub async fn claim_bonus(ctx: Context<'_>) -> Result<(), Error> {
     // update this to implement a d20 dice roll + bonus from level
@@ -322,7 +322,7 @@ pub async fn claim_bonus(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-/// Check how many creds, wishes, or submits you have
+/// check how many creds, wishes, or submits you have
 #[poise::command(slash_command)]
 pub async fn wallet(ctx: Context<'_>) -> Result<(), Error> {
     let user = ctx.author();
@@ -371,7 +371,7 @@ pub async fn wallet(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-/// Show the top wealthiest users in the server
+/// show the top wealthiest users in the server
 #[poise::command(slash_command)]
 pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
     let data = ctx.data().users.lock().await;
@@ -401,7 +401,7 @@ pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
                 .avatar_url()
                 .unwrap_or_default(),
         )
-        .description("Here lists the most active students in UwUversity!")
+        .description("Here lists the most accomplished in UwUversity!")
         .field("Rankings", leaderboard_text, false)
         .footer(serenity::CreateEmbedFooter::new(
             "@~ powered by UwUntu & RustyBamboo",

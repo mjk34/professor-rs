@@ -1,140 +1,167 @@
+use crate::data::PokeData;
 use crate::serenity;
 use crate::{Context, Error};
 use serenity::Color;
 
-#[poise::command(slash_command)]
-pub async fn search_pokemon(ctx: Context<'_>, pokedex_no: usize) -> Result<(), Error> {
-    if pokedex_no > 151 {
-        let msg_txt = format!("Entry {} does not exist.", pokedex_no);
+fn get_pokedata(
+    ctx: Context<'_>,
+    pokemon_name: Option<String>,
+    pokemon_index: Option<usize>,
+) -> PokeData {
+    match (pokemon_name, pokemon_index) {
+        // handle for user giving a name
+        (Some(pokemon_name), None) => {
+            let pokedex = &ctx.data().pokedex;
+            let pokemon = if let Some(pkmn) = pokedex
+                .iter()
+                .find(|&x| x.get_name().to_lowercase() == pokemon_name.to_lowercase())
+            {
+                pkmn
+            } else {
+                pokedex
+                    .first()
+                    .expect("get_pokedata(): Failed to load MissingNo.")
+            };
 
-        ctx.send(
-            poise::CreateReply::default().embed(
-                serenity::CreateEmbed::new()
-                    .title("Pokedex no.---")
-                    .description(msg_txt)
-                    .color(Color::new(16760399))
-                    .thumbnail(
-                        "https://archives.bulbagarden.net/media/upload/3/37/RG_Pok%C3%A9dex.png",
-                    )
-                    .footer(serenity::CreateEmbedFooter::new(
-                        "@~ powered by UwUntu & RustyBamboo",
-                    )),
-            ),
-        )
-        .await?;
-    } else {
-        let pokemon = ctx
-            .data()
-            .pokedex
-            .get(pokedex_no)
-            .expect(format!("Could not find Pokemon no.{}", pokedex_no).as_str());
-        let name: String = pokemon.get_name();
-        let desc: String = pokemon.get_desc();
-        let types: String = pokemon.get_types();
-        let sprite: String = pokemon.get_sprite();
+            pokemon.clone()
+        }
 
-        let msg_txt = format!("**{}**: {}\n{}", name, types, desc);
-        let type_split: Vec<&str> = types.split('/').collect();
-        let first_type = type_split
-            .first()
-            .expect("Failed to expand type")
-            .to_string();
-        let poke_color = get_type_color(&first_type);
+        // handle for user giving an index
+        (None, Some(pokemon_index)) => {
+            let pokedex = &ctx.data().pokedex;
+            let pokemon = if pokemon_index < 151 {
+                pokedex
+                    .get(pokemon_index)
+                    .expect("get_pokedata(): Failed to load Pokemon from index")
+            } else {
+                pokedex
+                    .first()
+                    .expect("get_pokedata(): Failed to load MissingNo.")
+            };
 
-        ctx.send(
-            poise::CreateReply::default().embed(
-                serenity::CreateEmbed::new()
-                    .title(format!("Pokedex no.{}", pokedex_no))
-                    .description(msg_txt)
-                    .color(Color::new(poke_color))
-                    .thumbnail(sprite)
-                    .footer(serenity::CreateEmbedFooter::new(
-                        "@~ powered by UwUntu & RustyBamboo",
-                    )),
-            ),
-        )
-        .await?;
+            pokemon.clone()
+        }
+
+        // handle for user giving both parameters
+        (Some(pokemon_name), Some(pokemon_index)) => {
+            let pokedex = &ctx.data().pokedex;
+            let pokemon = if let Some(pkmn) = pokedex
+                .iter()
+                .find(|&x| x.get_name().to_lowercase() == pokemon_name.to_lowercase())
+            {
+                pkmn
+            } else if pokemon_index < 151 {
+                pokedex
+                    .get(pokemon_index)
+                    .expect("get_pokedata(): Failed to load Pokemon from index")
+            } else {
+                pokedex
+                    .first()
+                    .expect("get_pokedata(): Failed to load MissingNo.")
+            };
+
+            pokemon.clone()
+        }
+
+        // handle for user giving no parameters
+        (None, None) => {
+            let pokedex = &ctx.data().pokedex;
+            pokedex
+                .first()
+                .expect("get_pokedata(): Failed to load MissingNo.")
+                .clone()
+        }
     }
+}
+
+/// look up a pokemon by name or by pokedex index entry
+#[poise::command(slash_command)]
+pub async fn search_pokemon(
+    ctx: Context<'_>,
+    #[description = "name of the pokemon e.g. bulbasaur, charmander, squirtle..."]
+    pokemon_name: Option<String>,
+    #[description = "index entry of the pokemon e.g. 1, 2, 3..."] pokemon_index: Option<usize>,
+) -> Result<(), Error> {
+    let pokemon = get_pokedata(ctx, pokemon_name, pokemon_index);
+
+    let name: String = pokemon.get_name();
+    let index: usize = pokemon.get_index();
+    let desc: String = pokemon.get_desc();
+    let types: String = pokemon.get_types();
+    let sprite: String = pokemon.get_sprite();
+
+    let msg_txt = format!("**{}**: {}\n{}", name, types, desc);
+    let type_split: Vec<&str> = types.split('/').collect();
+    let first_type = type_split
+        .first()
+        .expect("search_Pokemon(): Failed to expand first_type")
+        .to_string();
+    let poke_color = get_type_color(&first_type);
+
+    ctx.send(
+        poise::CreateReply::default().embed(
+            serenity::CreateEmbed::new()
+                .title(format!("Pokedex no.{}", index))
+                .description(msg_txt)
+                .color(Color::new(poke_color))
+                .thumbnail(sprite)
+                .footer(serenity::CreateEmbedFooter::new(
+                    "@~ powered by UwUntu & RustyBamboo",
+                )),
+        ),
+    )
+    .await?;
 
     Ok(())
 }
 
 #[poise::command(slash_command)]
-pub async fn test_matchup(ctx: Context<'_>, poke1: usize, poke2: usize) -> Result<(), Error> {
-    if poke1 > 151 || poke2 > 151 {
-        let msg_txt = if poke1 > 152 {
-            format!("Entry {} does not exist.", poke1)
-        } else {
-            format!("Entry {} does not exist.", poke2)
-        };
+pub async fn test_matchup(
+    ctx: Context<'_>,
+    #[description = "name of the first pokemon e.g. bulbasaur, charmander, squirtle..."]
+    pokemon1: String,
+    #[description = "name of the second pokemon e.g. bulbasaur, charmander, squirtle..."]
+    pokemon2: String,
+) -> Result<(), Error> {
+    let pokemon1 = get_pokedata(ctx, Some(pokemon1), None);
+    let pokemon2 = get_pokedata(ctx, Some(pokemon2), None);
 
-        ctx.send(
-            poise::CreateReply::default().embed(
-                serenity::CreateEmbed::new()
-                    .title("Pokedex no.---")
-                    .description(msg_txt)
-                    .color(Color::new(16760399))
-                    .thumbnail(
-                        "https://archives.bulbagarden.net/media/upload/3/37/RG_Pok%C3%A9dex.png",
-                    )
-                    .footer(serenity::CreateEmbedFooter::new(
-                        "@~ powered by UwUntu & RustyBamboo",
-                    )),
-            ),
-        )
-        .await?;
+    let poke1_type = pokemon1.get_types().clone();
+    let poke2_type = pokemon2.get_types().clone();
+
+    let poke1_emojis = get_type_emoji(&poke1_type);
+    let poke2_emojis = get_type_emoji(&poke2_type);
+
+    let type_advantage = get_advantage(ctx, poke1_type, poke2_type);
+
+    let phrase = if type_advantage >= 2.0 {
+        "Super Effective!".to_string()
+    } else if type_advantage == 1.0 {
+        "Neutral.".to_string()
     } else {
-        let pokemon1 = ctx
-            .data()
-            .pokedex
-            .get(poke1)
-            .expect(format!("Could not find Pokemon no.{}", poke1).as_str());
+        "Not Very Effective...".to_string()
+    };
 
-        let pokemon2 = ctx
-            .data()
-            .pokedex
-            .get(poke2)
-            .expect(format!("Could not find Pokemon no.{}", poke2).as_str());
+    let title_txt = format!(
+        "{} :crossed_swords: {}",
+        pokemon1.get_name(),
+        pokemon2.get_name()
+    );
+    let msg_txt = format!("{} vs {} is **{}**", poke1_emojis, poke2_emojis, phrase);
 
-        let poke1_type = pokemon1.get_types().clone();
-        let poke2_type = pokemon2.get_types().clone();
-
-        let poke1_emojis = get_type_emoji(&poke1_type);
-        let poke2_emojis = get_type_emoji(&poke2_type);
-
-        let type_advantage = get_advantage(ctx, poke1_type, poke2_type);
-
-        let phrase = if type_advantage >= 2.0 {
-            "Super Effective!".to_string()
-        } else if type_advantage == 1.0 {
-            "Neutral.".to_string()
-        } else {
-            "Not Very Effective...".to_string()
-        };
-
-        let title_txt = format!(
-            "{} :crossed_swords: {}",
-            pokemon1.get_name(),
-            pokemon2.get_name()
-        );
-        let msg_txt = format!("{} vs {} is **{}**", poke1_emojis, poke2_emojis, phrase);
-
-        ctx.send(
-            poise::CreateReply::default().embed(
-                serenity::CreateEmbed::new()
-                    .title(title_txt)
-                    .description(msg_txt)
-                    .color(Color::new(16760399))
-                    .thumbnail(
-                        "https://archives.bulbagarden.net/media/upload/3/37/RG_Pok%C3%A9dex.png",
-                    )
-                    .footer(serenity::CreateEmbedFooter::new(
-                        "@~ powered by UwUntu & RustyBamboo",
-                    )),
-            ),
-        )
-        .await?;
-    }
+    ctx.send(
+        poise::CreateReply::default().embed(
+            serenity::CreateEmbed::new()
+                .title(title_txt)
+                .description(msg_txt)
+                .color(Color::new(16760399))
+                .thumbnail("https://archives.bulbagarden.net/media/upload/3/37/RG_Pok%C3%A9dex.png")
+                .footer(serenity::CreateEmbedFooter::new(
+                    "@~ powered by UwUntu & RustyBamboo",
+                )),
+        ),
+    )
+    .await?;
 
     Ok(())
 }

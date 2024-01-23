@@ -62,6 +62,7 @@ pub struct ItemData {
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct PokeData {
     name: String,
+    index: usize,
     desc: String,
     nickname: Option<String>,
     sprite: String,
@@ -72,6 +73,9 @@ pub struct PokeData {
 impl PokeData {
     pub fn get_name(&self) -> String {
         self.name.clone()
+    }
+    pub fn get_index(&self) -> usize {
+        self.index
     }
     pub fn get_desc(&self) -> String {
         self.desc.clone()
@@ -419,6 +423,7 @@ impl Data {
         let mut pokedex = Vec::new();
         let missing_no = PokeData {
             name: "MissingNo.".to_string(),
+            index: 0,
             desc: "????????????".to_string(),
             types: "Normal".to_string(),
             sprite: "https://archives.bulbagarden.net/media/upload/9/98/Missingno_RB.png"
@@ -430,7 +435,7 @@ impl Data {
 
         let mut poke_counter = 1;
         for poke_line in poke_string {
-            let line_split: Vec<&str> = poke_line.split("=").collect();
+            let line_split: Vec<&str> = poke_line.split('=').collect();
 
             let poke_name: String = line_split
                 .first()
@@ -451,6 +456,7 @@ impl Data {
 
             let pokemon_info = PokeData {
                 name: poke_name,
+                index: poke_counter,
                 desc: poke_desc,
                 types: poke_types,
                 sprite: poke_sprite,
