@@ -58,6 +58,7 @@ async fn main() {
                 clips::edit_list(),
                 event::search_pokemon(),
                 event::test_matchup(),
+                event::wild_encounter(),
             ],
             prefix_options: poise::PrefixFrameworkOptions {
                 prefix: Some("~".into()),

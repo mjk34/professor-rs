@@ -1,6 +1,10 @@
+use std::vec;
+
 use crate::data::PokeData;
 use crate::serenity;
 use crate::{Context, Error};
+use rand::seq::SliceRandom;
+use rand::{thread_rng, Rng};
 use serenity::Color;
 
 fn get_pokedata(
@@ -116,11 +120,70 @@ pub async fn search_pokemon(
 }
 
 #[poise::command(slash_command)]
-pub async fn encounter_pokemon(ctx: Context<'_>) -> Result<(), Error> {
+pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
     // TODO: create 3 vectors with specific indexi for common, rare, mythic, legendary pokemon
     //       create persisting message with attack, capture, or run
 
+    let pokemon = spawn_random(ctx);
+    let name: String = pokemon.get_name();
+    let sprite: String = pokemon.get_sprite();
+
+    let msg_txt = format!("A wild {} appeared!", name);
+
+    let types: String = pokemon.get_types();
+    let type_split: Vec<&str> = types.split('/').collect();
+    let first_type = type_split
+        .first()
+        .expect("search_Pokemon(): Failed to expand first_type")
+        .to_string();
+    let poke_color = get_type_color(&first_type);
+
+    ctx.send(
+        poise::CreateReply::default().embed(
+            serenity::CreateEmbed::new()
+                .title("Wild Encounter")
+                .description(msg_txt)
+                .color(Color::new(poke_color))
+                .image(sprite)
+                .footer(serenity::CreateEmbedFooter::new(
+                    "@~ powered by UwUntu & RustyBamboo",
+                )),
+        ),
+    )
+    .await?;
+
     Ok(())
+}
+
+fn spawn_random(ctx: Context<'_>) -> PokeData {
+    let common: [usize; 61] = [
+        1, 4, 7, 10, 11, 13, 14, 16, 19, 20, 21, 23, 27, 29, 32, 35, 39, 41, 43, 46, 47, 48, 50,
+        51, 52, 53, 54, 56, 58, 60, 63, 66, 69, 72, 74, 77, 79, 81, 83, 84, 86, 88, 90, 92, 96, 98,
+        100, 102, 104, 108, 109, 114, 116, 118, 120, 122, 124, 128, 129, 132, 147,
+    ];
+    let rare: [usize; 52] = [
+        2, 5, 8, 12, 15, 17, 22, 24, 25, 28, 30, 33, 36, 37, 40, 42, 44, 49, 55, 57, 61, 64, 67,
+        70, 73, 75, 78, 80, 82, 85, 87, 89, 91, 93, 95, 97, 99, 101, 103, 105, 110, 111, 117, 119,
+        121, 123, 127, 133, 137, 138, 140, 148,
+    ];
+    let mythic: [usize; 33] = [
+        3, 6, 9, 18, 26, 31, 34, 38, 45, 59, 62, 65, 68, 71, 76, 94, 106, 107, 112, 113, 115, 125,
+        126, 130, 131, 134, 135, 136, 139, 141, 142, 143, 149,
+    ];
+    let legendary: [usize; 5] = [144, 145, 146, 150, 151];
+
+    let random_spawn = thread_rng().gen_range(0..100);
+    let spawn_index = if random_spawn < 66 {
+        common.choose(&mut thread_rng()).unwrap()
+    } else if (66..94).contains(&random_spawn) {
+        rare.choose(&mut thread_rng()).unwrap()
+    } else if (94..99).contains(&random_spawn) {
+        mythic.choose(&mut thread_rng()).unwrap()
+    } else {
+        legendary.choose(&mut thread_rng()).unwrap()
+    };
+
+    get_pokedata(ctx, None, Some(*spawn_index))
 }
 
 #[poise::command(slash_command)]
