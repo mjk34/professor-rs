@@ -116,6 +116,14 @@ pub async fn search_pokemon(
 }
 
 #[poise::command(slash_command)]
+pub async fn encounter_pokemon(ctx: Context<'_>) -> Result<(), Error> {
+    // TODO: create 3 vectors with specific indexi for common, rare, mythic, legendary pokemon
+    //       create persisting message with attack, capture, or run
+
+    Ok(())
+}
+
+#[poise::command(slash_command)]
 pub async fn test_matchup(
     ctx: Context<'_>,
     #[description = "name of the first pokemon e.g. bulbasaur, charmander, squirtle..."]
