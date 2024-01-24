@@ -1,4 +1,5 @@
 use crate::data;
+use std::path::Component;
 use std::time::Duration;
 
 use crate::data::{ClipData, UserData};
@@ -104,7 +105,7 @@ pub async fn submit_list(ctx: Context<'_>) -> Result<(), Error> {
     for (id, u) in data.iter() {
         let author = id.to_user(ctx).await.unwrap();
         let clips = u.get_submissions();
-        desc += &format!("**{}:**\n", author.name);
+        desc += &format!("\n**{}:**\n", author.name);
         desc += &clips.join("\n ");
     }
 
@@ -137,42 +138,63 @@ pub async fn edit_list(ctx: Context<'_>) -> Result<(), Error> {
 
     let desc = clips.get_submissions().join("\n");
 
-    let reply = ctx
-        .send(
+    if clips.submits.len() == 0 {
+        ctx.send(
             poise::CreateReply::default().embed(
                 serenity::CreateEmbed::default()
-                    .title("Clip Submissions")
-                    .description(format!("*Click on the react emoji to delete*\n\n{}", desc))
-                    .colour(serenity::Color::DARK_GREEN)
+                    .title("No clips?")
+                    .description(format!("Submit a clip using `/submit_clip`!"))
                     .footer(serenity::CreateEmbedFooter::new(
                         "@~ powered by UwUntu & RustyBamboo",
                     )),
             ),
         )
         .await?;
+        return Ok(());
+    }
+
+    let mut buttons = Vec::new();
+    for i in 0..clips.submits.len() {
+        let emoji = ReactionType::Unicode(data::NUMBER_EMOJS[i].to_string());
+        let button = serenity::CreateButton::new("open_modal")
+            .label("")
+            .custom_id(format!("delete-clip-{}", i))
+            .emoji(emoji)
+            .style(poise::serenity_prelude::ButtonStyle::Secondary);
+        buttons.push(button);
+    }
+
+    let components = vec![serenity::CreateActionRow::Buttons(buttons)];
+
+    let reply = ctx
+        .send(
+            poise::CreateReply::default()
+                .embed(
+                    serenity::CreateEmbed::default()
+                        .title("Clip Submissions")
+                        .description(format!("*Click on the react emoji to delete*\n\n{}", desc))
+                        .colour(serenity::Color::DARK_GREEN)
+                        .footer(serenity::CreateEmbedFooter::new(
+                            "@~ powered by UwUntu & RustyBamboo",
+                        )),
+                )
+                .components(components),
+        )
+        .await?;
 
     let msg = reply.message().await?;
 
-    //TODO: calculate non-none
-    for i in 0..clips.submits.len() {
-        msg.react(
-            ctx,
-            ReactionType::Unicode(data::NUMBER_EMOJS[i].to_string()),
-        )
-        .await?;
-    }
-
     let reactions = msg
-        .await_reaction(ctx)
-        .timeout(Duration::new(60, 0))
+        .await_component_interactions(ctx)
+        .timeout(Duration::new(10, 0))
         .author_id(author.id);
 
     if let Some(reaction) = reactions.await {
-        let i = data::NUMBER_EMOJS
-            .iter()
-            .position(|x| reaction.emoji.unicode_eq(x));
+        let id = reaction.data.custom_id.chars().last().unwrap();
+        let i = id.to_digit(10);
 
         if let Some(i) = i {
+            let i = i as usize;
             if !clips.remove_submit(i) {
                 ctx.send(
                     poise::CreateReply::default().embed(
@@ -185,19 +207,23 @@ pub async fn edit_list(ctx: Context<'_>) -> Result<(), Error> {
                     ),
                 )
                 .await?;
+                return Ok(());
             }
         }
+        reaction
+            .create_response(ctx, serenity::CreateInteractionResponse::Acknowledge)
+            .await?;
+        reply
+            .edit(
+                ctx,
+                poise::CreateReply::default()
+                    .embed(serenity::CreateEmbed::new().description("Deleted!").footer(
+                        serenity::CreateEmbedFooter::new("@~ powered by UwUntu & RustyBamboo"),
+                    ))
+                    .components(Vec::new()),
+            )
+            .await?;
     }
 
-    reply
-        .edit(
-            ctx,
-            poise::CreateReply::default().embed(
-                serenity::CreateEmbed::new().description("Deleted!").footer(
-                    serenity::CreateEmbedFooter::new("@~ powered by UwUntu & RustyBamboo"),
-                ),
-            ),
-        )
-        .await?;
     Ok(())
 }

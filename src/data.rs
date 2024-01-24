@@ -279,10 +279,11 @@ impl UserData {
         for (id, clip) in self.submits.iter().enumerate() {
             if let Some(clip) = clip {
                 let clip_string = format!(
-                    "{} - {} {}",
+                    "{} - {} [{}]({})",
                     NUMBER_EMOJS[id],
                     clip.date.date_naive(),
-                    clip.title
+                    clip.title,
+                    clip.link
                 );
                 submissions.push(clip_string);
             }
@@ -416,7 +417,7 @@ impl Data {
         let pong = read_lines("reference/pong.txt");
         let d20f = read_lines("reference/d20.txt");
 
-        let gpt_key = env::var("API_KEY").expect("missing DISCORD_TOKEN");
+        let gpt_key = env::var("API_KEY").expect("missing GPT API_KEY");
 
         // EVENT DATA ////////////////////////////////////////////////////////////////////////////////////////
         let poke_string = read_lines("event/pokemon.txt");
