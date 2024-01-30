@@ -389,7 +389,7 @@ pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
     for x in data.iter() {
         let (id, u) = x.pair();
         let u = u.read().await;
-        info.push((id.clone(), u.get_creds()));
+        info.push((*id, u.get_creds()));
     }
 
     info.sort_by(|a, b| b.1.cmp(&a.1));

@@ -367,7 +367,7 @@ pub struct Data {
 }
 
 impl Data {
-    pub async fn check_or_create_user<'a>(ctx: crate::Context<'a>) -> Result<(), crate::Error> {
+    pub async fn check_or_create_user(ctx: crate::Context<'_>) -> Result<(), crate::Error> {
         let user_id = ctx.author().id;
         {
             let data = &ctx.data().users;

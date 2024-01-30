@@ -143,12 +143,12 @@ pub async fn edit_list(ctx: Context<'_>) -> Result<(), Error> {
 
     let desc = clips.get_submissions().join("\n");
 
-    if clips.submits.len() == 0 {
+    if clips.submits.is_empty() {
         ctx.send(
             poise::CreateReply::default().embed(
                 serenity::CreateEmbed::default()
                     .title("No clips?")
-                    .description(format!("Submit a clip using `/submit_clip`!"))
+                    .description("Submit a clip using `/submit_clip`!".to_string())
                     .footer(serenity::CreateEmbedFooter::new(
                         "@~ powered by UwUntu & RustyBamboo",
                     )),
@@ -246,7 +246,6 @@ pub async fn edit_list(ctx: Context<'_>) -> Result<(), Error> {
             )
             .await
             .unwrap();
-        return;
     });
 
     Ok(())
