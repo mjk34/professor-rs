@@ -1,13 +1,15 @@
 use crate::data;
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use crate::data::ClipData;
 use crate::{Context, Error};
 
 use crate::serenity;
-use poise::serenity_prelude::ReactionType;
+use poise::serenity_prelude::{EditMessage, ReactionType};
 use regex::Regex;
+use tokio::sync::RwLock;
 
 fn is_youtube_or_medal_url(url: &str) -> bool {
     let youtube_regex =
@@ -136,11 +138,8 @@ pub async fn edit_list(ctx: Context<'_>) -> Result<(), Error> {
     let id = author.id;
 
     let data = &ctx.data().users;
-    let u = data.get_mut(&id).unwrap();
-    let mut clips = u.write().await;
-    // let mut data = ctx.data().users.lock().await;
-
-    // let clips: &mut UserData = data.get_mut(&id).unwrap();
+    let u = data.get(&id).unwrap();
+    let clips = u.read().await;
 
     let desc = clips.get_submissions().join("\n");
 
@@ -188,48 +187,67 @@ pub async fn edit_list(ctx: Context<'_>) -> Result<(), Error> {
         )
         .await?;
 
-    let msg = reply.message().await?;
+    drop(clips);
+
+    let msg_og = Arc::new(RwLock::new(reply.into_message().await?));
+
+    let msg = Arc::clone(&msg_og);
 
     let reactions = msg
+        .read()
+        .await
         .await_component_interactions(ctx)
-        .timeout(Duration::new(10, 0))
+        .timeout(Duration::new(15, 0))
         .author_id(author.id);
 
-    if let Some(reaction) = reactions.await {
-        let id = reaction.data.custom_id.chars().last().unwrap();
-        let i = id.to_digit(10);
+    let u = Arc::clone(&u);
+    let ctx = ctx.serenity_context().clone();
 
-        if let Some(i) = i {
-            let i = i as usize;
-            if !clips.remove_submit(i) {
-                ctx.send(
-                    poise::CreateReply::default().embed(
-                        serenity::CreateEmbed::default()
-                            .title("Could not delete...")
-                            .colour(serenity::Color::RED)
+    tokio::spawn(async move {
+        if let Some(reaction) = reactions.await {
+            let id = reaction.data.custom_id.chars().last().unwrap();
+            let i = id.to_digit(10);
+            if let Some(i) = i {
+                let mut clip = u.write().await;
+
+                clip.remove_submit(i as usize);
+            }
+            reaction
+                .create_response(&ctx, serenity::CreateInteractionResponse::Acknowledge)
+                .await
+                .unwrap();
+            msg.write()
+                .await
+                .edit(
+                    &ctx,
+                    EditMessage::default()
+                        .embed(serenity::CreateEmbed::new().description("Deleted!").footer(
+                            serenity::CreateEmbedFooter::new("@~ powered by UwUntu & RustyBamboo"),
+                        ))
+                        .components(Vec::new()),
+                )
+                .await
+                .unwrap();
+            return;
+        }
+        msg.write()
+            .await
+            .edit(
+                ctx,
+                EditMessage::default()
+                    .embed(
+                        serenity::CreateEmbed::new()
+                            .description("Edit timed out...")
                             .footer(serenity::CreateEmbedFooter::new(
                                 "@~ powered by UwUntu & RustyBamboo",
                             )),
-                    ),
-                )
-                .await?;
-                return Ok(());
-            }
-        }
-        reaction
-            .create_response(ctx, serenity::CreateInteractionResponse::Acknowledge)
-            .await?;
-        reply
-            .edit(
-                ctx,
-                poise::CreateReply::default()
-                    .embed(serenity::CreateEmbed::new().description("Deleted!").footer(
-                        serenity::CreateEmbedFooter::new("@~ powered by UwUntu & RustyBamboo"),
-                    ))
+                    )
                     .components(Vec::new()),
             )
-            .await?;
-    }
+            .await
+            .unwrap();
+        return;
+    });
 
     Ok(())
 }
