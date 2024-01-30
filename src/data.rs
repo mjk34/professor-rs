@@ -442,19 +442,19 @@ impl Data {
 
             let poke_name: String = line_split
                 .first()
-                .expect(format!("Failed to load Name for No. {}", poke_counter).as_str())
+                .unwrap_or_else(|| panic!("Failed to load Name for No. {}", poke_counter))
                 .to_string();
             let poke_desc: String = line_split
                 .get(1)
-                .expect(format!("Failed to load Description for No. {}", poke_counter).as_str())
+                .unwrap_or_else(|| panic!("Failed to load Description for No. {}", poke_counter))
                 .to_string();
             let poke_types: String = line_split
                 .get(2)
-                .expect(format!("Failed to load typing for No. {}", poke_counter).as_str())
+                .unwrap_or_else(|| panic!("Failed to load typing for No. {}", poke_counter))
                 .to_string();
             let poke_sprite: String = line_split
                 .get(3)
-                .expect(format!("Failed to load Sprite for No. {}", poke_counter).as_str())
+                .unwrap_or_else(|| panic!("Failed to load Sprite for No. {}", poke_counter))
                 .to_string();
 
             let pokemon_info = PokeData {
@@ -570,7 +570,7 @@ impl Data {
         // EVENT DATA ////////////////////////////////////////////////////////////////////////////////////////
 
         Data {
-            users: users,
+            users,
             voice_users: Mutex::new(HashMap::new()),
             meme,
             ponder,
