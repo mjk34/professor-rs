@@ -72,8 +72,9 @@ async fn gpt_string(ctx: Context<'_>, prompt: String) -> Result<String, APIError
 #[poise::command(slash_command)]
 pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
     let user = ctx.author();
-    let mut data = ctx.data().users.lock().await;
-    let user_data = data.get_mut(&user.id).unwrap();
+    let data = &ctx.data().users;
+    let u = data.get(&user.id).unwrap();
+    let mut user_data = u.write().await;
 
     // check if daily is available
     if !user_data.check_daily() {
@@ -230,8 +231,9 @@ pub async fn claim_bonus(ctx: Context<'_>) -> Result<(), Error> {
     // update this to implement a d20 dice roll + bonus from level
 
     let user = ctx.author();
-    let mut data = ctx.data().users.lock().await;
-    let user_data = data.get_mut(&user.id).unwrap();
+    let data = &ctx.data().users;
+    let u = data.get_mut(&user.id).unwrap();
+    let mut user_data = u.write().await;
 
     let bonus = user_data.get_bonus();
     if user_data.check_claim() {
@@ -326,8 +328,9 @@ pub async fn claim_bonus(ctx: Context<'_>) -> Result<(), Error> {
 #[poise::command(slash_command)]
 pub async fn wallet(ctx: Context<'_>) -> Result<(), Error> {
     let user = ctx.author();
-    let data = ctx.data().users.lock().await;
-    let user_data = data.get(&user.id).unwrap();
+    let data = &ctx.data().users;
+    let u = data.get(&user.id).unwrap();
+    let user_data = u.read().await;
 
     // get user info
     let user_luck: String = if user_data.get_luck() == "" {
@@ -374,16 +377,28 @@ pub async fn wallet(ctx: Context<'_>) -> Result<(), Error> {
 /// show the top wealthiest users in the server
 #[poise::command(slash_command)]
 pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
-    let data = ctx.data().users.lock().await;
+    let data = &ctx.data().users;
 
-    let mut sorted: Vec<_> = data.iter().collect();
-    sorted.sort_by(|a, b| b.1.get_creds().cmp(&a.1.get_creds()));
+    // let info = data.iter().map(|x| {
+    // let (id, u) = x.pair();
+    // let u = u.read().await;
+    // });
+
+    let mut info = Vec::new();
+
+    for x in data.iter() {
+        let (id, u) = x.pair();
+        let u = u.read().await;
+        info.push((id.clone(), u.get_creds()));
+    }
+
+    info.sort_by(|a, b| b.1.cmp(&a.1));
 
     let mut leaderboard_text = String::new();
-    for (index, (id, u)) in sorted.iter().enumerate().take(10) {
+    for (index, (id, u)) in info.iter().enumerate().take(10) {
         let user_name = id.to_user(ctx).await?.name;
         let score = if index == 0 {
-            format!("- {}", u.get_creds())
+            format!("- {}", u)
         } else {
             "".to_string()
         };
@@ -394,7 +409,7 @@ pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
         .title("Leaderboard")
         .color(Color::TEAL)
         .thumbnail(
-            sorted[0]
+            info[0]
                 .0
                 .to_user(ctx)
                 .await?

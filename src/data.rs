@@ -1,12 +1,15 @@
 use crate::serenity;
 use chrono::prelude::{DateTime, Utc};
 
+use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use serenity::Color;
 use std::collections::HashMap;
+use tokio::sync::RwLock;
 
 use std::env;
 use std::fs;
+use std::sync::Arc;
 
 use tokio::sync::Mutex;
 
@@ -350,7 +353,7 @@ impl VoiceUser {
 #[derive(Default)]
 pub struct Data {
     /// Persistent data of users
-    pub users: Mutex<HashMap<serenity::UserId, UserData>>,
+    pub users: DashMap<serenity::UserId, Arc<RwLock<UserData>>>,
     /// Duration of users in voice channel, updates by events
     pub voice_users: Mutex<HashMap<serenity::UserId, VoiceUser>>,
     pub meme: Vec<String>,
@@ -364,20 +367,18 @@ pub struct Data {
 }
 
 impl Data {
-    pub async fn check_or_create_user<'a>(
-        &self,
-        ctx: crate::Context<'a>,
-    ) -> Result<(), crate::Error> {
+    pub async fn check_or_create_user<'a>(ctx: crate::Context<'a>) -> Result<(), crate::Error> {
         let user_id = ctx.author().id;
         {
-            let mut data = self.users.lock().await;
+            let data = &ctx.data().users;
+            // let data = &mut ctx.data().users;
             if data.contains_key(&user_id) {
                 return Ok(());
             }
 
             data.insert(user_id, Default::default());
         }
-        self.save().await;
+        // self.save().await;
         ctx.send(
             poise::CreateReply::default().embed(
                 serenity::CreateEmbed::new()
@@ -398,19 +399,20 @@ impl Data {
     ///
     /// Make sure that the Mutex is unlocked before calling this function
     pub async fn save(&self) {
-        let users = self.users.lock().await;
-        let encoded = serde_json::to_string(&users.clone()).unwrap();
-        fs::write("data.json", encoded).expect("Failed to write binary save file");
+        // let users = self.users;
+        // let encoded = serde_json::to_string(&users).unwrap();
+        // fs::write("data.json", encoded).expect("Failed to write binary save file");
     }
 
     /// Attempts to load the Data from a file, otherwise return a default
     pub fn load() -> Data {
-        let data = fs::read_to_string("data.json").ok();
-        let users: HashMap<serenity::UserId, UserData> = if let Some(file) = data {
-            serde_json::from_str(&file).expect("Old data format?")
-        } else {
-            HashMap::default()
-        };
+        let _data = fs::read_to_string("data.json").ok();
+        // let users: HashMap<serenity::UserId, Arc<RwLock<UserData>>> = if let Some(file) = data {
+        // serde_json::from_str(&file).expect("Old data format?")
+        // } else {
+        // HashMap::default()
+        // };
+        let users = DashMap::default();
 
         let meme = read_lines("reference/meme.txt");
         let ponder = read_lines("reference/ponder.txt");
@@ -568,7 +570,7 @@ impl Data {
         // EVENT DATA ////////////////////////////////////////////////////////////////////////////////////////
 
         Data {
-            users: Mutex::new(users),
+            users: users,
             voice_users: Mutex::new(HashMap::new()),
             meme,
             ponder,

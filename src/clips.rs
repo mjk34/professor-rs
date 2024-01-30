@@ -1,8 +1,8 @@
 use crate::data;
-use std::path::Component;
+
 use std::time::Duration;
 
-use crate::data::{ClipData, UserData};
+use crate::data::ClipData;
 use crate::{Context, Error};
 
 use crate::serenity;
@@ -47,8 +47,9 @@ pub async fn submit_clip(ctx: Context<'_>, title: String, link: String) -> Resul
     }
 
     let user = ctx.author();
-    let mut data = ctx.data().users.lock().await;
-    let user_data = data.get_mut(&user.id).unwrap();
+    let data = &ctx.data().users;
+    let u = data.get_mut(&user.id).unwrap();
+    let mut user_data = u.write().await;
 
     let clip = ClipData::new(title, link);
 
@@ -99,10 +100,12 @@ pub async fn submit_list(ctx: Context<'_>) -> Result<(), Error> {
 
     let icon_url = guild.icon_url().unwrap_or_default();
     let banner_url = guild.banner_url().unwrap_or_default();
-    let data = ctx.data().users.lock().await;
+    let data = &ctx.data().users;
 
     let mut desc = "".to_string();
-    for (id, u) in data.iter() {
+    for x in data.iter() {
+        let (id, u) = x.pair();
+        let u = u.read().await;
         let author = id.to_user(ctx).await.unwrap();
         let clips = u.get_submissions();
         desc += &format!("\n**{}:**\n", author.name);
@@ -132,9 +135,12 @@ pub async fn edit_list(ctx: Context<'_>) -> Result<(), Error> {
     let author = ctx.author();
     let id = author.id;
 
-    let mut data = ctx.data().users.lock().await;
+    let data = &ctx.data().users;
+    let u = data.get_mut(&id).unwrap();
+    let mut clips = u.write().await;
+    // let mut data = ctx.data().users.lock().await;
 
-    let clips: &mut UserData = data.get_mut(&id).unwrap();
+    // let clips: &mut UserData = data.get_mut(&id).unwrap();
 
     let desc = clips.get_submissions().join("\n");
 
