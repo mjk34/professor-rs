@@ -2,9 +2,11 @@ use std::collections::HashMap;
 
 use chrono::prelude::Utc;
 use openai_api_rs::v1::error::APIError;
+use poise::serenity_prelude::UserId;
 use rand::seq::SliceRandom;
 use rand::{thread_rng, Rng};
 
+use crate::data::VoiceUser;
 use crate::serenity;
 use crate::{Context, Error};
 use serenity::Color;
@@ -429,9 +431,15 @@ pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
 
 #[poise::command(slash_command)]
 pub async fn voice_status(ctx: Context<'_>) -> Result<(), Error> {
-    let data = ctx.data().voice_users.lock().await;
+    let data = &ctx.data().voice_users;
 
-    let mut out: Vec<_> = data.iter().collect();
+    let mut out: Vec<(UserId, VoiceUser)> = Vec::new();
+
+    for x in data.iter() {
+        let (id, u) = x.pair();
+        out.push((*id, u.clone()));
+    }
+
     out.sort_by(|a, b| a.1.joined.cmp(&b.1.joined));
 
     let now = chrono::Utc::now();

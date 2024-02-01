@@ -3,7 +3,10 @@ mod clips;
 mod data;
 mod event;
 
-use std::env;
+use dashmap::DashMap;
+use data::{UserData, VoiceUser};
+use std::{env, sync::Arc};
+use tokio::sync::RwLock;
 use tracing::error;
 
 pub use poise::serenity_prelude as serenity;
@@ -69,9 +72,11 @@ async fn main() {
             },
             ..Default::default()
         })
-        .setup(|_, _ready, _| {
-            //|ctx, _ready, framework| {
+        .setup(|_ctx, _ready, _framework| {
             Box::pin(async move {
+                let users = data.users.clone();
+                let voice_users = data.voice_users.clone();
+                background_task(users, voice_users);
                 // poise::builtins::register_globally(ctx, &framework.options().commands).await?;
                 Ok(data)
             })
@@ -110,7 +115,7 @@ async fn event_handler(
             }
         }
         serenity::FullEvent::VoiceStateUpdate { old: _, new } => {
-            let mut voice_users = data.voice_users.lock().await;
+            let voice_users = &data.voice_users;
 
             // Someone left the channel
             if new.channel_id.is_none() {
@@ -118,7 +123,7 @@ async fn event_handler(
                 return Ok(());
             }
 
-            let user = voice_users
+            let mut user = voice_users
                 .entry(new.user_id)
                 .or_insert(data::VoiceUser::new());
             user.update_mute(new.self_mute || new.mute);
@@ -127,4 +132,51 @@ async fn event_handler(
         _ => {}
     }
     Ok(())
+}
+
+fn background_task(
+    users: Arc<DashMap<serenity::UserId, Arc<RwLock<UserData>>>>,
+    voice_users: Arc<DashMap<serenity::UserId, VoiceUser>>,
+) {
+    tokio::spawn(async move {
+        loop {
+            {
+                // How long should someone be in voice for award
+                const REWARD_TIME: i64 = 30;
+                // How much to award
+                const REWARD_CREDITS: i32 = 30;
+                // Check time
+                let now = chrono::Utc::now();
+
+                for mut x in voice_users.iter_mut() {
+                    let (id, vu) = x.pair_mut();
+                    let joined = vu.joined;
+
+                    let user_data = users.get_mut(id);
+                    if user_data.is_none() {
+                        return;
+                    }
+                    let user_data = user_data.unwrap();
+
+                    if let Some(last) = vu.last_reward {
+                        if (now - last).num_minutes() >= REWARD_TIME {
+                            // Give user credits
+                            let mut user_data = user_data.write().await;
+                            user_data.add_creds(REWARD_CREDITS);
+                            vu.last_reward = Some(now);
+                        }
+                    } else {
+                        if (now - joined).num_minutes() >= REWARD_TIME {
+                            // Give user credits
+                            let mut user_data = user_data.write().await;
+                            user_data.add_creds(REWARD_CREDITS);
+                            vu.last_reward = Some(now);
+                        }
+                    }
+                }
+            }
+            // Sleep for a while before the next iteration
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+        }
+    });
 }

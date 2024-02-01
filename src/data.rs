@@ -4,14 +4,12 @@ use chrono::prelude::{DateTime, Utc};
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use serenity::Color;
-use std::collections::HashMap;
+
 use tokio::sync::RwLock;
 
 use std::env;
 use std::fs;
 use std::sync::Arc;
-
-use tokio::sync::Mutex;
 
 pub const NUMBER_EMOJS: [&str; 10] = [
     "\u{0030}\u{FE0F}\u{20E3}",
@@ -319,9 +317,10 @@ impl UserData {
     // }
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct VoiceUser {
     pub joined: DateTime<Utc>,
+    pub last_reward: Option<DateTime<Utc>>,
     pub mute: Option<DateTime<Utc>>,
     pub deaf: Option<DateTime<Utc>>,
 }
@@ -330,6 +329,7 @@ impl VoiceUser {
     pub fn new() -> VoiceUser {
         VoiceUser {
             joined: Utc::now(),
+            last_reward: None,
             mute: None,
             deaf: None,
         }
@@ -353,9 +353,9 @@ impl VoiceUser {
 #[derive(Default)]
 pub struct Data {
     /// Persistent data of users
-    pub users: DashMap<serenity::UserId, Arc<RwLock<UserData>>>,
+    pub users: Arc<DashMap<serenity::UserId, Arc<RwLock<UserData>>>>,
     /// Duration of users in voice channel, updates by events
-    pub voice_users: Mutex<HashMap<serenity::UserId, VoiceUser>>,
+    pub voice_users: Arc<DashMap<serenity::UserId, VoiceUser>>,
     pub meme: Vec<String>,
     pub ponder: Vec<String>,
     pub pong: Vec<String>,
@@ -412,7 +412,7 @@ impl Data {
         // } else {
         // HashMap::default()
         // };
-        let users = DashMap::default();
+        let users = Arc::new(DashMap::default());
 
         let meme = read_lines("reference/meme.txt");
         let ponder = read_lines("reference/ponder.txt");
@@ -571,7 +571,7 @@ impl Data {
 
         Data {
             users,
-            voice_users: Mutex::new(HashMap::new()),
+            voice_users: Arc::new(DashMap::new()),
             meme,
             ponder,
             pong,
