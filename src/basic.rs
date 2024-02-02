@@ -5,6 +5,7 @@ use openai_api_rs::v1::error::APIError;
 use poise::serenity_prelude::UserId;
 use rand::seq::SliceRandom;
 use rand::{thread_rng, Rng};
+use tracing::field::display;
 
 use crate::data::VoiceUser;
 use crate::serenity;
@@ -381,36 +382,51 @@ pub async fn wallet(ctx: Context<'_>) -> Result<(), Error> {
 
 /// show the top wealthiest users in the server
 #[poise::command(slash_command)]
-pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
+pub async fn leaderboard(ctx: Context<'_>, display: Option<String>) -> Result<(), Error> {
     let data = &ctx.data().users;
-
-    // let info = data.iter().map(|x| {
-    // let (id, u) = x.pair();
-    // let u = u.read().await;
-    // });
-
     let mut info = Vec::new();
 
     for x in data.iter() {
         let (id, u) = x.pair();
         let u = u.read().await;
-        info.push((*id, u.get_creds()));
-    }
 
+        if display == Some("Luck".to_string())
+            || display == Some("LUCK".to_string())
+            || display == Some("luck".to_string())
+            || display == Some("l".to_string())
+        {
+            info.push((*id, u.get_luck_score(), u.get_luck()));
+        } else {
+            info.push((*id, u.get_creds(), String::new()));
+        }
+    }
     info.sort_by(|a, b| b.1.cmp(&a.1));
 
     let mut leaderboard_text = String::new();
     leaderboard_text.push_str("﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n");
 
-    for (index, (id, u)) in info.iter().enumerate().take(10) {
+    for (index, (id, u, s)) in info.iter().enumerate().take(10) {
         let user_name = id.to_user(ctx).await?.name;
         let rank = if index == 0 {
-            format!(
-                "\u{3000}** #{} ** \u{3000}\u{3000} **{}** \u{3000}~({})\n",
-                index + 1,
-                user_name,
-                u
-            )
+            if display == Some("Luck".to_string())
+                || display == Some("LUCK".to_string())
+                || display == Some("luck".to_string())
+                || display == Some("l".to_string())
+            {
+                format!(
+                    "\u{3000}** #{} ** \u{3000}\u{3000} **{}** \u{3000}\u{3000}~({})\n",
+                    index + 1,
+                    user_name,
+                    s
+                )
+            } else {
+                format!(
+                    "\u{3000}** #{} ** \u{3000}\u{3000} **{}** \u{3000}\u{3000}~({})\n",
+                    index + 1,
+                    user_name,
+                    u
+                )
+            }
         } else if index > 9 {
             format!(
                 "\u{3000}** #{} ** \u{3000}\u{2000} *{}*\n",

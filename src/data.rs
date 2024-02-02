@@ -214,10 +214,10 @@ impl UserData {
 
     pub fn get_luck(&self) -> String {
         if self.daily_count == 0 {
-            return "---".to_string();
+            return "N/A".to_string();
         }
 
-        let average = self.rolls / self.daily_count;
+        let average = self.get_luck_score();
         let luck: String;
         if average < 6 {
             luck = "Horrible".to_string();
@@ -232,6 +232,10 @@ impl UserData {
         }
 
         luck
+    }
+
+    pub fn get_luck_score(&self) -> i32 {
+        self.rolls / self.daily_count
     }
 
     pub fn get_bonus(&self) -> i32 {
