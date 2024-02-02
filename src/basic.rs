@@ -5,7 +5,6 @@ use openai_api_rs::v1::error::APIError;
 use poise::serenity_prelude::UserId;
 use rand::seq::SliceRandom;
 use rand::{thread_rng, Rng};
-use tracing::field::display;
 
 use crate::data::VoiceUser;
 use crate::serenity;
@@ -360,7 +359,7 @@ pub async fn wallet(ctx: Context<'_>) -> Result<(), Error> {
     let creds: i32 = user_data.get_creds();
 
     let desc = format!(
-        "**Level {} **  -  {}/{}\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\nDaily UwU........... . . . **{}**\nAverage Luck..... . . . **{}**\nClaim Bonus....... . . . **{}**\n\nTotal Creds: **{}**\n",
+        "**Level {} **  -  {}/{}\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\nDaily UwU........... . . . **{}**\nAverage Luck..... . . . **{}**\nClaim Bonus....... . . . **{}**\n\nTotal Creds: **{}**\n",
         level, xp, next_level, daily, luck, claim, creds
     );
 
@@ -386,16 +385,29 @@ pub async fn leaderboard(ctx: Context<'_>, display: Option<String>) -> Result<()
     let data = &ctx.data().users;
     let mut info = Vec::new();
 
+    let fortune: Vec<Option<String>> = vec![
+        Some("Fortune".to_string()),
+        Some("FORTUNE".to_string()),
+        Some("fortune".to_string()),
+        Some("f".to_string()),
+    ];
+
+    let level: Vec<Option<String>> = vec![
+        Some("Level".to_string()),
+        Some("LEVEL".to_string()),
+        Some("level".to_string()),
+        Some("l".to_string()),
+    ];
+
     for x in data.iter() {
         let (id, u) = x.pair();
         let u = u.read().await;
 
-        if display == Some("Luck".to_string())
-            || display == Some("LUCK".to_string())
-            || display == Some("luck".to_string())
-            || display == Some("l".to_string())
-        {
+        if fortune.contains(&display) {
             info.push((*id, u.get_luck_score(), u.get_luck()));
+        } else if level.contains(&display) {
+            let total_xp = u.get_level() * 80 + u.get_xp();
+            info.push((*id, total_xp, format!("Level {}", u.get_level())));
         } else {
             info.push((*id, u.get_creds(), String::new()));
         }
@@ -403,16 +415,12 @@ pub async fn leaderboard(ctx: Context<'_>, display: Option<String>) -> Result<()
     info.sort_by(|a, b| b.1.cmp(&a.1));
 
     let mut leaderboard_text = String::new();
-    leaderboard_text.push_str("﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n");
+    leaderboard_text.push_str("﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n");
 
     for (index, (id, u, s)) in info.iter().enumerate().take(10) {
         let user_name = id.to_user(ctx).await?.name;
         let rank = if index == 0 {
-            if display == Some("Luck".to_string())
-                || display == Some("LUCK".to_string())
-                || display == Some("luck".to_string())
-                || display == Some("l".to_string())
-            {
+            if fortune.contains(&display) || level.contains(&display) {
                 format!(
                     "\u{3000}** #{} ** \u{3000}\u{3000} **{}** \u{3000}\u{3000}~({})\n",
                     index + 1,

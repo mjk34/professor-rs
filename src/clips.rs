@@ -309,7 +309,7 @@ pub async fn next_clip(ctx: Context<'_>) -> Result<(), Error> {
 
     let button_done = vec![serenity::CreateButton::new("open_modal")
         .label("Done")
-        .custom_id(format!("vote-done"))
+        .custom_id("vote-done".to_string())
         // .emoji(emoji)
         .style(poise::serenity_prelude::ButtonStyle::Danger)];
 
@@ -329,7 +329,7 @@ pub async fn next_clip(ctx: Context<'_>) -> Result<(), Error> {
             poise::CreateReply::default()
                 .embed(
                     serenity::CreateEmbed::default()
-                        .title(format!("Rate this clip!"))
+                        .title("Rate this clip!".to_string())
                         .colour(serenity::Color::BLUE)
                         .footer(serenity::CreateEmbedFooter::new(
                             "@~ powered by UwUntu & RustyBamboo",
@@ -417,7 +417,7 @@ pub async fn next_clip(ctx: Context<'_>) -> Result<(), Error> {
                     &ctx,
                     EditMessage::default().embed(
                         serenity::CreateEmbed::new()
-                            .title(format!("Rate this clip!"))
+                            .title("Rate this clip!".to_string())
                             .description(format!("Score: {}", score.load(Ordering::Relaxed)))
                             .colour(serenity::Color::BLUE)
                             .footer(serenity::CreateEmbedFooter::new(
