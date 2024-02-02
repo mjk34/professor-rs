@@ -141,10 +141,13 @@ fn background_task(
     tokio::spawn(async move {
         loop {
             {
-                // How long should someone be in voice for award
-                const REWARD_TIME: i64 = 30;
-                // How much to award
-                const REWARD_CREDITS: i32 = 30;
+                // How long should someone be in voice for creds
+                const CRED_TIME: i64 = 30;
+                // How much creds to award
+                const REWARD_CREDITS: i32 = 50;
+                // How much xp to award
+                const REWARD_XP: i32 = 30;
+
                 // Check time
                 let now = chrono::Utc::now();
 
@@ -159,19 +162,21 @@ fn background_task(
                     let user_data = user_data.unwrap();
 
                     if let Some(last) = vu.last_reward {
-                        if (now - last).num_minutes() >= REWARD_TIME {
+                        if (now - last).num_minutes() >= CRED_TIME {
                             // Give user credits
                             let mut user_data = user_data.write().await;
                             user_data.add_creds(REWARD_CREDITS);
+                            user_data.update_xp(REWARD_XP);
                             vu.last_reward = Some(now);
                         }
-                    } else {
-                        if (now - joined).num_minutes() >= REWARD_TIME {
-                            // Give user credits
-                            let mut user_data = user_data.write().await;
-                            user_data.add_creds(REWARD_CREDITS);
-                            vu.last_reward = Some(now);
-                        }
+                    }
+
+                    if (now - joined).num_minutes() >= CRED_TIME {
+                        // Give user credits
+                        let mut user_data = user_data.write().await;
+                        user_data.add_creds(REWARD_CREDITS);
+                        user_data.update_xp(REWARD_XP);
+                        vu.last_reward = Some(now);
                     }
                 }
             }

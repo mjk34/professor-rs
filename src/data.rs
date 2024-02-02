@@ -134,9 +134,9 @@ impl UserData {
         }
 
         self.xp += xp;
-        let xp_cap = self.get_level() * 80;
+        let xp_cap = 500 + self.get_level() * 80;
 
-        if self.xp > xp_cap {
+        if self.xp >= xp_cap {
             self.xp -= xp_cap;
             self.update_level();
             self.add_wishes(3);
@@ -239,6 +239,14 @@ impl UserData {
 
     pub fn get_level(&self) -> i32 {
         self.level
+    }
+
+    pub fn get_xp(&self) -> i32 {
+        self.xp
+    }
+
+    pub fn get_next_level(&self) -> i32 {
+        500 + self.get_level() * 80
     }
 
     pub fn add_submit(&mut self, new_submit: ClipData) -> bool {
@@ -402,7 +410,7 @@ impl Data {
                     .image(
                         "https://gifdb.com/images/high/anime-girl-okay-sign-b5zlye5h8mnjhdg2.gif",
                     )
-                    .thumbnail(ctx.author().avatar_url().unwrap())
+                    .thumbnail(ctx.author().avatar_url().unwrap_or_default())
                     .color(Color::new(16119285)),
             ),
         )

@@ -300,12 +300,12 @@ pub async fn claim_bonus(ctx: Context<'_>) -> Result<(), Error> {
         let desc: String = match bonus {
             2 => {
                 format!(
-                    "The ***Bonus*** will be ready after your next `/uwu`! (Claim Bonus: {})",
+                    "The ***Bonus*** will be ready after your next `/uwu`! (Count: {}/3)",
                     bonus
                 )
             }
             _ => {
-                format!("The ***Bonus*** is not ready! (Claim Bonus: {})", bonus)
+                format!("The ***Bonus*** is not ready! (Count: {}/3)", bonus)
             }
         };
 
@@ -335,29 +335,32 @@ pub async fn wallet(ctx: Context<'_>) -> Result<(), Error> {
     let user_data = u.read().await;
 
     // get user info
-    let user_luck: String = if user_data.get_luck() == "" {
-        "---".to_string()
+    let luck: String = if user_data.get_luck() == "" {
+        "N/A".to_string()
     } else {
         user_data.get_luck()
     };
 
-    let has_daily: String = if user_data.check_daily() {
+    let daily: String = if user_data.check_daily() {
         "Available".to_string()
     } else {
         "Not Available".to_string()
     };
 
-    let has_claim: String = if user_data.check_claim() {
+    let claim: String = if user_data.check_claim() {
         "Available".to_string()
     } else {
         format!("{} / 3", user_data.get_bonus())
     };
 
-    let user_creds: i32 = user_data.get_creds();
+    let level: i32 = user_data.get_level();
+    let xp: i32 = user_data.get_xp();
+    let next_level = user_data.get_next_level();
+    let creds: i32 = user_data.get_creds();
 
     let desc = format!(
-        "Daily UwU........... . . **{}**\nAverage Luck..... . . **{}**\nClaim Bonus....... . . **{}**\n\nTotal Creds: **{}**\n", 
-        has_daily, user_luck, has_claim, user_creds
+        "**Level {} **  -  {}/{}\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\nDaily UwU........... . . . **{}**\nAverage Luck..... . . . **{}**\nClaim Bonus....... . . . **{}**\n\nTotal Creds: **{}**\n",
+        level, xp, next_level, daily, luck, claim, creds
     );
 
     ctx.send(
@@ -397,14 +400,32 @@ pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
     info.sort_by(|a, b| b.1.cmp(&a.1));
 
     let mut leaderboard_text = String::new();
+    leaderboard_text.push_str("﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n");
+
     for (index, (id, u)) in info.iter().enumerate().take(10) {
         let user_name = id.to_user(ctx).await?.name;
-        let score = if index == 0 {
-            format!("- {}", u)
+        let rank = if index == 0 {
+            format!(
+                "\u{3000}** #{} ** \u{3000}\u{3000} **{}** \u{3000}~({})\n",
+                index + 1,
+                user_name,
+                u
+            )
+        } else if index > 9 {
+            format!(
+                "\u{3000}** #{} ** \u{3000}\u{2000} *{}*\n",
+                index + 1,
+                user_name,
+            )
         } else {
-            "".to_string()
+            format!(
+                "\u{3000}** #{} ** \u{3000}\u{3000} *{}*\n",
+                index + 1,
+                user_name,
+            )
         };
-        leaderboard_text.push_str(&format!("**#{}**: {} {}\n", index + 1, user_name, score));
+
+        leaderboard_text.push_str(&rank);
     }
 
     let embed = serenity::CreateEmbed::new()
