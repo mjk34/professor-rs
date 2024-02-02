@@ -289,13 +289,23 @@ impl UserData {
         res.is_some()
     }
 
-    pub fn get_submissions(&self) -> Vec<String> {
+    pub fn get_submissions(&self, show_score: bool) -> Vec<String> {
         let mut submissions: Vec<String> = vec![];
         for (id, clip) in self.submits.iter().enumerate() {
             if let Some(clip) = clip {
+                let score = if let Some(s) = clip.rating {
+                    format!("[{}/5]", s)
+                } else {
+                    "".to_string()
+                };
                 let clip_string = format!(
-                    "{} - {} [{}]({})",
+                    "{}{}- {} [{}]({})",
                     NUMBER_EMOJS[id],
+                    if show_score {
+                        format!(" {} ", score)
+                    } else {
+                        "".to_string()
+                    },
                     clip.date.date_naive(),
                     clip.title,
                     clip.link
@@ -331,7 +341,7 @@ impl UserData {
     // }
 }
 
-#[derive(Default, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct VoiceUser {
     pub joined: DateTime<Utc>,
     pub last_reward: Option<DateTime<Utc>>,

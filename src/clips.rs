@@ -110,7 +110,7 @@ pub async fn submit_clip(ctx: Context<'_>, title: String, link: String) -> Resul
 }
 
 // View clip submission summary
-#[poise::command(prefix_command, slash_command, track_edits)]
+#[poise::command(prefix_command, slash_command, track_edits, check = "check_mod")]
 pub async fn submit_list(ctx: Context<'_>) -> Result<(), Error> {
     let guild = match ctx.guild() {
         Some(guild) => guild.clone(),
@@ -121,16 +121,50 @@ pub async fn submit_list(ctx: Context<'_>) -> Result<(), Error> {
     let banner_url = guild.banner_url().unwrap_or_default();
     let data = &ctx.data().users;
 
+    let mut all_clips = Vec::new();
+
     let mut desc = "".to_string();
     for x in data.iter() {
         let (id, u) = x.pair();
         let u = u.read().await;
+        for c in &u.submits {
+            if let Some(c) = c {
+                all_clips.push((*id, c.clone()));
+            }
+        }
         let author = id.to_user(ctx).await.unwrap();
-        let clips = u.get_submissions();
+        let clips = u.get_submissions(true);
         desc += &format!("\n**{}:**\n", author.name);
         desc += &clips.join("\n ");
     }
 
+    let mut rated_clips = Vec::new();
+    for (id, c) in all_clips {
+        if c.rating.is_some() {
+            rated_clips.push((id, c));
+        }
+    }
+
+    rated_clips.sort_by(|a, b| {
+        b.1.rating
+            .unwrap()
+            .partial_cmp(&a.1.rating.unwrap())
+            .unwrap()
+    });
+
+    let top_ten = rated_clips.iter().take(10);
+    let mut top_ten_desc = String::new();
+    for (id, c) in top_ten {
+        let author = id.to_user(ctx).await.unwrap();
+        let rating = c.rating.unwrap();
+
+        top_ten_desc += &format!(
+            "**{}** - [{}/5]\n [{}]({})\n",
+            author.name, rating, c.title, c.link
+        );
+    }
+
+    let desc = top_ten_desc + &desc;
     ctx.send(
         poise::CreateReply::default().embed(
             serenity::CreateEmbed::default()
@@ -158,7 +192,7 @@ pub async fn edit_list(ctx: Context<'_>) -> Result<(), Error> {
     let u = data.get(&id).unwrap();
     let clips = u.read().await;
 
-    let desc = clips.get_submissions().join("\n");
+    let desc = clips.get_submissions(false).join("\n");
 
     if clips.submits.is_empty() {
         ctx.send(
