@@ -2,6 +2,7 @@ use crate::serenity;
 use chrono::prelude::{DateTime, Utc};
 
 use dashmap::DashMap;
+
 use serde::{Deserialize, Serialize};
 use serenity::Color;
 
@@ -349,6 +350,20 @@ impl VoiceUser {
         }
     }
 }
+
+#[derive(Default, Serialize, Deserialize)]
+pub struct SaveData {
+    pub users: DashMap<serenity::UserId, UserData>,
+}
+
+impl std::ops::Deref for SaveData {
+    type Target = DashMap<serenity::UserId, UserData>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.users
+    }
+}
+
 /// User data, which is stored and accessible in all command invocations
 #[derive(Default)]
 pub struct Data {
@@ -395,24 +410,38 @@ impl Data {
 
         Ok(())
     }
+
     /// Attempts to save the data to a file
-    ///
-    /// Make sure that the Mutex is unlocked before calling this function
     pub async fn save(&self) {
-        // let users = self.users;
-        // let encoded = serde_json::to_string(&users).unwrap();
-        // fs::write("data.json", encoded).expect("Failed to write binary save file");
+        let users = Arc::clone(&self.users);
+        let users_save = DashMap::new();
+
+        for x in users.iter() {
+            let (id, u) = x.pair();
+            let u = u.read().await;
+            users_save.insert(*id, u.clone());
+        }
+
+        let users_save = SaveData { users: users_save };
+
+        let encoded = serde_json::to_string(&users_save).unwrap();
+        fs::write("data.json", encoded).expect("Failed to write binary save file");
     }
 
     /// Attempts to load the Data from a file, otherwise return a default
     pub fn load() -> Data {
-        let _data = fs::read_to_string("data.json").ok();
-        // let users: HashMap<serenity::UserId, Arc<RwLock<UserData>>> = if let Some(file) = data {
-        // serde_json::from_str(&file).expect("Old data format?")
-        // } else {
-        // HashMap::default()
-        // };
+        let data = fs::read_to_string("data.json").ok();
+        let users_data: SaveData = if let Some(file) = data {
+            serde_json::from_str(&file).expect("Old data format?")
+        } else {
+            SaveData::default()
+        };
+
         let users = Arc::new(DashMap::default());
+        for x in users_data.iter() {
+            let (id, u) = x.pair();
+            users.insert(*id, Arc::new(RwLock::new(u.clone())));
+        }
 
         let meme = read_lines("reference/meme.txt");
         let ponder = read_lines("reference/ponder.txt");
