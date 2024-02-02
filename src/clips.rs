@@ -17,6 +17,17 @@ use rand::thread_rng;
 use regex::Regex;
 use tokio::sync::RwLock;
 
+pub async fn check_mod(ctx: Context<'_>) -> Result<bool, Error> {
+    let mod_id = ctx.data().mod_id;
+    let guild_id = ctx.guild_id().unwrap();
+    if let Ok(b) = ctx.author().has_role(ctx, guild_id, mod_id).await {
+        if b {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 fn is_youtube_or_medal_url(url: &str) -> bool {
     let youtube_regex =
         Regex::new(r"(https?://)?(www\.)?(youtube\.com/watch\?v=|youtu\.be/).+").unwrap();
@@ -257,7 +268,7 @@ pub async fn edit_list(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-#[poise::command(prefix_command, slash_command, track_edits)]
+#[poise::command(prefix_command, slash_command, track_edits, check = "check_mod")]
 pub async fn next_clip(ctx: Context<'_>) -> Result<(), Error> {
     let data = &ctx.data().users;
 
