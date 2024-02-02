@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-poise = {version = "0.6.1", features=["cache"]}
+poise = {version = "0.6.1", features=["cache", "collector"]}
 #poise = { path = "../poise-0.6.1" }
 #poise = {git = "https://github.com/kangalioo/poise", features=["collector"]}
 

@@ -3,6 +3,7 @@ use chrono::prelude::{DateTime, Utc};
 
 use dashmap::DashMap;
 
+use poise::serenity_prelude::RoleId;
 use serde::{Deserialize, Serialize};
 use serenity::Color;
 
@@ -28,10 +29,10 @@ pub const NUMBER_EMOJS: [&str; 10] = [
 // General Structures
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct ClipData {
-    title: String,
-    link: String,
-    date: DateTime<Utc>,
-    rating: Option<u8>,
+    pub title: String,
+    pub link: String,
+    pub date: DateTime<Utc>,
+    pub rating: Option<f64>,
 }
 
 impl ClipData {
@@ -250,7 +251,7 @@ impl UserData {
     }
 
     pub fn add_submit(&mut self, new_submit: ClipData) -> bool {
-        for i in 0..3 {
+        for i in 0..5 {
             let s = self.submits.get_mut(i);
             if let Some(s) = s {
                 if s.is_none() {
@@ -384,6 +385,7 @@ pub struct Data {
     pub pong: Vec<String>,
     pub d20f: Vec<String>,
     pub gpt_key: String,
+    pub mod_id: RoleId,
     pub pokedex: Vec<PokeData>,
     pub type_matrix: Vec<Vec<f32>>,
     pub type_name: Vec<String>,
@@ -457,6 +459,13 @@ impl Data {
         let d20f = read_lines("reference/d20.txt");
 
         let gpt_key = env::var("API_KEY").expect("missing GPT API_KEY");
+
+        let mod_id = RoleId::new(
+            env::var("MOD_ID")
+                .expect("Missing moderator ID")
+                .parse()
+                .unwrap(),
+        );
 
         // EVENT DATA ////////////////////////////////////////////////////////////////////////////////////////
         let poke_string = read_lines("event/pokemon.txt");
@@ -614,6 +623,7 @@ impl Data {
             pong,
             d20f,
             gpt_key,
+            mod_id,
             pokedex,
             type_matrix,
             type_name,

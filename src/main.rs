@@ -59,6 +59,7 @@ async fn main() {
                 clips::submit_clip(),
                 clips::submit_list(),
                 clips::edit_list(),
+                clips::next_clip(),
                 event::search_pokemon(),
                 event::test_matchup(),
                 event::wild_encounter(),
