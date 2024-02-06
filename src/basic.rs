@@ -1,10 +1,16 @@
 use std::collections::HashMap;
 
+use std::sync::Arc;
+use std::time::Duration;
+
 use chrono::prelude::Utc;
 use openai_api_rs::v1::error::APIError;
-use poise::serenity_prelude::UserId;
+use poise::serenity_prelude::futures::StreamExt;
+
+use poise::serenity_prelude::{EditMessage, UserId};
 use rand::seq::SliceRandom;
 use rand::{thread_rng, Rng};
+use tokio::sync::RwLock;
 
 use crate::data::VoiceUser;
 use crate::serenity;
@@ -403,73 +409,164 @@ pub async fn leaderboard(ctx: Context<'_>, display: Option<String>) -> Result<()
         let (id, u) = x.pair();
         let u = u.read().await;
 
+        let user_name = id.to_user(ctx).await?.name;
+
         if fortune.contains(&display) {
-            info.push((*id, u.get_luck_score(), u.get_luck()));
+            info.push((*id, u.get_luck_score(), u.get_luck(), user_name));
         } else if level.contains(&display) {
             let total_xp = u.get_level() * 80 + u.get_xp();
-            info.push((*id, total_xp, format!("Level {}", u.get_level())));
+            info.push((*id, total_xp, format!("Level {}", u.get_level()), user_name));
         } else {
-            info.push((*id, u.get_creds(), String::new()));
+            info.push((*id, u.get_creds(), String::new(), user_name));
         }
     }
     info.sort_by(|a, b| b.1.cmp(&a.1));
 
-    let mut leaderboard_text = String::new();
-    leaderboard_text.push_str("﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n");
+    let total_pages = (&info.len()) / 10 + 1;
 
-    for (index, (id, u, s)) in info.iter().enumerate().take(10) {
-        let user_name = id.to_user(ctx).await?.name;
-        let rank = if index == 0 {
-            if fortune.contains(&display) || level.contains(&display) {
+    fn get_learderboard(
+        info: &Vec<(UserId, i32, String, String)>,
+        display: &Option<String>,
+        fortune: &Vec<Option<String>>,
+        level: &Vec<Option<String>>,
+        start: usize,
+    ) -> String {
+        let mut leaderboard_text = String::new();
+        leaderboard_text.push_str("﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n");
+
+        for (index, (_id, u, s, user_name)) in info.iter().enumerate().skip(start).take(10) {
+            let rank = if index == 0 {
+                if fortune.contains(display) || level.contains(display) {
+                    format!(
+                        "\u{3000}** #{} ** \u{3000}\u{3000} **{}** \u{3000}\u{3000}~({})\n",
+                        index + 1,
+                        user_name,
+                        s
+                    )
+                } else {
+                    format!(
+                        "\u{3000}** #{} ** \u{3000}\u{3000} **{}** \u{3000}\u{3000}~({})\n",
+                        index + 1,
+                        user_name,
+                        u
+                    )
+                }
+            } else if index > 9 {
                 format!(
-                    "\u{3000}** #{} ** \u{3000}\u{3000} **{}** \u{3000}\u{3000}~({})\n",
+                    "\u{3000}** #{} ** \u{3000}\u{2000} *{}*\n",
                     index + 1,
                     user_name,
-                    s
                 )
             } else {
                 format!(
-                    "\u{3000}** #{} ** \u{3000}\u{3000} **{}** \u{3000}\u{3000}~({})\n",
+                    "\u{3000}** #{} ** \u{3000}\u{3000} *{}*\n",
                     index + 1,
                     user_name,
-                    u
                 )
-            }
-        } else if index > 9 {
-            format!(
-                "\u{3000}** #{} ** \u{3000}\u{2000} *{}*\n",
-                index + 1,
-                user_name,
-            )
-        } else {
-            format!(
-                "\u{3000}** #{} ** \u{3000}\u{3000} *{}*\n",
-                index + 1,
-                user_name,
-            )
-        };
+            };
 
-        leaderboard_text.push_str(&rank);
+            leaderboard_text.push_str(&rank);
+        }
+        leaderboard_text
     }
+    let buttons = vec![
+        serenity::CreateButton::new("open_modal")
+            .label("<-")
+            .custom_id("back".to_string())
+            .style(poise::serenity_prelude::ButtonStyle::Primary),
+        serenity::CreateButton::new("open_modal")
+            .label("->")
+            .custom_id("next".to_string())
+            .style(poise::serenity_prelude::ButtonStyle::Primary),
+    ];
+    let components = vec![serenity::CreateActionRow::Buttons(buttons)];
+
+    let first_thumbnail = info[0]
+        .0
+        .to_user(ctx)
+        .await?
+        .avatar_url()
+        .unwrap_or_default();
+
+    let leaderboard_text = get_learderboard(&info, &display, &fortune, &level, 0);
 
     let embed = serenity::CreateEmbed::new()
         .title("Leaderboard")
         .color(Color::TEAL)
-        .thumbnail(
-            info[0]
-                .0
-                .to_user(ctx)
-                .await?
-                .avatar_url()
-                .unwrap_or_default(),
-        )
+        .thumbnail(first_thumbnail.clone())
         .description("Here lists the most accomplished in UwUversity!")
         .field("Rankings", leaderboard_text, false)
         .footer(serenity::CreateEmbedFooter::new(
             "@~ powered by UwUntu & RustyBamboo",
         ));
 
-    ctx.send(poise::CreateReply::default().embed(embed)).await?;
+    let reply = ctx
+        .send(
+            poise::CreateReply::default()
+                .embed(embed)
+                .components(components),
+        )
+        .await?;
+
+    let msg_og = Arc::new(RwLock::new(reply.into_message().await?));
+
+    let msg = Arc::clone(&msg_og);
+
+    let mut reactions = msg
+        .read()
+        .await
+        .await_component_interactions(ctx)
+        .timeout(Duration::new(60, 0))
+        .stream();
+
+    let ctx = ctx.serenity_context().clone();
+
+    let info = info.clone();
+    let display = display.clone();
+    let fortune = fortune.clone();
+    let level = level.clone();
+    tokio::spawn(async move {
+        let mut current_page: usize = 0;
+        while let Some(reaction) = reactions.next().await {
+            let label = reaction.data.custom_id.as_str();
+            match label {
+                "back" => {
+                    if current_page > 0 {
+                        current_page -= 10;
+                    }
+                }
+                "next" => {
+                    if current_page < total_pages - 1 {
+                        current_page += 10;
+                    }
+                }
+                _ => (),
+            };
+
+            let leaderboard_text =
+                get_learderboard(&info, &display, &fortune, &level, current_page);
+
+            reaction
+                .create_response(&ctx, serenity::CreateInteractionResponse::Acknowledge)
+                .await
+                .unwrap();
+
+            let embed = serenity::CreateEmbed::new()
+                .title("Leaderboard")
+                .color(Color::TEAL)
+                .thumbnail(first_thumbnail.clone())
+                .description("Here lists the most accomplished in UwUversity!")
+                .field("Rankings", leaderboard_text, false)
+                .footer(serenity::CreateEmbedFooter::new(
+                    "@~ powered by UwUntu & RustyBamboo",
+                ));
+            msg.write()
+                .await
+                .edit(&ctx, EditMessage::default().embed(embed))
+                .await
+                .unwrap();
+        }
+    });
 
     Ok(())
 }
