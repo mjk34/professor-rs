@@ -6,13 +6,13 @@ use std::time::Duration;
 use chrono::prelude::Utc;
 use openai_api_rs::v1::error::APIError;
 use poise::serenity_prelude::futures::StreamExt;
-
-use poise::serenity_prelude::{EditMessage, UserId};
+use poise::serenity_prelude::model::user;
+use poise::serenity_prelude::{EditMessage, Reaction, ReactionType, UserId};
 use rand::seq::SliceRandom;
 use rand::{thread_rng, Rng};
 use tokio::sync::RwLock;
 
-use crate::data::VoiceUser;
+use crate::data::{self, VoiceUser};
 use crate::serenity;
 use crate::{Context, Error};
 use serenity::Color;
@@ -48,7 +48,7 @@ pub async fn ping(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-// use gpt-3.5-turbo to generate fun responses to user prompts
+/// use gpt-3.5-turbo to generate fun responses to user prompts
 async fn gpt_string(ctx: Context<'_>, prompt: String) -> Result<String, APIError> {
     let api_key = &ctx.data().gpt_key;
     let client = Client::new(api_key.to_string());
@@ -565,6 +565,183 @@ pub async fn leaderboard(ctx: Context<'_>, display: Option<String>) -> Result<()
                 .edit(&ctx, EditMessage::default().embed(embed))
                 .await
                 .unwrap();
+        }
+    });
+
+    Ok(())
+}
+
+/// buy tickets for the battle pass raffle
+#[poise::command(slash_command)]
+pub async fn buy_tickets(ctx: Context<'_>) -> Result<(), Error> {
+    let user = ctx.author();
+    let data = &ctx.data().users;
+    let u = data.get_mut(&user.id).unwrap();
+    let mut user_data = u.write().await;
+
+    let tickets = user_data.get_tickets();
+    let creds = user_data.get_creds();
+
+    if creds <= 0 {
+        ctx.send(
+            poise::CreateReply::default().embed(
+                serenity::CreateEmbed::default()
+                    .title("Buy Tickets")
+                    .description("You are to broke to even view the ticket costs...")
+                    .colour(serenity::Color::RED)
+                    .footer(serenity::CreateEmbedFooter::new(
+                        "@~ powered by UwUntu & RustyBamboo",
+                    )),
+            ),
+        )
+        .await?;
+        return Ok(());
+    }
+
+    let tkcost1 = 2000 + 300 * (tickets);
+    let tkcost2 = 2000 + 300 * (tickets + 1);
+    let tkcost3 = 2000 + 300 * (tickets + 2);
+    let mut tkcostmax = 0;
+    let mut tkcount = 0;
+    while tkcostmax <= creds {
+        tkcostmax += 2000 + 300 * (tickets + tkcount);
+        tkcount += 1;
+    }
+
+    let mut buttons = Vec::new();
+    for i in 0..5 {
+        if i == 0 {
+            let button_none = serenity::CreateButton::new("open_modal")
+                .label("None")
+                .custom_id("buy-none".to_string())
+                .style(poise::serenity_prelude::ButtonStyle::Secondary);
+            buttons.push(button_none);
+        } else if i == 4 {
+            let button_max = serenity::CreateButton::new("open_modal")
+                .label("MAX")
+                .custom_id("buy-max".to_string())
+                .style(poise::serenity_prelude::ButtonStyle::Danger);
+            buttons.push(button_max);
+        } else {
+            let emoji = ReactionType::Unicode(data::NUMBER_EMOJS[i].to_string());
+            let button = serenity::CreateButton::new("open_modal")
+                .label("")
+                .custom_id(format!("buy-{}", i))
+                .emoji(emoji)
+                .style(poise::serenity_prelude::ButtonStyle::Primary);
+            buttons.push(button);
+        }
+    }
+
+    let components = vec![serenity::CreateActionRow::Buttons(buttons)];
+    let desc = format!(
+        "Buy 1 Ticket (cost: {})\nBuy 2 Tickets (cost: {})\n Buy 3 Tickets (cost: {})\n Buy MAX Tickets (cost: {})",
+        tkcost1, tkcost2, tkcost3, tkcostmax
+    );
+
+    let reply = ctx
+        .send(
+            poise::CreateReply::default()
+                .embed(
+                    serenity::CreateEmbed::default()
+                        .title("Buy Tickets".to_string())
+                        .description(desc)
+                        .colour(serenity::Color::DARK_GREEN)
+                        .footer(serenity::CreateEmbedFooter::new(
+                            "@~ powered by UwUntu & RustyBamboo",
+                        )),
+                )
+                .components(components),
+        )
+        .await?;
+
+    let msg_og = Arc::new(RwLock::new(reply.into_message().await?));
+
+    let msg = Arc::clone(&msg_og);
+
+    let mut reactions = msg
+        .read()
+        .await
+        .await_component_interactions(ctx)
+        .timeout(Duration::new(60, 0))
+        .stream();
+
+    tokio::spawn(async move {
+        while let Some(reaction) = reactions.next().await {
+            let bought_tickets;
+            let purchase_cost;
+
+            let react_id = reaction.member.clone().unwrap_or_default().user.id.clone();
+            if react_id == &user.id {
+                match reaction.data.custom_id.as_str() {
+                    "buy-1" => {
+                        bought_tickets = 1;
+                        purchase_cost = tkcost1;
+                    }
+
+                    "buy-2" => {
+                        bought_tickets = 2;
+                        purchase_cost = tkcost2;
+                    }
+
+                    "buy-3" => {
+                        bought_tickets = 3;
+                        purchase_cost = tkcost3;
+                    }
+
+                    "buy-max" => {
+                        bought_tickets = tkcount + 1;
+                        purchase_cost = tkcostmax;
+                    }
+
+                    _ => {
+                        msg.write()
+                            .await
+                            .edit(
+                                &ctx,
+                                EditMessage::default()
+                                    .embed(
+                                        serenity::CreateEmbed::new()
+                                            .title("Buy Tickets".to_string())
+                                            .description("Just browsing I see, come again!")
+                                            .color(Color::new(6053215))
+                                            .footer(serenity::CreateEmbedFooter::new(
+                                                "@~ powered by UwUntu & RustyBamboo",
+                                            )),
+                                    )
+                                    .components(Vec::new()),
+                            )
+                            .await
+                            .unwrap();
+                        return;
+                    }
+                }
+
+                msg.write()
+                    .await
+                    .edit(
+                        &ctx,
+                        EditMessage::default()
+                            .embed(
+                                serenity::CreateEmbed::new()
+                                    .title("Buy Tickets".to_string())
+                                    .description(format!(
+                                        "You purchased {} ticket(s)! Ganbatte!! (-{} creds)",
+                                        bought_tickets, purchase_cost
+                                    ))
+                                    .color(Color::new(65280))
+                                    .footer(serenity::CreateEmbedFooter::new(
+                                        "@~ powered by UwUntu & RustyBamboo",
+                                    )),
+                            )
+                            .components(Vec::new()),
+                    )
+                    .await
+                    .unwrap();
+                user_data.sub_creds(purchase_cost);
+                user_data.add_tickets(bought_tickets);
+                return;
+            }
         }
     });
 

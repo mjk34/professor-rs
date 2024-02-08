@@ -118,6 +118,7 @@ pub struct UserData {
     last_daily: DateTime<Utc>,
 
     pub submits: Vec<Option<ClipData>>,
+    tickets: i32,
     wish: WishData,
 
     event: EventData,
@@ -199,6 +200,15 @@ impl UserData {
         true
     }
 
+    pub fn add_tickets(&mut self, tickets: i32) -> bool {
+        if tickets < 1 {
+            return false;
+        }
+
+        self.tickets += tickets;
+        true
+    }
+
     pub fn add_wishes(&mut self, wishes: i32) -> bool {
         if wishes < 1 {
             return false;
@@ -210,6 +220,10 @@ impl UserData {
 
     pub fn get_creds(&self) -> i32 {
         self.creds
+    }
+
+    pub fn get_tickets(&self) -> i32 {
+        self.tickets
     }
 
     pub fn get_luck(&self) -> String {

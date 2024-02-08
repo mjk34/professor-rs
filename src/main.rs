@@ -56,6 +56,7 @@ async fn main() {
                 basic::voice_status(),
                 basic::info(),
                 basic::leaderboard(),
+                basic::buy_tickets(),
                 clips::submit_clip(),
                 clips::submit_list(),
                 clips::edit_list(),
