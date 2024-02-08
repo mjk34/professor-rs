@@ -85,18 +85,18 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
     let mut user_data = u.write().await;
 
     // check if daily is available
-    if !user_data.check_daily() {
-        ctx.send(
-            poise::CreateReply::default().embed(
-                serenity::CreateEmbed::new()
-                    .title("Daily")
-                    .description("Your next **/uwu** is tomorrow")
-                    .thumbnail(user.avatar_url().unwrap_or_default()),
-            ),
-        )
-        .await?;
-        return Ok(());
-    }
+    // if !user_data.check_daily() {
+    //     ctx.send(
+    //         poise::CreateReply::default().embed(
+    //             serenity::CreateEmbed::new()
+    //                 .title("Daily")
+    //                 .description("Your next **/uwu** is tomorrow")
+    //                 .thumbnail(user.avatar_url().unwrap_or_default()),
+    //         ),
+    //     )
+    //     .await?;
+    //     return Ok(());
+    // }
 
     let d20 = thread_rng().gen_range(1..21);
     let check = thread_rng().gen_range(6..15);
@@ -363,10 +363,11 @@ pub async fn wallet(ctx: Context<'_>) -> Result<(), Error> {
     let xp: i32 = user_data.get_xp();
     let next_level = user_data.get_next_level();
     let creds: i32 = user_data.get_creds();
+    let tickets: i32 = user_data.get_tickets();
 
     let desc = format!(
-        "**Level {} **  -  {}/{}\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\nDaily UwU........... . . . **{}**\nAverage Luck..... . . . **{}**\nClaim Bonus....... . . . **{}**\n\nTotal Creds: **{}**\n",
-        level, xp, next_level, daily, luck, claim, creds
+        "**Level {} **  -  {}/{}\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\nDaily UwU........... . . . **{}**\nAverage Luck..... . . . **{}**\nClaim Bonus....... . . . **{}**\n\nTotal Creds: **{}** \u{3000}\u{2000}Tickets: **{}**\n",
+        level, xp, next_level, daily, luck, claim, creds, tickets
     );
 
     ctx.send(
@@ -583,31 +584,25 @@ pub async fn buy_tickets(ctx: Context<'_>) -> Result<(), Error> {
     let tickets = user_data.get_tickets();
     let creds = user_data.get_creds();
 
-    if creds <= 0 {
-        ctx.send(
-            poise::CreateReply::default().embed(
-                serenity::CreateEmbed::default()
-                    .title("Buy Tickets")
-                    .description("You are to broke to even view the ticket costs...")
-                    .colour(serenity::Color::RED)
-                    .footer(serenity::CreateEmbedFooter::new(
-                        "@~ powered by UwUntu & RustyBamboo",
-                    )),
-            ),
-        )
-        .await?;
-        return Ok(());
-    }
-
     let tkcost1 = 2000 + 300 * (tickets);
-    let tkcost2 = 2000 + 300 * (tickets + 1);
-    let tkcost3 = 2000 + 300 * (tickets + 2);
+    let tkcost2 = (2000 + 300 * (tickets + 1)) + tkcost1;
+    let tkcost3 = (2000 + 300 * (tickets + 2)) + tkcost2;
+
     let mut tkcostmax = 0;
     let mut tkcount = 0;
-    while tkcostmax <= creds {
+    let mut tkcreds = creds;
+    while 2000 + 300 * (tickets + tkcount) <= tkcreds {
+        tkcreds -= 2000 + 300 * (tickets + tkcount);
         tkcostmax += 2000 + 300 * (tickets + tkcount);
         tkcount += 1;
     }
+
+    println!("{}", tkcount);
+
+    let mut desc = format!(
+        "Welcome to the Shop, buy tickets here to participate in the Server's Battle Pass Raffle! (Total: {})\n\n", 
+        creds
+    );
 
     let mut buttons = Vec::new();
     for i in 0..5 {
@@ -618,35 +613,58 @@ pub async fn buy_tickets(ctx: Context<'_>) -> Result<(), Error> {
                 .style(poise::serenity_prelude::ButtonStyle::Secondary);
             buttons.push(button_none);
         } else if i == 4 {
-            let button_max = serenity::CreateButton::new("open_modal")
-                .label("MAX")
-                .custom_id("buy-max".to_string())
-                .style(poise::serenity_prelude::ButtonStyle::Danger);
-            buttons.push(button_max);
-        } else {
+            if tkcount > 0 {
+                let button_max = serenity::CreateButton::new("open_modal")
+                    .label("MAX")
+                    .custom_id("buy-max".to_string())
+                    .style(poise::serenity_prelude::ButtonStyle::Danger);
+
+                buttons.push(button_max);
+                desc +=
+                    format!("\nBuy **MAX** ({} Tickets) . . . {}\n", tkcount, tkcostmax).as_str();
+            }
+        } else if i == 1 && tkcost1 <= creds
+            || i == 2 && tkcost2 <= creds
+            || i == 3 && tkcost3 <= creds
+        {
             let emoji = ReactionType::Unicode(data::NUMBER_EMOJS[i].to_string());
             let button = serenity::CreateButton::new("open_modal")
                 .label("")
                 .custom_id(format!("buy-{}", i))
                 .emoji(emoji)
                 .style(poise::serenity_prelude::ButtonStyle::Primary);
+
             buttons.push(button);
+
+            if i == 1 {
+                desc += format!("Buy **{}** Ticket.............. . . . {}\n", i, tkcost1).as_str();
+            } else if i == 2 {
+                desc += format!("Buy **{}** Ticket.............. . . . {}\n", i, tkcost2).as_str();
+            } else if i == 3 {
+                desc += format!("Buy **{}** Ticket.............. . . . {}\n", i, tkcost3).as_str();
+            }
+        } else {
+            if i == 1 {
+                desc +=
+                    format!("~~Buy **{}** Ticket~~.............. . . . {}\n", i, tkcost1).as_str();
+            } else if i == 2 {
+                desc +=
+                    format!("~~Buy **{}** Ticket~~.............. . . . {}\n", i, tkcost2).as_str();
+            } else if i == 3 {
+                desc +=
+                    format!("~~Buy **{}** Ticket~~.............. . . . {}\n", i, tkcost3).as_str();
+            }
         }
     }
 
     let components = vec![serenity::CreateActionRow::Buttons(buttons)];
-    let desc = format!(
-        "Buy 1 Ticket (cost: {})\nBuy 2 Tickets (cost: {})\n Buy 3 Tickets (cost: {})\n Buy MAX Tickets (cost: {})",
-        tkcost1, tkcost2, tkcost3, tkcostmax
-    );
-
     let reply = ctx
         .send(
             poise::CreateReply::default()
                 .embed(
                     serenity::CreateEmbed::default()
                         .title("Buy Tickets".to_string())
-                        .description(desc)
+                        .description(&desc)
                         .colour(serenity::Color::DARK_GREEN)
                         .footer(serenity::CreateEmbedFooter::new(
                             "@~ powered by UwUntu & RustyBamboo",
@@ -660,11 +678,12 @@ pub async fn buy_tickets(ctx: Context<'_>) -> Result<(), Error> {
 
     let msg = Arc::clone(&msg_og);
 
-    let reactions = msg
+    let mut reactions = msg
         .read()
         .await
         .await_component_interactions(ctx)
-        .timeout(Duration::new(60, 0));
+        .timeout(Duration::new(60, 0))
+        .stream();
 
     let ctx = ctx.serenity_context().clone();
 
@@ -673,8 +692,7 @@ pub async fn buy_tickets(ctx: Context<'_>) -> Result<(), Error> {
     let u = Arc::clone(&u);
 
     tokio::spawn(async move {
-        let mut user_data = u.write().await;
-        if let Some(reaction) = reactions.await {
+        while let Some(reaction) = reactions.next().await {
             let bought_tickets;
             let purchase_cost;
 
@@ -697,7 +715,7 @@ pub async fn buy_tickets(ctx: Context<'_>) -> Result<(), Error> {
                     }
 
                     "buy-max" => {
-                        bought_tickets = tkcount + 1;
+                        bought_tickets = tkcount;
                         purchase_cost = tkcostmax;
                     }
 
@@ -745,10 +763,33 @@ pub async fn buy_tickets(ctx: Context<'_>) -> Result<(), Error> {
                     )
                     .await
                     .unwrap();
+                let mut user_data = u.write().await;
+
                 user_data.sub_creds(purchase_cost);
                 user_data.add_tickets(bought_tickets);
+
+                return;
             }
         }
+
+        msg.write()
+            .await
+            .edit(
+                &ctx,
+                EditMessage::default()
+                    .embed(
+                        serenity::CreateEmbed::default()
+                            .title("Buy Tickets".to_string())
+                            .description(&desc)
+                            .colour(serenity::Color::DARK_GREEN)
+                            .footer(serenity::CreateEmbedFooter::new(
+                                "@~ powered by UwUntu & RustyBamboo",
+                            )),
+                    )
+                    .components(Vec::new()),
+            )
+            .await
+            .unwrap();
     });
 
     Ok(())
