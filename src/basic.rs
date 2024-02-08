@@ -6,8 +6,8 @@ use std::time::Duration;
 use chrono::prelude::Utc;
 use openai_api_rs::v1::error::APIError;
 use poise::serenity_prelude::futures::StreamExt;
-use poise::serenity_prelude::model::user;
-use poise::serenity_prelude::{EditMessage, Reaction, ReactionType, UserId};
+
+use poise::serenity_prelude::{EditMessage, ReactionType, UserId};
 use rand::seq::SliceRandom;
 use rand::{thread_rng, Rng};
 use tokio::sync::RwLock;
@@ -576,8 +576,9 @@ pub async fn leaderboard(ctx: Context<'_>, display: Option<String>) -> Result<()
 pub async fn buy_tickets(ctx: Context<'_>) -> Result<(), Error> {
     let user = ctx.author();
     let data = &ctx.data().users;
-    let u = data.get_mut(&user.id).unwrap();
-    let mut user_data = u.write().await;
+
+    let u = data.get(&user.id).unwrap();
+    let user_data = u.read().await;
 
     let tickets = user_data.get_tickets();
     let creds = user_data.get_creds();
@@ -659,20 +660,26 @@ pub async fn buy_tickets(ctx: Context<'_>) -> Result<(), Error> {
 
     let msg = Arc::clone(&msg_og);
 
-    let mut reactions = msg
+    let reactions = msg
         .read()
         .await
         .await_component_interactions(ctx)
-        .timeout(Duration::new(60, 0))
-        .stream();
+        .timeout(Duration::new(60, 0));
+
+    let ctx = ctx.serenity_context().clone();
+
+    let user_id = user.id;
+
+    let u = Arc::clone(&u);
 
     tokio::spawn(async move {
-        while let Some(reaction) = reactions.next().await {
+        let mut user_data = u.write().await;
+        if let Some(reaction) = reactions.await {
             let bought_tickets;
             let purchase_cost;
 
-            let react_id = reaction.member.clone().unwrap_or_default().user.id.clone();
-            if react_id == &user.id {
+            let react_id = reaction.member.clone().unwrap_or_default().user.id;
+            if react_id == user_id {
                 match reaction.data.custom_id.as_str() {
                     "buy-1" => {
                         bought_tickets = 1;
@@ -740,7 +747,6 @@ pub async fn buy_tickets(ctx: Context<'_>) -> Result<(), Error> {
                     .unwrap();
                 user_data.sub_creds(purchase_cost);
                 user_data.add_tickets(bought_tickets);
-                return;
             }
         }
     });
