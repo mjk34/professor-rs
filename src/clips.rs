@@ -9,23 +9,17 @@
 //!     [x] - next_clip                                                 !
 //!---------------------------------------------------------------------!
 
-use crate::data;
-
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
-use std::time::Duration;
-
-use crate::data::ClipData;
-use crate::{Context, Error};
-
-use crate::serenity;
+use crate::data::{self, ClipData};
+use crate::{serenity, Context, Error};
 use dashmap::DashMap;
 use poise::serenity_prelude::futures::StreamExt;
-
 use poise::serenity_prelude::{EditMessage, ReactionType};
 use rand::seq::IteratorRandom;
 use rand::thread_rng;
 use regex::Regex;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::RwLock;
 
 pub async fn check_mod(ctx: Context<'_>) -> Result<bool, Error> {

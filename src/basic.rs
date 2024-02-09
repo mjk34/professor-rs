@@ -13,28 +13,22 @@
 //!     [x] - info                                                      !
 //!---------------------------------------------------------------------!
 
-use std::collections::HashMap;
-
-use std::sync::Arc;
-use std::time::Duration;
-
-use chrono::prelude::Utc;
-use openai_api_rs::v1::error::APIError;
-use poise::serenity_prelude::futures::StreamExt;
-
-use poise::serenity_prelude::{EditMessage, ReactionType, UserId};
-use rand::seq::SliceRandom;
-use rand::{thread_rng, Rng};
-use tokio::sync::RwLock;
-
 use crate::data::{self, VoiceUser};
-use crate::serenity;
-use crate::{Context, Error};
-use serenity::Color;
-
+use crate::{serenity, Context, Error};
+use chrono::prelude::Utc;
 use openai_api_rs::v1::api::Client;
 use openai_api_rs::v1::chat_completion::{self, ChatCompletionRequest};
 use openai_api_rs::v1::common::GPT3_5_TURBO_16K;
+use openai_api_rs::v1::error::APIError;
+use poise::serenity_prelude::futures::StreamExt;
+use poise::serenity_prelude::{EditMessage, ReactionType, UserId};
+use rand::seq::SliceRandom;
+use rand::{thread_rng, Rng};
+use serenity::Color;
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::sync::RwLock;
 
 /// ping the bot to see if its alive or to play ping pong
 #[poise::command(slash_command)]

@@ -1,17 +1,12 @@
 use crate::serenity;
 use chrono::prelude::{DateTime, Utc};
-
 use dashmap::DashMap;
-
 use poise::serenity_prelude::RoleId;
 use serde::{Deserialize, Serialize};
 use serenity::Color;
-
-use tokio::sync::RwLock;
-
-use std::env;
-use std::fs;
 use std::sync::Arc;
+use std::{env, fs};
+use tokio::sync::RwLock;
 
 pub const NUMBER_EMOJS: [&str; 10] = [
     "\u{0030}\u{FE0F}\u{20E3}",

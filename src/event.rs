@@ -11,14 +11,13 @@
 //!     [ ] - trainer_battle                                            !
 //!---------------------------------------------------------------------!
 
-use std::vec;
-
 use crate::data::PokeData;
 use crate::serenity;
 use crate::{Context, Error};
 use rand::seq::SliceRandom;
 use rand::{thread_rng, Rng};
 use serenity::Color;
+use std::vec;
 
 fn get_pokedata(
     ctx: Context<'_>,
