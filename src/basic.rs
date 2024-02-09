@@ -21,15 +21,8 @@ use openai_api_rs::v1::api::Client;
 use openai_api_rs::v1::chat_completion::{self, ChatCompletionRequest};
 use openai_api_rs::v1::common::GPT3_5_TURBO_16K;
 
-const EMBED_DEFAULT: Color = Color::new(16119285);
-const EMBED_CYAN: Color = Color::new(6943230);
-const EMBED_GOLD: Color = Color::GOLD;
-const EMBED_FAIL: Color = Color::RED;
-const EMBED_SUCCESS: Color = Color::new(65280);
-const EMBED_ERROR: Color = Color::new(6053215);
-
 /// ping the bot to see if its alive or to play ping pong
-#[poise::command(prefix_command, slash_command)]
+#[poise::command(slash_command)]
 pub async fn ping(ctx: Context<'_>) -> Result<(), Error> {
     let author = ctx.author();
     let pong_image = ctx.data().pong.choose(&mut thread_rng()).unwrap();
@@ -44,7 +37,7 @@ pub async fn ping(ctx: Context<'_>) -> Result<(), Error> {
                     "Right back at you <@{}>! ProfessorBot is live! ({}s)",
                     author.id, latency
                 ))
-                .color(EMBED_CYAN)
+                .color(data::EMBED_CYAN)
                 .image(pong_image)
                 .footer(serenity::CreateEmbedFooter::new(
                     "@~ powered by UwUntu & RustyBamboo",
@@ -123,22 +116,22 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
         total = 1200;
         roll_str = "**Critical Success!!**".to_string();
         roll_context = "+".to_string();
-        roll_color = EMBED_GOLD;
+        roll_color = data::EMBED_GOLD;
     } else if d20 == 1 {
         total = fortune;
         roll_str = "**Critical Failure!**".to_string();
         roll_context = "-".to_string();
-        roll_color = EMBED_FAIL;
+        roll_color = data::EMBED_FAIL;
     } else if d20 >= check {
         total = fortune;
         roll_str = "Yippee, you passed.".to_string();
         roll_context = "+".to_string();
-        roll_color = EMBED_SUCCESS;
+        roll_color = data::EMBED_SUCCESS;
     } else {
         total = fortune / 2;
         roll_str = "*oof*, you failed...".to_string();
         roll_context = "+".to_string();
-        roll_color = EMBED_ERROR;
+        roll_color = data::EMBED_ERROR;
     };
 
     let base_ref = ctx.data().d20f.get(28);
@@ -167,7 +160,7 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
                     .title("Daily")
                     .description(&desc)
                     .thumbnail(base_ref.unwrap().to_string())
-                    .color(EMBED_DEFAULT)
+                    .color(data::EMBED_DEFAULT)
                     .image(ponder_image)
                     .footer(serenity::CreateEmbedFooter::new(
                         "@~ powered by UwUntu & RustyBamboo",
@@ -268,7 +261,7 @@ pub async fn claim_bonus(ctx: Context<'_>) -> Result<(), Error> {
                         .title("Claim Bonus")
                         .description(&desc)
                         .thumbnail(base_ref.unwrap().to_string())
-                        .color(EMBED_DEFAULT)
+                        .color(data::EMBED_DEFAULT)
                         .image("https://cdn.discordapp.com/attachments/1196582162057662484/1197008145868918854/de6b5df29abaf7124387b9c86ca46a29.gif?ex=65b9b3b5&is=65a73eb5&hm=b36eb6f0e235b2ca8d37339cd541e55ea397cdf4be5cc080da4bd37cd99c6c3d&")
                         .footer(serenity::CreateEmbedFooter::new(
                             "@~ powered by UwUntu & RustyBamboo",
@@ -298,7 +291,7 @@ pub async fn claim_bonus(ctx: Context<'_>) -> Result<(), Error> {
                         .title("Claim Bonus")
                         .description(&desc)
                         .thumbnail(roll_ref.unwrap().to_string())
-                        .color(EMBED_GOLD)
+                        .color(data::EMBED_GOLD)
                         .image("https://cdn.discordapp.com/attachments/1196582162057662484/1197008145868918854/de6b5df29abaf7124387b9c86ca46a29.gif?ex=65b9b3b5&is=65a73eb5&hm=b36eb6f0e235b2ca8d37339cd541e55ea397cdf4be5cc080da4bd37cd99c6c3d&")
                         .footer(serenity::CreateEmbedFooter::new(
                             "@~ powered by UwUntu & RustyBamboo",
@@ -327,7 +320,7 @@ pub async fn claim_bonus(ctx: Context<'_>) -> Result<(), Error> {
                 serenity::CreateEmbed::new()
                     .title("Claim Bonus")
                     .description(desc)
-                    .color(EMBED_ERROR)
+                    .color(data::EMBED_ERROR)
                     .footer(serenity::CreateEmbedFooter::new(
                         "@~ powered by UwUntu & RustyBamboo",
                     ))
@@ -383,7 +376,7 @@ pub async fn wallet(ctx: Context<'_>) -> Result<(), Error> {
                 .title("Wallet")
                 .description(desc)
                 .thumbnail(user.avatar_url().unwrap_or_default().to_string())
-                .color(EMBED_GOLD)
+                .color(data::EMBED_GOLD)
                 .footer(serenity::CreateEmbedFooter::new(
                     "@~ powered by UwUntu & RustyBamboo",
                 )),
@@ -505,7 +498,7 @@ pub async fn leaderboard(
 
     let embed = serenity::CreateEmbed::new()
         .title("Leaderboard")
-        .color(EMBED_CYAN)
+        .color(data::EMBED_CYAN)
         .thumbnail(first_thumbnail.clone())
         .description("Here lists the most accomplished in UwUversity!")
         .field("Rankings", leaderboard_text, false)
@@ -566,7 +559,7 @@ pub async fn leaderboard(
 
             let embed = serenity::CreateEmbed::new()
                 .title("Leaderboard")
-                .color(EMBED_CYAN)
+                .color(data::EMBED_CYAN)
                 .thumbnail(first_thumbnail.clone())
                 .description("Here lists the most accomplished in UwUversity!")
                 .field("Rankings", leaderboard_text, false)
@@ -677,7 +670,7 @@ pub async fn buy_tickets(ctx: Context<'_>) -> Result<(), Error> {
                     serenity::CreateEmbed::default()
                         .title("Buy Tickets".to_string())
                         .description(&desc)
-                        .colour(EMBED_DEFAULT)
+                        .colour(data::EMBED_DEFAULT)
                         .footer(serenity::CreateEmbedFooter::new(
                             "@~ powered by UwUntu & RustyBamboo",
                         )),
@@ -741,7 +734,7 @@ pub async fn buy_tickets(ctx: Context<'_>) -> Result<(), Error> {
                                         serenity::CreateEmbed::default()
                                             .title("Buy Tickets".to_string())
                                             .description(&desc)
-                                            .colour(EMBED_ERROR)
+                                            .colour(data::EMBED_ERROR)
                                             .footer(serenity::CreateEmbedFooter::new(
                                                 "@~ powered by UwUntu & RustyBamboo",
                                             )),
@@ -766,7 +759,8 @@ pub async fn buy_tickets(ctx: Context<'_>) -> Result<(), Error> {
                                         "You purchased **{}** ticket(s)! Ganbatte!! (-{} creds)",
                                         bought_tickets, purchase_cost
                                     ))
-                                    .color(EMBED_CYAN)
+                                    .image("https://cdn.discordapp.com/attachments/1196582162057662484/1205356602572668958/tenor_6.gif?ex=65d812d0&is=65c59dd0&hm=32cbd3224127f18634b13cf7f878754e69ba5bcd7e19872385406c7ccb7d2218&")
+                                    .color(data::EMBED_CYAN)
                                     .footer(serenity::CreateEmbedFooter::new(
                                         "@~ powered by UwUntu & RustyBamboo",
                                     )),
@@ -793,7 +787,7 @@ pub async fn buy_tickets(ctx: Context<'_>) -> Result<(), Error> {
                         serenity::CreateEmbed::default()
                             .title("Buy Tickets".to_string())
                             .description(&desc)
-                            .colour(EMBED_ERROR)
+                            .colour(data::EMBED_ERROR)
                             .footer(serenity::CreateEmbedFooter::new(
                                 "@~ powered by UwUntu & RustyBamboo",
                             )),
@@ -857,7 +851,7 @@ pub async fn voice_status(ctx: Context<'_>) -> Result<(), Error> {
         serenity::CreateEmbed::new()
             .title("Voice Status")
             .description("No one in voice")
-            .color(EMBED_ERROR)
+            .color(data::EMBED_ERROR)
     };
 
     ctx.send(poise::CreateReply::default().embed(embed)).await?;
@@ -913,7 +907,7 @@ pub async fn info(ctx: Context<'_>) -> Result<(), Error> {
                     num_boosts,
                     emojis
                 ))
-                .colour(EMBED_DEFAULT)
+                .colour(data::EMBED_DEFAULT)
                 .footer(serenity::CreateEmbedFooter::new(
                     "@~ powered by UwUntu & RustyBamboo",
                 )),

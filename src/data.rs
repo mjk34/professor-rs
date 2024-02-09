@@ -26,6 +26,13 @@ pub const NUMBER_EMOJS: [&str; 10] = [
     "\u{0039}\u{FE0F}\u{20E3}",
 ];
 
+pub const EMBED_DEFAULT: Color = Color::new(16119285); // white - transition color
+pub const EMBED_CYAN: Color = Color::new(6943230); // cyan  - good finish color
+pub const EMBED_GOLD: Color = Color::GOLD; // gold - cred related color
+pub const EMBED_FAIL: Color = Color::RED; // red - absolute fails
+pub const EMBED_SUCCESS: Color = Color::new(65280); // green - major success
+pub const EMBED_ERROR: Color = Color::new(6053215); // grey - soft fails
+
 // General Structures
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct ClipData {

@@ -17,15 +17,6 @@ use rand::thread_rng;
 use regex::Regex;
 use tokio::sync::RwLock;
 
-use serenity::Color;
-
-const EMBED_DEFAULT: Color = Color::new(16119285); // white - transition color
-const EMBED_CYAN: Color = Color::new(6943230); // cyan  - good finish color
-const EMBED_GOLD: Color = Color::GOLD; // gold - cred related color
-const EMBED_FAIL: Color = Color::RED; // red - absolute fails
-const EMBED_SUCCESS: Color = Color::new(65280); // green - major success
-const EMBED_ERROR: Color = Color::new(6053215); // grey - soft fails
-
 pub async fn check_mod(ctx: Context<'_>) -> Result<bool, Error> {
     let mod_id = ctx.data().mod_id;
     let guild_id = ctx.guild_id().unwrap();
@@ -46,16 +37,8 @@ fn is_youtube_or_medal_url(url: &str) -> bool {
 }
 
 // Submit game/other clips
-#[poise::command(prefix_command, slash_command)]
+#[poise::command(slash_command)]
 pub async fn submit_clip(ctx: Context<'_>, title: String, link: String) -> Result<(), Error> {
-    let guild = match ctx.guild() {
-        Some(guild) => guild.clone(),
-        None => return Ok(()), // Exit if not in a guild
-    };
-
-    let icon_url = guild.icon_url().unwrap_or_default();
-    let banner_url = guild.banner_url().unwrap_or_default();
-
     if !is_youtube_or_medal_url(&link) {
         ctx.send(
             poise::CreateReply::default().embed(
@@ -63,7 +46,7 @@ pub async fn submit_clip(ctx: Context<'_>, title: String, link: String) -> Resul
                     .title("Submit Clip")
                     .thumbnail("https://cdn.discordapp.com/attachments/1196582162057662484/1197004718631833650/tenor.gif?ex=65b9b084&is=65a73b84&hm=0368979e5bdf0c258f6b344ec2b79826459b3ec4c937374e05ec77f131adf37f&")
                     .description("Invalid link - Link must either be youtube or medal")
-                    .color(EMBED_ERROR)
+                    .color(data::EMBED_ERROR)
                     .footer(serenity::CreateEmbedFooter::new(
                         "@~ powered by UwUntu & RustyBamboo",
                     )),
@@ -80,6 +63,11 @@ pub async fn submit_clip(ctx: Context<'_>, title: String, link: String) -> Resul
 
     let avatar = user.avatar_url().unwrap_or_default().to_string();
 
+    let desc = format!(
+        "Title: \u{3000}**{}**\nLink: \u{3000}**{}**\n",
+        &title, &link
+    );
+
     let clip = ClipData::new(title, link);
 
     let check = user_data.add_submit(clip);
@@ -90,9 +78,9 @@ pub async fn submit_clip(ctx: Context<'_>, title: String, link: String) -> Resul
                 serenity::CreateEmbed::default()
                     .title("Submit Clip")
                     .thumbnail(&avatar)
-                    .image("https://c.tenor.com/nIfKxqBUqQQAAAAC/tenor.gif")
+                    .image("https://cdn.discordapp.com/attachments/1196582162057662484/1205354794588307456/tenor_1.gif?ex=65d81121&is=65c59c21&hm=35114062e5a4516b69da081842189520df9b846bce5b8547f83ad39c91c2d1cd&")
                     .description("Max clips reached...")
-                    .color(EMBED_FAIL)
+                    .color(data::EMBED_FAIL)
                     .footer(serenity::CreateEmbedFooter::new(
                         "@~ powered by UwUntu & RustyBamboo",
                     )),
@@ -105,11 +93,10 @@ pub async fn submit_clip(ctx: Context<'_>, title: String, link: String) -> Resul
     ctx.send(
         poise::CreateReply::default().embed(
             serenity::CreateEmbed::default()
-                .title("Submit Clip")
+                .title("Submission")
                 .thumbnail(&avatar)
-                .image("https://c.tenor.com/hij0LBIt5ucAAAAd/tenor.gif")
-                .description("Uploaded!")
-                .color(EMBED_CYAN)
+                .description(desc)
+                .color(data::EMBED_CYAN)
                 .footer(serenity::CreateEmbedFooter::new(
                     "@~ powered by UwUntu & RustyBamboo",
                 )),
@@ -120,7 +107,7 @@ pub async fn submit_clip(ctx: Context<'_>, title: String, link: String) -> Resul
 }
 
 // View clip submission summary
-#[poise::command(prefix_command, slash_command, track_edits, check = "check_mod")]
+#[poise::command(slash_command, track_edits, check = "check_mod")]
 pub async fn server_clips(ctx: Context<'_>) -> Result<(), Error> {
     let guild = match ctx.guild() {
         Some(guild) => guild.clone(),
@@ -144,8 +131,15 @@ pub async fn server_clips(ctx: Context<'_>) -> Result<(), Error> {
         }
         let author = id.to_user(ctx).await.unwrap();
         let clips = u.get_submissions(true);
-        desc += &format!("\n**{}:**\n", author.name);
-        desc += &clips.join("\n ");
+
+        if !clips.is_empty() {
+            desc += &format!(
+                "\n**{}:**\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n",
+                author.name
+            );
+            desc += &clips.join("\n ");
+            desc += "\n";
+        }
     }
 
     if all_clips.is_empty() {
@@ -154,9 +148,8 @@ pub async fn server_clips(ctx: Context<'_>) -> Result<(), Error> {
                 serenity::CreateEmbed::default()
                     .title("Server Clips")
                     .description("Where are the clips...")
-                    .thumbnail(&icon_url)
-                    .image(&banner_url)
-                    .color(EMBED_ERROR)
+                    .image("https://cdn.discordapp.com/attachments/1196582162057662484/1205354794156429362/tenor_2.gif?ex=65d81121&is=65c59c21&hm=c402afb9f3a578f018657cd60a4b8ec1cefccc09e26b0830701037593852b65d&")
+                    .color(data::EMBED_ERROR)
                     .footer(serenity::CreateEmbedFooter::new(
                         "@~ powered by UwUntu & RustyBamboo",
                     )),
@@ -200,7 +193,7 @@ pub async fn server_clips(ctx: Context<'_>) -> Result<(), Error> {
                 .thumbnail(&icon_url)
                 .image(&banner_url)
                 .description(desc)
-                .color(EMBED_DEFAULT)
+                .color(data::EMBED_CYAN)
                 .footer(serenity::CreateEmbedFooter::new(
                     "@~ powered by UwUntu & RustyBamboo",
                 )),
@@ -211,7 +204,7 @@ pub async fn server_clips(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-#[poise::command(prefix_command, slash_command, track_edits)]
+#[poise::command(slash_command, track_edits)]
 pub async fn my_clips(ctx: Context<'_>) -> Result<(), Error> {
     let author = ctx.author();
     let id = author.id;
@@ -230,8 +223,8 @@ pub async fn my_clips(ctx: Context<'_>) -> Result<(), Error> {
                     .title("My Clips")
                     .description("You have not submitted a clip yet, submit your first clip with /submit-clip!!")
                     .thumbnail(&avatar)
-                    .image("https://c.tenor.com/gjBx2zbdJjAAAAAC/tenor.gif")
-                    .color(EMBED_ERROR)
+                    .image("https://cdn.discordapp.com/attachments/1196582162057662484/1205354793753903104/tenor_3.gif?ex=65d81121&is=65c59c21&hm=32b8b0926677e68d225a2085b4a99ac63d0356b5cb4d05d54e13f5013b9a8664&")
+                    .color(data::EMBED_ERROR)
                     .footer(serenity::CreateEmbedFooter::new(
                         "@~ powered by UwUntu & RustyBamboo",
                     )),
@@ -262,7 +255,7 @@ pub async fn my_clips(ctx: Context<'_>) -> Result<(), Error> {
                         .title("My Clips")
                         .description(format!("Ta-da!! Your carefully crafted clips!! (*If you wish to remove a clip, use the emojis below*)\n\n{}", desc))
                         .thumbnail(&avatar)
-                        .color(EMBED_DEFAULT)
+                        .color(data::EMBED_DEFAULT)
                         .footer(serenity::CreateEmbedFooter::new(
                             "@~ powered by UwUntu & RustyBamboo",
                         )),
@@ -310,8 +303,8 @@ pub async fn my_clips(ctx: Context<'_>) -> Result<(), Error> {
                                 .title("My Clips")
                                 .description("Clip Removed!")
                                 .thumbnail(&avatar)
-                                .image("https://c.tenor.com/WBdQcwYYpOsAAAAC/tenor.gif")
-                                .color(EMBED_CYAN)
+                                .image("https://cdn.discordapp.com/attachments/1196582162057662484/1205354795012071424/tenor.gif?ex=65d81121&is=65c59c21&hm=e283dc1b9ffdeb45b85d8caabfdc68dedbf18faef0bdf84967f7d242749476cd&")
+                                .color(data::EMBED_CYAN)
                                 .footer(serenity::CreateEmbedFooter::new(
                                     "@~ powered by UwUntu & RustyBamboo",
                                 )),
@@ -330,8 +323,9 @@ pub async fn my_clips(ctx: Context<'_>) -> Result<(), Error> {
                     .embed(
                         serenity::CreateEmbed::default()
                             .title("My Clips")
-                            .description(format!("Edit timed out...{}", desc))
-                            .colour(EMBED_ERROR)
+                            .thumbnail(&avatar)
+                            .description(format!("Edit timed out...\n\n{}", desc))
+                            .colour(data::EMBED_ERROR)
                             .footer(serenity::CreateEmbedFooter::new(
                                 "@~ powered by UwUntu & RustyBamboo",
                             )),
@@ -345,7 +339,7 @@ pub async fn my_clips(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-#[poise::command(prefix_command, slash_command, track_edits, check = "check_mod")]
+#[poise::command(slash_command, track_edits, check = "check_mod")]
 pub async fn next_clip(ctx: Context<'_>) -> Result<(), Error> {
     let guild = match ctx.guild() {
         Some(guild) => guild.clone(),
@@ -381,8 +375,8 @@ pub async fn next_clip(ctx: Context<'_>) -> Result<(), Error> {
                     .title("Next Clip")
                     .description("No more clips!")
                     .thumbnail(&icon_url)
-                    .image("https://c.tenor.com/f896Cz56p48AAAAC/tenor.gif")
-                    .colour(EMBED_FAIL)
+                    .image("https://cdn.discordapp.com/attachments/1196582162057662484/1205354793246138408/tenor_4.gif?ex=65d81121&is=65c59c21&hm=752fa8c3dbc4ef91ec632f3988261c0e7628fb6ca54170ffdd6439a5de9a3a9b&")
+                    .colour(data::EMBED_FAIL)
                     .footer(serenity::CreateEmbedFooter::new(
                         "@~ powered by UwUntu & RustyBamboo",
                     )),
@@ -430,7 +424,7 @@ pub async fn next_clip(ctx: Context<'_>) -> Result<(), Error> {
                         .title("Next Clip")
                         .description("Rate this clip!")
                         .thumbnail(&icon_url)
-                        .colour(serenity::Color::BLUE)
+                        .colour(data::EMBED_DEFAULT)
                         .footer(serenity::CreateEmbedFooter::new(
                             "@~ powered by UwUntu & RustyBamboo",
                         )),
@@ -487,8 +481,8 @@ pub async fn next_clip(ctx: Context<'_>) -> Result<(), Error> {
                                         score.load(Ordering::Relaxed)
                                     ))
                                     .thumbnail(&icon_url)
-                                    .image("https://c.tenor.com/YXXkNqv16AgAAAAd/tenor.gif")
-                                    .colour(serenity::Color::BLUE)
+                                    .image("https://cdn.discordapp.com/attachments/1196582162057662484/1205354792621309972/tenor_5.gif?ex=65d81120&is=65c59c20&hm=b7661397c96231060492b909d1d7f2025bcfa91c166618611f612e95551be35a&")
+                                    .colour(data::EMBED_CYAN)
                                     .footer(serenity::CreateEmbedFooter::new(
                                         "@~ powered by UwUntu & RustyBamboo",
                                     )),
@@ -526,7 +520,7 @@ pub async fn next_clip(ctx: Context<'_>) -> Result<(), Error> {
                                 "Rate this clip!\n\nScore: {}",
                                 score.load(Ordering::Relaxed)
                             ))
-                            .colour(serenity::Color::BLUE)
+                            .colour(data::EMBED_DEFAULT)
                             .footer(serenity::CreateEmbedFooter::new(
                                 "@~ powered by UwUntu & RustyBamboo",
                             )),
@@ -552,8 +546,8 @@ pub async fn next_clip(ctx: Context<'_>) -> Result<(), Error> {
                                 score.load(Ordering::Relaxed)
                             ))
                             .thumbnail(&icon_url)
-                            .image("https://c.tenor.com/YXXkNqv16AgAAAAd/tenor.gif")
-                            .colour(serenity::Color::BLUE)
+                            .image("https://cdn.discordapp.com/attachments/1196582162057662484/1205354792621309972/tenor_5.gif?ex=65d81120&is=65c59c20&hm=b7661397c96231060492b909d1d7f2025bcfa91c166618611f612e95551be35a&")
+                            .colour(data::EMBED_CYAN)
                             .footer(serenity::CreateEmbedFooter::new(
                                 "@~ powered by UwUntu & RustyBamboo",
                             )),
