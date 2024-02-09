@@ -49,8 +49,7 @@ pub async fn ping(ctx: Context<'_>) -> Result<(), Error> {
 }
 
 /// use gpt-3.5-turbo to generate fun responses to user prompts
-async fn gpt_string(ctx: Context<'_>, prompt: String) -> Result<String, APIError> {
-    let api_key = &ctx.data().gpt_key;
+pub async fn gpt_string(api_key: String, prompt: String) -> Result<String, APIError> {
     let client = Client::new(api_key.to_string());
 
     let req = ChatCompletionRequest::new(
@@ -180,7 +179,7 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
     let mut tries = 0;
     let reading;
     loop {
-        match gpt_string(ctx, prompt.to_string()).await {
+        match gpt_string(ctx.data().gpt_key.clone(), prompt.to_string()).await {
             Ok(result) => {
                 reading = result;
                 break;

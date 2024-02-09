@@ -5,7 +5,8 @@ mod event;
 
 use dashmap::DashMap;
 use data::{UserData, VoiceUser};
-use std::{env, sync::Arc};
+use rand::{thread_rng, Rng};
+use std::{env, fs::read, sync::Arc};
 use tokio::sync::RwLock;
 use tracing::error;
 
@@ -109,11 +110,57 @@ async fn event_handler(
         serenity::FullEvent::Ready { data_about_bot, .. } => {
             println!("Logged in as {}\n\n", data_about_bot.user.name);
         }
+        // Check if bot
+        // Recursively check for replied message (this does not work... only works with depth=2.. API issue?)
+        // Check if pinging @bot
+        // Send prompt to GPT
+        // Print
         serenity::FullEvent::Message { new_message } => {
-            if new_message.content == "yo" {
-                if let Err(e) = new_message.channel_id.say(&ctx.http, "mama").await {
-                    error!("Error sending message: {:?}", e);
+            if new_message.is_own(ctx) {
+                return Ok(());
+            }
+            let mut do_gpt = new_message.mentions_me(&ctx.http).await.unwrap_or(false);
+
+            let mut messages = vec![new_message.content.clone()];
+
+            let mut referenced_message = &new_message.referenced_message;
+            while let Some(msg) = referenced_message {
+                messages.push(msg.content.clone());
+                if msg.mentions_me(&ctx.http).await.unwrap_or(false) {
+                    do_gpt = true;
+                    break;
                 }
+                referenced_message = &msg.referenced_message;
+            }
+            if do_gpt {
+                messages.reverse();
+                let full_message_history = messages.join("\n");
+                let prompt = if thread_rng().gen::<f64>() < 0.8 {
+                    full_message_history + "(make it simple and answer in a cute tone with uwu emojis like a tsundere)"
+                } else {
+                    full_message_history + "(make it simple and answer in a cute tone with murderous emojis like a yandere)"
+                };
+
+                let mut tries = 0;
+                let reading;
+                loop {
+                    match basic::gpt_string(data.gpt_key.clone(), prompt.clone()).await {
+                        Ok(result) => {
+                            reading = result;
+                            break;
+                        }
+                        Err(e) => {
+                            println!("An error occurred: {:?}, retrying...", e);
+                            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                            if tries > 5 {
+                                return Err(Box::new(e));
+                            }
+                        }
+                    }
+                    tries += 1;
+                }
+
+                new_message.reply(&ctx.http, reading).await?;
             }
         }
         serenity::FullEvent::VoiceStateUpdate { old: _, new } => {
