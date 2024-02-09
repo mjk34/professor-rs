@@ -1,3 +1,16 @@
+//!---------------------------------------------------------------------!
+//! This file contains a collection of EVENT related commands, the      !
+//! current event is POKEMON themed!                                    !
+//!                                                                     !
+//! Commands:                                                           !
+//!     [x] - get_pokedata                                              !
+//!     [x] - search_pokemon                                            !
+//!     [x] - test_matchup                                              !
+//!     [-] - pokedex                                                   !
+//!     [ ] - wild_encounter                                            !
+//!     [ ] - trainer_battle                                            !
+//!---------------------------------------------------------------------!
+
 use std::vec;
 
 use crate::data::PokeData;

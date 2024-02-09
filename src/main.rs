@@ -6,9 +6,8 @@ mod event;
 use dashmap::DashMap;
 use data::{UserData, VoiceUser};
 use rand::{thread_rng, Rng};
-use std::{env, fs::read, sync::Arc};
+use std::{env, sync::Arc};
 use tokio::sync::RwLock;
-use tracing::error;
 
 pub use poise::serenity_prelude as serenity;
 

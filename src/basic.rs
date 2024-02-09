@@ -1,3 +1,18 @@
+//!---------------------------------------------------------------------!
+//! This file contains a collection of commands that is fundamental     !
+//! to professorBot's functionality and purpose                         !
+//!                                                                     !
+//! Commands:                                                           !
+//!     [x] - ping                                                      !
+//!     [x] - uwu                                                       !
+//!     [x] - claim_bonus                                               !
+//!     [-] - wallet                                                    !
+//!     [-] - leaderboard                                               !
+//!     [x] - buy_tickets                                               !
+//!     [x] - voice_status                                              !
+//!     [x] - info                                                      !
+//!---------------------------------------------------------------------!
+
 use std::collections::HashMap;
 
 use std::sync::Arc;
@@ -366,7 +381,7 @@ pub async fn wallet(ctx: Context<'_>) -> Result<(), Error> {
     let tickets: i32 = user_data.get_tickets();
 
     let desc = format!(
-        "**Level {} **  -  {}/{}\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\nDaily UwU........... . . . **{}**\nAverage Luck..... . . . **{}**\nClaim Bonus....... . . . **{}**\n\nTotal Creds: **{}** \u{3000}\u{2000}Tickets: **{}**\n",
+        "**Level {} **  -  {}/{}\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\nDaily UwU........... . . . **{}**\nAverage Luck..... . . . **{}**\nClaim Bonus....... . . . **{}**\n\nTotal Creds: **{}** \u{3000}\u{3000}\u{2000}Tickets: **{}**\n",
         level, xp, next_level, daily, luck, claim, creds, tickets
     );
 

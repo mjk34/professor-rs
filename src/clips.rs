@@ -1,3 +1,14 @@
+//!---------------------------------------------------------------------!
+//! This file contains a collection of clip related commands to allow   !
+//! the organization, submission and facilitation of clip night         !
+//!                                                                     !
+//! Commands:                                                           !
+//!     [x] - submit_clip                                               !
+//!     [x] - server_clips                                              !
+//!     [x] - my_clips                                                  !
+//!     [x] - next_clip                                                 !
+//!---------------------------------------------------------------------!
+
 use crate::data;
 
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -36,9 +47,13 @@ fn is_youtube_or_medal_url(url: &str) -> bool {
     youtube_regex.is_match(url) || medal_regex.is_match(url)
 }
 
-// Submit game/other clips
+/// submit a youtube or medal clip for clip night!
 #[poise::command(slash_command)]
-pub async fn submit_clip(ctx: Context<'_>, title: String, link: String) -> Result<(), Error> {
+pub async fn submit_clip(
+    ctx: Context<'_>,
+    #[description = "the name of your clip"] title: String,
+    #[description = "the youtube or medal link of your clip"] link: String,
+) -> Result<(), Error> {
     if !is_youtube_or_medal_url(&link) {
         ctx.send(
             poise::CreateReply::default().embed(
@@ -106,7 +121,7 @@ pub async fn submit_clip(ctx: Context<'_>, title: String, link: String) -> Resul
     Ok(())
 }
 
-// View clip submission summary
+/// [!] MODERATOR - view all submitted clips sorted by users
 #[poise::command(slash_command, track_edits, check = "check_mod")]
 pub async fn server_clips(ctx: Context<'_>) -> Result<(), Error> {
     let guild = match ctx.guild() {
@@ -204,6 +219,7 @@ pub async fn server_clips(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
+/// [!] view and edit your submitted clips
 #[poise::command(slash_command, track_edits)]
 pub async fn my_clips(ctx: Context<'_>) -> Result<(), Error> {
     let author = ctx.author();
@@ -339,6 +355,7 @@ pub async fn my_clips(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
+/// [!] MODERATOR - CLIP NIGHT ONLY - get the next clip to view and rate
 #[poise::command(slash_command, track_edits, check = "check_mod")]
 pub async fn next_clip(ctx: Context<'_>) -> Result<(), Error> {
     let guild = match ctx.guild() {
