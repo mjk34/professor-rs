@@ -1,0 +1,33 @@
+Hex Maniac=Ghost/Psychic=https://cdn.discordapp.com/attachments/1196582162057662484/1205751048342347856/75.jpg?ex=65d9822b&is=65c70d2b&hm=dac82466d3b5ad37e5c92e41ac03ff1413b9322b252318ec1c19ec9fa07836d2&
+Black Belt=Fighting=https://cdn.discordapp.com/attachments/1196582162057662484/1205751048585879552/85.jpg?ex=65d9822b&is=65c70d2b&hm=360bac435aceb0a429ce29921fd88dcc1d0c7c6f64a51cddd791d7e56403fa3e&
+Aroma Lady=Grass/Poison=https://cdn.discordapp.com/attachments/1196582162057662484/1205751074997141517/141.jpg?ex=65d98232&is=65c70d32&hm=4d1c01d12367622aba40e23523db11550ab048c71331871d5d4a76d03e96ef81&
+Psychic=Psychic=https://cdn.discordapp.com/attachments/1196582162057662484/1205751073126744084/108.jpg?ex=65d98231&is=65c70d31&hm=7123fbc6d2f18ac6cbfb3e4a2b0f48ab593f2e80c1e743df7c76c190a09b9dcb&
+Dancer=Normal/Fairy=https://cdn.discordapp.com/attachments/1196582162057662484/1205751117326061588/232.jpg?ex=65d9823c&is=65c70d3c&hm=5b99330795036ad8e8b42a34cda6b6123863085038089b0814613fefddf694a0&
+Safari Ranger=Bug/Water=https://cdn.discordapp.com/attachments/1196582162057662484/1205969126778998814/224.jpg?ex=65da4d45&is=65c7d845&hm=e8bf039cf30f80759ef12f049ae3112a20ba024c48806b256d738ed85e3f8148&
+Bird Keeper=Flying=https://cdn.discordapp.com/attachments/1196582162057662484/1205969127961788507/66.jpg?ex=65da4d45&is=65c7d845&hm=b5337e45f99d95a680c4f3615dffdc4b03f0dfe439028f5b1e80ea02a536f42b&
+Team Rocket Goons=Poison/Fighting=https://cdn.discordapp.com/attachments/1196582162057662484/1205969128188551239/112.jpg?ex=65da4d45&is=65c7d845&hm=c21a5c295d88a517412f42d2bffd06674f56b9237bfae8f46478dc94c1365a72&
+Bug Catcher=Bug=https://cdn.discordapp.com/attachments/1196582162057662484/1205969129073410150/189.jpg?ex=65da4d46&is=65c7d846&hm=ccd9294c1fc16bbee064621a40ff2afc508c2fe122398981c671c886991bb960&
+Lady=Fairy/Grass=https://cdn.discordapp.com/attachments/1196582162057662484/1205970074184196146/159.jpg?ex=65da4e27&is=65c7d927&hm=b4492d8c90b6d42367519e5278c45269ca4d2025e53d80e01f382da5c969e2cb&
+Ace Trainers=Electric/Fire/Water/Grass/Ghost/Dragon=https://cdn.discordapp.com/attachments/1196582162057662484/1205969129379467274/192.jpg?ex=65da4d46&is=65c7d846&hm=564e2ec3446e5b7833d3ee6cf49f1ae120610a90474aebd090dedd31f6e8c992&
+Candela=Fire=https://cdn.discordapp.com/attachments/1196582162057662484/1205969145917608007/228.jpg?ex=65da4d4a&is=65c7d84a&hm=009b027b1901f112e9bd608bcb1955a98ea8ff17ffbb4af50f01c1265a8591d1&
+Spark=Electric=https://cdn.discordapp.com/attachments/1196582162057662484/1205969145309700167/226.jpg?ex=65da4d4a&is=65c7d84a&hm=874f47753d127e7ce04f53dc8a89bf4a54de31c1efe9b3a91b3c0b125df634fc&
+Blanche=Water=https://cdn.discordapp.com/attachments/1196582162057662484/1205969145628327966/227.jpg?ex=65da4d4a&is=65c7d84a&hm=6c144656794ad62104af9b06ea642a146aac8b3ce9df49599ae33936ec1f0444&
+Jesse & James=Normal/Poison=https://cdn.discordapp.com/attachments/1196582162057662484/1205969144701255761/278.jpg?ex=65da4d49&is=65c7d849&hm=970cb5b0a23e9fcf6f881a0415bb673358258cbafda5167316bc68c5057c3241&
+Bill=Normal/Water/Fire/Electric=https://cdn.discordapp.com/attachments/1196582162057662484/1205751113266241566/156.jpg?ex=65d9823b&is=65c70d3b&hm=2fcd6301b35fabf80cf1df13a66cffb3217af39fb7c3b4bde89ab0a16447a1f8&
+Ashe=Electric/Grass/Fire/Water=https://cdn.discordapp.com/attachments/1196582162057662484/1205969127034855494/25.jpg?ex=65da4d45&is=65c7d845&hm=03b8a5a814f1468fdabbf65f4b49b168df9168fc950113921e4e18296f99cdea&
+Brock=Rock/Ground=https://cdn.discordapp.com/attachments/1196582162057662484/1205969127710396486/55.jpg?ex=65da4d45&is=65c7d845&hm=78d665574ac63da76e7b7223ff20bd2fb0c9c71afdc05031b79f2a17bcf7ebff&
+Blaine=Fire=https://cdn.discordapp.com/attachments/1196582162057662484/1205751046983647232/58.jpg?ex=65d9822b&is=65c70d2b&hm=bd306befcc78f5f38e4122c98fd1b439b9beff7623c7116b43680dce56cb2332&
+Misty=Water/Ice/Dragon=https://cdn.discordapp.com/attachments/1196582162057662484/1205751047260475432/62.jpg?ex=65d9822b&is=65c70d2b&hm=5ef0968409e6315ea5018332158194029c289275c6763da25617b2f4706003c5&
+Erika=Grass/Poison=https://cdn.discordapp.com/attachments/1196582162057662484/1205751113605971998/160.jpg?ex=65d9823b&is=65c70d3b&hm=1445644bdb3de59f0a063b69ab31eaaedefa8f616fb31b75e8afabda4783c183&
+Giovanni=Ground/Poison/Psychic=https://cdn.discordapp.com/attachments/1196582162057662484/1205969128502988991/161.jpg?ex=65da4d46&is=65c7d846&hm=8846109dec5d3ca23aef79de8ada9f39d18644efaef7deb9217f580f42a7d6fa&
+Koga=Poison/Bug=https://cdn.discordapp.com/attachments/1196582162057662484/1205969128784134255/177_1.jpg?ex=65da4d46&is=65c7d846&hm=90bf4508563892f1d241134030b46fc996c7f9afe7474679adf9e9c40e1892ee&
+Gary=Normal/Flying/Fighting/Dragon=https://cdn.discordapp.com/attachments/1196582162057662484/1205969146253283328/231.jpg?ex=65da4d4a&is=65c7d84a&hm=27bfda1c7324527539e4964eaba922c616a9a894feab396d88b353cf33d7fe91&
+Jesse & James=Normal/Poison=https://cdn.discordapp.com/attachments/1196582162057662484/1205970073458835516/58.jpg?ex=65da4e27&is=65c7d927&hm=74dce0d07e577271d13d55a16819c983d1927710f47dcd76a6c9fd137796c8ab&
+Morty=Ghost/Poison/Psychic=https://cdn.discordapp.com/attachments/1196582162057662484/1205751047780442163/69_1.jpg?ex=65d9822b&is=65c70d2b&hm=4cce53613c9772aa78a631bd3cbd2a636013d67086cd549555d6331f6e3451f2&
+Cynthia=Ghost/Dragon/Flying/Ground/Electric=https://cdn.discordapp.com/attachments/1196582162057662484/1205751074212945960/136.jpg?ex=65d98231&is=65c70d31&hm=30bbee24b15aff1797ff2cb7f9582db3c7d157bac6bcd496c716245927f7b3fc&
+Marnie=Normal/Fairy/Fighting=https://cdn.discordapp.com/attachments/1196582162057662484/1205751073529270302/120.jpg?ex=65d98231&is=65c70d31&hm=1ad84b2234916295295e61121c6eb3c99f813b4404ef48ebde88d6503cf6691a&
+Olivia=Rock/Ground=https://cdn.discordapp.com/attachments/1196582162057662484/1205969127425056799/53.jpg?ex=65da4d45&is=65c7d845&hm=3ac5e9b8c6472c1362ed2a016cf9dd1620a2d1150542e227a065271d288d53b8&
+Nessa=Water/Ice/Dragon=https://cdn.discordapp.com/attachments/1196582162057662484/1205969144974024744/h27.jpg?ex=65da4d49&is=65c7d849&hm=4af4cdd97f54091759e24405bc34ff3f41396c32fe31ad54b83369af52166d29&
+Iono=Electric/Steel=https://cdn.discordapp.com/attachments/1196582162057662484/1205969144374108221/269.jpg?ex=65da4d49&is=65c7d849&hm=897276ce33717e17726b995a7dcaeb6d3f2fafa86e6b4e4eeb571decaaf39163&
+Lance=Dragon/Flying/Water=https://cdn.discordapp.com/attachments/1196582162057662484/1205970073886658640/159_1.jpg?ex=65da4e27&is=65c7d927&hm=93e60d83d4e1ab62da1368ee1f62195395b667f37e900a00607abfb4b255526f&
+N=Dragon/Electric/Rock/Flying=https://cdn.discordapp.com/attachments/1196582162057662484/1205970074448433183/200.jpg?ex=65da4e27&is=65c7d927&hm=914e32b04626ba3ecb316cd4ef0cb74a4c322ad46ea11b0edfa85135f06133b3&

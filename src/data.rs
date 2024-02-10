@@ -105,6 +105,29 @@ impl PokeData {
 }
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
+pub struct TrainerData {
+    name: String,
+    types: String,
+    tier: String,
+    wallpaper: String,
+}
+
+impl TrainerData {
+    pub fn get_name(&self) -> String {
+        self.name.clone()
+    }
+    pub fn get_types(&self) -> String {
+        self.types.clone()
+    }
+    pub fn get_tier(&self) -> String {
+        self.tier.clone()
+    }
+    pub fn get_wallpaper(&self) -> String {
+        self.wallpaper.clone()
+    }
+}
+
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct EventData {
     name: String,
     buddy: i32,
@@ -424,6 +447,7 @@ pub struct Data {
     pub pokedex: Vec<PokeData>,
     pub type_matrix: Vec<Vec<f32>>,
     pub type_name: Vec<String>,
+    pub trainers: Vec<TrainerData>,
 }
 
 impl Data {
@@ -656,6 +680,45 @@ impl Data {
             "Fairy".to_string(),
         ];
 
+        let trainer_string = read_lines("event/trainer.txt");
+        let mut trainers = Vec::new();
+
+        let mut trainer_index: i32 = 0;
+        for trainer_line in trainer_string {
+            let line_split: Vec<&str> = trainer_line.split('=').collect();
+
+            let trainer_name: String = line_split
+                .first()
+                .unwrap_or_else(|| panic!("Failed to load Name for No. {}", poke_counter))
+                .to_string();
+            let trainer_types: String = line_split
+                .get(1)
+                .unwrap_or_else(|| panic!("Failed to load Description for No. {}", poke_counter))
+                .to_string();
+            let trainer_wallpaper: String = line_split
+                .get(2)
+                .unwrap_or_else(|| panic!("Failed to load typing for No. {}", poke_counter))
+                .to_string();
+
+            let trainer_tier = if trainer_index < 15 {
+                "Common".to_string()
+            } else if (15..25).contains(&trainer_index) {
+                "Mythic".to_string()
+            } else {
+                "Legendary".to_string()
+            };
+
+            let trainer_info = TrainerData {
+                name: trainer_name,
+                types: trainer_types,
+                tier: trainer_tier,
+                wallpaper: trainer_wallpaper,
+            };
+
+            trainers.push(trainer_info);
+            trainer_index += 1;
+        }
+
         // EVENT DATA ////////////////////////////////////////////////////////////////////////////////////////
 
         Data {
@@ -670,6 +733,7 @@ impl Data {
             pokedex,
             type_matrix,
             type_name,
+            trainers,
         }
     }
 }
