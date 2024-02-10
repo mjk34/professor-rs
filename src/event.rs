@@ -105,6 +105,7 @@ pub async fn search_pokemon(
     let desc: String = pokemon.get_desc();
     let types: String = pokemon.get_types();
     let sprite: String = pokemon.get_sprite();
+    let wallpaper: String = pokemon.get_wallpaper();
 
     let msg_txt = format!("**{}**: {}\n{}", name, types, desc);
     let type_split: Vec<&str> = types.split('/').collect();
@@ -121,6 +122,7 @@ pub async fn search_pokemon(
                 .description(msg_txt)
                 .color(Color::new(poke_color))
                 .thumbnail(sprite)
+                .image(wallpaper)
                 .footer(serenity::CreateEmbedFooter::new(
                     "@~ powered by UwUntu & RustyBamboo",
                 )),
