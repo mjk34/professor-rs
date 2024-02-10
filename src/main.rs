@@ -2,6 +2,8 @@ mod basic;
 mod clips;
 mod data;
 mod event;
+mod helper;
+mod mods;
 
 use dashmap::DashMap;
 use data::{UserData, VoiceUser};
@@ -64,6 +66,8 @@ async fn main() {
                 event::search_pokemon(),
                 event::test_matchup(),
                 event::wild_encounter(),
+                mods::give_creds(),
+                mods::take_creds(),
             ],
             prefix_options: poise::PrefixFrameworkOptions {
                 prefix: Some("~".into()),

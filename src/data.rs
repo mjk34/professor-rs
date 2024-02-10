@@ -27,6 +27,7 @@ pub const EMBED_GOLD: Color = Color::GOLD; // gold - cred related color
 pub const EMBED_FAIL: Color = Color::RED; // red - absolute fails
 pub const EMBED_SUCCESS: Color = Color::new(65280); // green - major success
 pub const EMBED_ERROR: Color = Color::new(6053215); // grey - soft fails
+pub const EMBED_MOD: Color = Color::new(16749300); // pink - moderator commands
 
 // General Structures
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
@@ -434,16 +435,18 @@ impl Data {
             data.insert(user_id, Default::default());
         }
         // self.save().await;
+        ctx.send(poise::CreateReply::default().content(format!("<@{}>", ctx.author().id)))
+            .await?;
+
         ctx.send(
             poise::CreateReply::default().embed(
                 serenity::CreateEmbed::new()
                     .title("Account Created!")
-                    .description(ctx.author().name.to_string())
+                    .description(format!("Welcome <@{}>! You are now registered with ProfessorBot, feel free to checkout Professors Commands in https://discord.com/channels/1194668798830194850/1194700756306108437", ctx.author().id))
                     .image(
                         "https://gifdb.com/images/high/anime-girl-okay-sign-b5zlye5h8mnjhdg2.gif",
                     )
-                    .thumbnail(ctx.author().avatar_url().unwrap_or_default())
-                    .color(Color::new(16119285)),
+                    .color(EMBED_DEFAULT),
             ),
         )
         .await?;

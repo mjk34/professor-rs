@@ -202,7 +202,7 @@ pub async fn server_clips(ctx: Context<'_>) -> Result<(), Error> {
                 .thumbnail(&icon_url)
                 .image(&banner_url)
                 .description(desc)
-                .color(data::EMBED_CYAN)
+                .color(data::EMBED_MOD)
                 .footer(serenity::CreateEmbedFooter::new(
                     "@~ powered by UwUntu & RustyBamboo",
                 )),
@@ -493,7 +493,7 @@ pub async fn next_clip(ctx: Context<'_>) -> Result<(), Error> {
                                     ))
                                     .thumbnail(&icon_url)
                                     .image("https://cdn.discordapp.com/attachments/1196582162057662484/1205354792621309972/tenor_5.gif?ex=65d81120&is=65c59c20&hm=b7661397c96231060492b909d1d7f2025bcfa91c166618611f612e95551be35a&")
-                                    .colour(data::EMBED_CYAN)
+                                    .colour(data::EMBED_MOD)
                                     .footer(serenity::CreateEmbedFooter::new(
                                         "@~ powered by UwUntu & RustyBamboo",
                                     )),
@@ -558,7 +558,7 @@ pub async fn next_clip(ctx: Context<'_>) -> Result<(), Error> {
                             ))
                             .thumbnail(&icon_url)
                             .image("https://cdn.discordapp.com/attachments/1196582162057662484/1205354792621309972/tenor_5.gif?ex=65d81120&is=65c59c20&hm=b7661397c96231060492b909d1d7f2025bcfa91c166618611f612e95551be35a&")
-                            .colour(data::EMBED_CYAN)
+                            .colour(data::EMBED_MOD)
                             .footer(serenity::CreateEmbedFooter::new(
                                 "@~ powered by UwUntu & RustyBamboo",
                             )),
