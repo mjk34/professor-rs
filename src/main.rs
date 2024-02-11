@@ -66,6 +66,7 @@ async fn main() {
                 event::search_pokemon(),
                 event::test_matchup(),
                 event::wild_encounter(),
+                event::trainer_encounter(),
                 mods::give_creds(),
                 mods::take_creds(),
             ],

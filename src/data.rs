@@ -28,6 +28,7 @@ pub const EMBED_FAIL: Color = Color::RED; // red - absolute fails
 pub const EMBED_SUCCESS: Color = Color::new(65280); // green - major success
 pub const EMBED_ERROR: Color = Color::new(6053215); // grey - soft fails
 pub const EMBED_MOD: Color = Color::new(16749300); // pink - moderator commands
+pub const EMBED_TRAINER: Color = Color::new(3756519); // blue - trainer battles
 
 // General Structures
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
@@ -73,11 +74,17 @@ pub struct PokeData {
     nickname: Option<String>,
     sprite: String,
     wallpaper: String,
+    current_hp: Option<i32>,
     health: Option<i32>,
     types: String,
 }
 
 impl PokeData {
+    pub fn set_health(&mut self, health: i32) {
+        self.health = Some(health);
+        self.current_hp = Some(health);
+    }
+
     pub fn get_name(&self) -> String {
         self.name.clone()
     }
@@ -96,9 +103,21 @@ impl PokeData {
     pub fn get_wallpaper(&self) -> String {
         self.wallpaper.clone()
     }
-    // pub fn get_health(&self) -> Option<i32> {
-    //     return self.health.clone();
-    // }
+    pub fn get_health(&self) -> i32 {
+        if self.health.is_none() {
+            return 0;
+        }
+
+        return self.health.clone().unwrap();
+    }
+    pub fn get_current_health(&self) -> i32 {
+        if self.current_hp.is_none() {
+            return 0;
+        }
+
+        return self.current_hp.clone().unwrap();
+    }
+
     pub fn get_types(&self) -> String {
         self.types.clone()
     }
@@ -109,10 +128,15 @@ pub struct TrainerData {
     name: String,
     types: String,
     tier: String,
+    team: Vec<PokeData>,
     wallpaper: String,
 }
 
 impl TrainerData {
+    pub fn give_pokemon(&mut self, pokemon: PokeData) {
+        self.team.push(pokemon);
+    }
+
     pub fn get_name(&self) -> String {
         self.name.clone()
     }
@@ -124,6 +148,9 @@ impl TrainerData {
     }
     pub fn get_wallpaper(&self) -> String {
         self.wallpaper.clone()
+    }
+    pub fn get_team(&self) -> Vec<PokeData> {
+        self.team.clone()
     }
 }
 
@@ -540,6 +567,7 @@ impl Data {
                 .to_string(),
             wallpaper: "https://cdn.discordapp.com/attachments/1196582162057662484/1205737290186629150/000.png?ex=65d9755b&is=65c7005b&hm=5b4c8a00352fc53e6be6930f5b960090ca955a02bfcc838299ba59a6be7ed888&".to_string(),
             nickname: None,
+            current_hp: None,
             health: None,
         };
         pokedex.push(missing_no);
@@ -577,6 +605,7 @@ impl Data {
                 sprite: poke_sprite,
                 wallpaper: poke_wallpaper,
                 nickname: None,
+                current_hp: None,
                 health: None,
             };
 
@@ -712,6 +741,7 @@ impl Data {
                 name: trainer_name,
                 types: trainer_types,
                 tier: trainer_tier,
+                team: vec![],
                 wallpaper: trainer_wallpaper,
             };
 

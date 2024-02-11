@@ -24,7 +24,7 @@ Koga=Poison/Bug=https://cdn.discordapp.com/attachments/1196582162057662484/12059
 Gary=Normal/Flying/Fighting/Dragon=https://cdn.discordapp.com/attachments/1196582162057662484/1205969146253283328/231.jpg?ex=65da4d4a&is=65c7d84a&hm=27bfda1c7324527539e4964eaba922c616a9a894feab396d88b353cf33d7fe91&
 Jesse & James=Normal/Poison=https://cdn.discordapp.com/attachments/1196582162057662484/1205970073458835516/58.jpg?ex=65da4e27&is=65c7d927&hm=74dce0d07e577271d13d55a16819c983d1927710f47dcd76a6c9fd137796c8ab&
 Morty=Ghost/Poison/Psychic=https://cdn.discordapp.com/attachments/1196582162057662484/1205751047780442163/69_1.jpg?ex=65d9822b&is=65c70d2b&hm=4cce53613c9772aa78a631bd3cbd2a636013d67086cd549555d6331f6e3451f2&
-Cynthia=Ghost/Dragon/Flying/Ground/Electric=https://cdn.discordapp.com/attachments/1196582162057662484/1205751074212945960/136.jpg?ex=65d98231&is=65c70d31&hm=30bbee24b15aff1797ff2cb7f9582db3c7d157bac6bcd496c716245927f7b3fc&
+Cynthia=Ghost/Dragon/Flying/Ground=https://cdn.discordapp.com/attachments/1196582162057662484/1205751074212945960/136.jpg?ex=65d98231&is=65c70d31&hm=30bbee24b15aff1797ff2cb7f9582db3c7d157bac6bcd496c716245927f7b3fc&
 Marnie=Normal/Fairy/Fighting=https://cdn.discordapp.com/attachments/1196582162057662484/1205751073529270302/120.jpg?ex=65d98231&is=65c70d31&hm=1ad84b2234916295295e61121c6eb3c99f813b4404ef48ebde88d6503cf6691a&
 Olivia=Rock/Ground=https://cdn.discordapp.com/attachments/1196582162057662484/1205969127425056799/53.jpg?ex=65da4d45&is=65c7d845&hm=3ac5e9b8c6472c1362ed2a016cf9dd1620a2d1150542e227a065271d288d53b8&
 Nessa=Water/Ice/Dragon=https://cdn.discordapp.com/attachments/1196582162057662484/1205969144974024744/h27.jpg?ex=65da4d49&is=65c7d849&hm=4af4cdd97f54091759e24405bc34ff3f41396c32fe31ad54b83369af52166d29&
