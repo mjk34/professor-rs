@@ -159,7 +159,7 @@ pub async fn poke_event(ctx: Context<'_>) -> Result<(), Error> {
     let u = data.get(&user.id).unwrap();
     let user_data = u.read().await;
 
-    let team = user_data.get_event().get_team();
+    let team = user_data.event.get_team();
     if team.is_empty() {
         // Oak dialogue
         let oak_text1 = format!(
@@ -231,6 +231,10 @@ pub async fn poke_event(ctx: Context<'_>) -> Result<(), Error> {
         tokio::spawn(async move {
             let mut timeout_check = true;
             while let Some(reaction) = reactions.next().await {
+                reaction
+                    .create_response(&ctx, serenity::CreateInteractionResponse::Acknowledge)
+                    .await
+                    .unwrap();
                 let react_id = reaction.member.clone().unwrap_or_default().user.id;
                 if react_id == user_id && reaction.data.custom_id.as_str() == "continue" {
                     let continue_btn = serenity::CreateButton::new("open_modal")
@@ -293,6 +297,10 @@ pub async fn poke_event(ctx: Context<'_>) -> Result<(), Error> {
             let mut timeout_check = true;
 
             while let Some(reaction) = reactions.next().await {
+                reaction
+                    .create_response(&ctx, serenity::CreateInteractionResponse::Acknowledge)
+                    .await
+                    .unwrap();
                 let react_id = reaction.member.clone().unwrap_or_default().user.id;
                 if react_id == user_id && reaction.data.custom_id.as_str() == "continue1" {
                     let continue_btn = serenity::CreateButton::new("open_modal")
@@ -355,6 +363,10 @@ pub async fn poke_event(ctx: Context<'_>) -> Result<(), Error> {
             let mut timeout_check = true;
 
             while let Some(reaction) = reactions.next().await {
+                reaction
+                    .create_response(&ctx, serenity::CreateInteractionResponse::Acknowledge)
+                    .await
+                    .unwrap();
                 let react_id = reaction.member.clone().unwrap_or_default().user.id;
                 if react_id == user_id && reaction.data.custom_id.as_str() == "continue2" {
                     let continue_btn = serenity::CreateButton::new("open_modal")
@@ -419,6 +431,10 @@ pub async fn poke_event(ctx: Context<'_>) -> Result<(), Error> {
 
             // choose pokemon
             while let Some(reaction) = reactions.next().await {
+                reaction
+                    .create_response(&ctx, serenity::CreateInteractionResponse::Acknowledge)
+                    .await
+                    .unwrap();
                 let react_id = reaction.member.clone().unwrap_or_default().user.id;
                 if react_id == user_id && reaction.data.custom_id.as_str() == "continue3" {
                     let mut buttons = Vec::new();
@@ -495,6 +511,10 @@ pub async fn poke_event(ctx: Context<'_>) -> Result<(), Error> {
 
             while not_choose {
                 while let Some(reaction) = reactions.next().await {
+                    reaction
+                        .create_response(&ctx, serenity::CreateInteractionResponse::Acknowledge)
+                        .await
+                        .unwrap();
                     let react_id = reaction.member.clone().unwrap_or_default().user.id;
 
                     let mut buttons = Vec::new();
@@ -680,6 +700,10 @@ pub async fn poke_event(ctx: Context<'_>) -> Result<(), Error> {
                 let mut timeout_check = true;
 
                 while let Some(reaction) = reactions.next().await {
+                    reaction
+                        .create_response(&ctx, serenity::CreateInteractionResponse::Acknowledge)
+                        .await
+                        .unwrap();
                     let react_id = reaction.member.clone().unwrap_or_default().user.id;
                     let react_str = reaction.data.custom_id.to_string();
                     let string_split: Vec<&str> = react_str.split('-').collect();
@@ -688,19 +712,19 @@ pub async fn poke_event(ctx: Context<'_>) -> Result<(), Error> {
                         match string_split[1] {
                             "Bulbasaur" => {
                                 let mut user_data = u.write().await;
-                                user_data.get_event().add_pokemon(bulbasaur.clone());
+                                user_data.event.add_pokemon(bulbasaur.clone());
                                 not_choose = false;
                             }
 
                             "Squirtle" => {
                                 let mut user_data = u.write().await;
-                                user_data.get_event().add_pokemon(squirtle.clone());
+                                user_data.event.add_pokemon(squirtle.clone());
                                 not_choose = false;
                             }
 
                             "Charmander" => {
                                 let mut user_data = u.write().await;
-                                user_data.get_event().add_pokemon(charmander.clone());
+                                user_data.event.add_pokemon(charmander.clone());
                                 not_choose = false;
                             }
 
@@ -824,8 +848,8 @@ pub async fn buddy(ctx: Context<'_>) -> Result<(), Error> {
     let u = data.get(&user.id).unwrap();
     let user_data = u.read().await;
 
-    let team = user_data.get_event().get_team();
-    let buddy = user_data.get_event().get_buddy();
+    let team = user_data.event.get_team();
+    let buddy = user_data.event.get_buddy();
 
     if !team.is_empty() {
         let pokemon = get_pokedata(ctx, Some(team[buddy].get_name()), None);

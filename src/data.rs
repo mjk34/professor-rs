@@ -197,7 +197,7 @@ pub struct UserData {
     tickets: i32,
     wish: WishData,
 
-    event: EventData,
+    pub event: EventData,
     bag: Vec<ItemData>,
 }
 
@@ -342,10 +342,6 @@ impl UserData {
 
     pub fn get_next_level(&self) -> i32 {
         500 + self.get_level() * 80
-    }
-
-    pub fn get_event(&self) -> EventData {
-        self.event.clone()
     }
 
     pub fn add_submit(&mut self, new_submit: ClipData) -> bool {
