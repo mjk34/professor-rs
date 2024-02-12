@@ -14,10 +14,15 @@
 use crate::data::{self, PokeData, TrainerData};
 use crate::serenity;
 use crate::{Context, Error};
+use poise::serenity_prelude::futures::StreamExt;
+use poise::serenity_prelude::EditMessage;
 use rand::seq::SliceRandom;
 use rand::{thread_rng, Rng};
 use serenity::Color;
+use std::sync::Arc;
+use std::time::Duration;
 use std::vec;
+use tokio::sync::RwLock;
 
 const COMMON: [usize; 61] = [
     1, 4, 7, 10, 11, 13, 14, 16, 19, 20, 21, 23, 27, 29, 32, 35, 39, 41, 43, 46, 47, 48, 50, 51,
@@ -121,7 +126,6 @@ pub async fn search_pokemon(
     let desc: String = pokemon.get_desc();
     let types: String = pokemon.get_types();
     let sprite: String = pokemon.get_sprite();
-    let wallpaper: String = pokemon.get_wallpaper();
 
     let msg_txt = format!("**{}**: {}\n{}", name, types, desc);
     let type_split: Vec<&str> = types.split('/').collect();
@@ -138,7 +142,6 @@ pub async fn search_pokemon(
                 .description(msg_txt)
                 .color(Color::new(poke_color))
                 .thumbnail(sprite)
-                .image(wallpaper)
                 .footer(serenity::CreateEmbedFooter::new(
                     "@~ powered by UwUntu & RustyBamboo",
                 )),
@@ -150,15 +153,750 @@ pub async fn search_pokemon(
 }
 
 #[poise::command(slash_command)]
-pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
+pub async fn poke_event(ctx: Context<'_>) -> Result<(), Error> {
+    let user = ctx.author();
+    let data = &ctx.data().users;
+    let u = data.get(&user.id).unwrap();
+    let user_data = u.read().await;
+
+    let team = user_data.get_event().get_team();
+    if team.is_empty() {
+        // Oak dialogue
+        let oak_text1 = format!(
+            "Hello <@{}>!\n\nWelcome to the world of Pokémon!\n\n(hit *continue* at the bottom to go next)",
+            user.id
+        );
+        let oak_text2 = "My name is **Oak**! People call me the Pokémon Prof!\nThis world is inhabited by creatures called Pokémon!". to_string();
+        let oak_text3 = "For some people, Pokémon are pets. Other use them for fights. Myself… I study Pokémon as a profession.\n\n".to_string();
+        let oak_text4 =
+            "You need your own Pokémon for your protection.\n\nI know! There are 3 Pokémon here! Haha! They are inside the Poké Balls.\n\n You can have one! Choose!\n\n"
+                .to_string();
+        let oak_text5 = format!("Now, <@{}>, which Pokémon do you want?", user.id);
+        let oak_text6 = "Your very own Pokémon legend is about to unfold! A world of dreams and adventures with Pokémon awaits! Let's go!".to_string();
+
+        let oak_img = "https://cdn.discordapp.com/attachments/1196582162057662484/1206355418889064539/c8bfe05ab93e2bcb0bc78301c1a3933a.jpg?ex=65dbb508&is=65c94008&hm=985b07f671001518f422fe541b8c91ee9ac106a273a8bb023a6fe1fdb617dd50&";
+        let poke_img = "https://cdn.discordapp.com/attachments/1196582162057662484/1206355419153563668/nodemaster-pokemon-emerald-starter-selection-screen.jpg?ex=65dbb508&is=65c94008&hm=8a8595e4c8853a015b9c2ccd9c4e6403192c3d655e0f5b7250dd7cab269f214e&";
+
+        // continue
+        let continue_btn = serenity::CreateButton::new("open_modal")
+            .label("continue")
+            .custom_id("continue".to_string())
+            .style(poise::serenity_prelude::ButtonStyle::Success);
+
+        let components = vec![serenity::CreateActionRow::Buttons(vec![continue_btn])];
+
+        let reply = ctx
+            .send(
+                poise::CreateReply::default()
+                    .content(format!("<@{}>", user.id))
+                    .embed(
+                        serenity::CreateEmbed::new()
+                            .title("????????")
+                            .description(oak_text1)
+                            .color(data::EMBED_DEFAULT)
+                            .thumbnail(user.avatar_url().unwrap_or_default().to_string())
+                            .image(oak_img)
+                            .footer(serenity::CreateEmbedFooter::new(
+                                "@~ powered by UwUntu & RustyBamboo",
+                            )),
+                    )
+                    .components(components),
+            )
+            .await?;
+
+        let msg_og = Arc::new(RwLock::new(reply.into_message().await?));
+        let msg = Arc::clone(&msg_og);
+        let mut reactions = msg
+            .read()
+            .await
+            .await_component_interactions(ctx)
+            .timeout(Duration::new(120, 0))
+            .stream();
+
+        let mut bulbasaur = get_pokedata(ctx, None, Some(1));
+        bulbasaur.set_health(thread_rng().gen_range(15..30));
+
+        let mut squirtle = get_pokedata(ctx, None, Some(7));
+        squirtle.set_health(thread_rng().gen_range(15..30));
+
+        let mut charmander = get_pokedata(ctx, None, Some(4));
+        charmander.set_health(thread_rng().gen_range(15..30));
+
+        let ctx = ctx.serenity_context().clone();
+
+        let user_id = user.id;
+        let user_avatar = user.avatar_url().unwrap_or_default().to_string();
+        let u = Arc::clone(&u);
+
+        tokio::spawn(async move {
+            let mut timeout_check = true;
+            while let Some(reaction) = reactions.next().await {
+                let react_id = reaction.member.clone().unwrap_or_default().user.id;
+                if react_id == user_id && reaction.data.custom_id.as_str() == "continue" {
+                    let continue_btn = serenity::CreateButton::new("open_modal")
+                        .label("continue")
+                        .custom_id("continue1".to_string())
+                        .style(poise::serenity_prelude::ButtonStyle::Success);
+
+                    let components = vec![serenity::CreateActionRow::Buttons(vec![continue_btn])];
+                    msg.write()
+                        .await
+                        .edit(
+                            &ctx,
+                            EditMessage::default()
+                                .embed(
+                                    serenity::CreateEmbed::default()
+                                        .title("Prof Oak".to_string())
+                                        .description(&oak_text2)
+                                        .image(oak_img)
+                                        .thumbnail(&user_avatar)
+                                        .colour(data::EMBED_DEFAULT)
+                                        .footer(serenity::CreateEmbedFooter::new(
+                                            "@~ powered by UwUntu & RustyBamboo",
+                                        )),
+                                )
+                                .components(components),
+                        )
+                        .await
+                        .unwrap();
+
+                    timeout_check = false;
+                    break;
+                }
+            }
+
+            if timeout_check {
+                let desc =
+                    "Hey! Response timed out... try again tomorrow (next: `/uwu`)".to_string();
+                msg.write()
+                    .await
+                    .edit(
+                        &ctx,
+                        EditMessage::default()
+                            .embed(
+                                serenity::CreateEmbed::default()
+                                    .title("????????".to_string())
+                                    .description(&desc)
+                                    .image(oak_img)
+                                    .thumbnail(&user_avatar)
+                                    .colour(data::EMBED_ERROR)
+                                    .footer(serenity::CreateEmbedFooter::new(
+                                        "@~ powered by UwUntu & RustyBamboo",
+                                    )),
+                            )
+                            .components(Vec::new()),
+                    )
+                    .await
+                    .unwrap();
+            }
+
+            let mut timeout_check = true;
+
+            while let Some(reaction) = reactions.next().await {
+                let react_id = reaction.member.clone().unwrap_or_default().user.id;
+                if react_id == user_id && reaction.data.custom_id.as_str() == "continue1" {
+                    let continue_btn = serenity::CreateButton::new("open_modal")
+                        .label("continue")
+                        .custom_id("continue2".to_string())
+                        .style(poise::serenity_prelude::ButtonStyle::Success);
+
+                    let components = vec![serenity::CreateActionRow::Buttons(vec![continue_btn])];
+                    msg.write()
+                        .await
+                        .edit(
+                            &ctx,
+                            EditMessage::default()
+                                .embed(
+                                    serenity::CreateEmbed::default()
+                                        .title("Prof Oak".to_string())
+                                        .description(&oak_text3)
+                                        .image(oak_img)
+                                        .thumbnail(&user_avatar)
+                                        .colour(data::EMBED_DEFAULT)
+                                        .footer(serenity::CreateEmbedFooter::new(
+                                            "@~ powered by UwUntu & RustyBamboo",
+                                        )),
+                                )
+                                .components(components),
+                        )
+                        .await
+                        .unwrap();
+
+                    timeout_check = false;
+                    break;
+                }
+            }
+
+            if timeout_check {
+                let desc =
+                    "Hey! Response timed out... try again tomorrow (next: `/uwu`)".to_string();
+                msg.write()
+                    .await
+                    .edit(
+                        &ctx,
+                        EditMessage::default()
+                            .embed(
+                                serenity::CreateEmbed::default()
+                                    .title("????????".to_string())
+                                    .description(&desc)
+                                    .image(oak_img)
+                                    .thumbnail(&user_avatar)
+                                    .colour(data::EMBED_ERROR)
+                                    .footer(serenity::CreateEmbedFooter::new(
+                                        "@~ powered by UwUntu & RustyBamboo",
+                                    )),
+                            )
+                            .components(Vec::new()),
+                    )
+                    .await
+                    .unwrap();
+            }
+
+            let mut timeout_check = true;
+
+            while let Some(reaction) = reactions.next().await {
+                let react_id = reaction.member.clone().unwrap_or_default().user.id;
+                if react_id == user_id && reaction.data.custom_id.as_str() == "continue2" {
+                    let continue_btn = serenity::CreateButton::new("open_modal")
+                        .label("continue")
+                        .custom_id("continue3".to_string())
+                        .style(poise::serenity_prelude::ButtonStyle::Success);
+
+                    let components = vec![serenity::CreateActionRow::Buttons(vec![continue_btn])];
+                    msg.write()
+                        .await
+                        .edit(
+                            &ctx,
+                            EditMessage::default()
+                                .embed(
+                                    serenity::CreateEmbed::default()
+                                        .title("Prof Oak".to_string())
+                                        .description(&oak_text4)
+                                        .image(oak_img)
+                                        .thumbnail(&user_avatar)
+                                        .colour(data::EMBED_DEFAULT)
+                                        .footer(serenity::CreateEmbedFooter::new(
+                                            "@~ powered by UwUntu & RustyBamboo",
+                                        )),
+                                )
+                                .components(components),
+                        )
+                        .await
+                        .unwrap();
+
+                    timeout_check = false;
+                    break;
+                }
+            }
+
+            if timeout_check {
+                let desc =
+                    "Hey! Response timed out... try again tomorrow (next: `/uwu`)".to_string();
+                msg.write()
+                    .await
+                    .edit(
+                        &ctx,
+                        EditMessage::default()
+                            .embed(
+                                serenity::CreateEmbed::default()
+                                    .title("????????".to_string())
+                                    .description(&desc)
+                                    .image(oak_img)
+                                    .thumbnail(&user_avatar)
+                                    .colour(data::EMBED_ERROR)
+                                    .footer(serenity::CreateEmbedFooter::new(
+                                        "@~ powered by UwUntu & RustyBamboo",
+                                    )),
+                            )
+                            .components(Vec::new()),
+                    )
+                    .await
+                    .unwrap();
+            }
+
+            let mut timeout_check = true;
+            let mut not_choose = true;
+
+            // choose pokemon
+            while let Some(reaction) = reactions.next().await {
+                let react_id = reaction.member.clone().unwrap_or_default().user.id;
+                if react_id == user_id && reaction.data.custom_id.as_str() == "continue3" {
+                    let mut buttons = Vec::new();
+
+                    let left_btn = serenity::CreateButton::new("open_modal")
+                        .label("Left Poké Ball")
+                        .custom_id("left".to_string())
+                        .style(poise::serenity_prelude::ButtonStyle::Primary);
+                    buttons.push(left_btn);
+
+                    let center_btn = serenity::CreateButton::new("open_modal")
+                        .label("Center Poké Ball")
+                        .custom_id("center".to_string())
+                        .style(poise::serenity_prelude::ButtonStyle::Primary);
+                    buttons.push(center_btn);
+
+                    let right_btn = serenity::CreateButton::new("open_modal")
+                        .label("Right Poké Ball")
+                        .custom_id("right".to_string())
+                        .style(poise::serenity_prelude::ButtonStyle::Primary);
+                    buttons.push(right_btn);
+
+                    let components = vec![serenity::CreateActionRow::Buttons(buttons)];
+                    msg.write()
+                        .await
+                        .edit(
+                            &ctx,
+                            EditMessage::default()
+                                .embed(
+                                    serenity::CreateEmbed::default()
+                                        .title("Prof Oak".to_string())
+                                        .description(&oak_text5)
+                                        .image(poke_img)
+                                        .thumbnail(&user_avatar)
+                                        .colour(data::EMBED_DEFAULT)
+                                        .footer(serenity::CreateEmbedFooter::new(
+                                            "@~ powered by UwUntu & RustyBamboo",
+                                        )),
+                                )
+                                .components(components),
+                        )
+                        .await
+                        .unwrap();
+
+                    timeout_check = false;
+                    break;
+                }
+            }
+
+            if timeout_check {
+                let desc =
+                    "Hey! Response timed out... try again tomorrow (next: `/uwu`)".to_string();
+                msg.write()
+                    .await
+                    .edit(
+                        &ctx,
+                        EditMessage::default()
+                            .embed(
+                                serenity::CreateEmbed::default()
+                                    .title("????????".to_string())
+                                    .description(&desc)
+                                    .image(oak_img)
+                                    .thumbnail(&user_avatar)
+                                    .colour(data::EMBED_ERROR)
+                                    .footer(serenity::CreateEmbedFooter::new(
+                                        "@~ powered by UwUntu & RustyBamboo",
+                                    )),
+                            )
+                            .components(Vec::new()),
+                    )
+                    .await
+                    .unwrap();
+            }
+
+            while not_choose {
+                while let Some(reaction) = reactions.next().await {
+                    let react_id = reaction.member.clone().unwrap_or_default().user.id;
+
+                    let mut buttons = Vec::new();
+                    let back_btn = serenity::CreateButton::new("open_modal")
+                        .label("back")
+                        .custom_id("back".to_string())
+                        .style(poise::serenity_prelude::ButtonStyle::Secondary);
+                    buttons.push(back_btn);
+
+                    // bulbasaur
+                    if react_id == user_id && reaction.data.custom_id.as_str() == "left" {
+                        let name = bulbasaur.get_name();
+                        let desc = bulbasaur.get_desc();
+                        let sprite = bulbasaur.get_sprite();
+                        let img = bulbasaur.get_wallpaper();
+
+                        let types = bulbasaur.get_types();
+                        let type_split: Vec<&str> = types.split('/').collect();
+                        let first_type = type_split
+                            .first()
+                            .expect("search_Pokemon(): Failed to expand first_type")
+                            .to_string();
+                        let color = get_type_color(&first_type);
+
+                        let choose_btn = serenity::CreateButton::new("open_modal")
+                            .label(format!("Choose {}!", name).as_str())
+                            .custom_id(format!("choose-{}", name))
+                            .style(poise::serenity_prelude::ButtonStyle::Success);
+                        buttons.push(choose_btn);
+
+                        let components = vec![serenity::CreateActionRow::Buttons(buttons)];
+
+                        msg.write()
+                            .await
+                            .edit(
+                                &ctx,
+                                EditMessage::default()
+                                    .embed(
+                                        serenity::CreateEmbed::default()
+                                            .title(format!("Choose {}?", name))
+                                            .description(desc)
+                                            .image(img)
+                                            .thumbnail(sprite)
+                                            .colour(color)
+                                            .footer(serenity::CreateEmbedFooter::new(
+                                                "@~ powered by UwUntu & RustyBamboo",
+                                            )),
+                                    )
+                                    .components(components),
+                            )
+                            .await
+                            .unwrap();
+
+                        timeout_check = false;
+                        not_choose = false;
+                        break;
+                    }
+
+                    // squirtle
+                    if react_id == user_id && reaction.data.custom_id.as_str() == "center" {
+                        let name = squirtle.get_name();
+                        let desc = squirtle.get_desc();
+                        let sprite = squirtle.get_sprite();
+                        let img = squirtle.get_wallpaper();
+
+                        let types = squirtle.get_types();
+                        let type_split: Vec<&str> = types.split('/').collect();
+                        let first_type = type_split
+                            .first()
+                            .expect("search_Pokemon(): Failed to expand first_type")
+                            .to_string();
+                        let color = get_type_color(&first_type);
+
+                        let choose_btn = serenity::CreateButton::new("open_modal")
+                            .label(format!("Choose {}!", name).as_str())
+                            .custom_id(format!("choose-{}", name))
+                            .style(poise::serenity_prelude::ButtonStyle::Success);
+                        buttons.push(choose_btn);
+
+                        let components = vec![serenity::CreateActionRow::Buttons(buttons)];
+
+                        msg.write()
+                            .await
+                            .edit(
+                                &ctx,
+                                EditMessage::default()
+                                    .embed(
+                                        serenity::CreateEmbed::default()
+                                            .title(format!("Choose {}?", name))
+                                            .description(desc)
+                                            .image(img)
+                                            .thumbnail(sprite)
+                                            .colour(color)
+                                            .footer(serenity::CreateEmbedFooter::new(
+                                                "@~ powered by UwUntu & RustyBamboo",
+                                            )),
+                                    )
+                                    .components(components),
+                            )
+                            .await
+                            .unwrap();
+
+                        timeout_check = false;
+                        not_choose = false;
+                        break;
+                    }
+
+                    // charmander
+                    if react_id == user_id && reaction.data.custom_id.as_str() == "right" {
+                        let name = charmander.get_name();
+                        let desc = charmander.get_desc();
+                        let sprite = charmander.get_sprite();
+                        let img = charmander.get_wallpaper();
+
+                        let types = charmander.get_types();
+                        let type_split: Vec<&str> = types.split('/').collect();
+                        let first_type = type_split
+                            .first()
+                            .expect("search_Pokemon(): Failed to expand first_type")
+                            .to_string();
+                        let color = get_type_color(&first_type);
+
+                        let choose_btn = serenity::CreateButton::new("open_modal")
+                            .label(format!("Choose {}!", name).as_str())
+                            .custom_id(format!("choose-{}", name))
+                            .style(poise::serenity_prelude::ButtonStyle::Success);
+                        buttons.push(choose_btn);
+
+                        let components = vec![serenity::CreateActionRow::Buttons(buttons)];
+
+                        msg.write()
+                            .await
+                            .edit(
+                                &ctx,
+                                EditMessage::default()
+                                    .embed(
+                                        serenity::CreateEmbed::default()
+                                            .title(format!("Choose {}?", name))
+                                            .description(desc)
+                                            .image(img)
+                                            .thumbnail(sprite)
+                                            .colour(color)
+                                            .footer(serenity::CreateEmbedFooter::new(
+                                                "@~ powered by UwUntu & RustyBamboo",
+                                            )),
+                                    )
+                                    .components(components),
+                            )
+                            .await
+                            .unwrap();
+
+                        timeout_check = false;
+                        not_choose = false;
+                        break;
+                    }
+                }
+
+                if timeout_check {
+                    let desc =
+                        "Hey! Response timed out... try again tomorrow (next: `/uwu`)".to_string();
+                    msg.write()
+                        .await
+                        .edit(
+                            &ctx,
+                            EditMessage::default()
+                                .embed(
+                                    serenity::CreateEmbed::default()
+                                        .title("????????".to_string())
+                                        .description(&desc)
+                                        .image(oak_img)
+                                        .thumbnail(&user_avatar)
+                                        .colour(data::EMBED_ERROR)
+                                        .footer(serenity::CreateEmbedFooter::new(
+                                            "@~ powered by UwUntu & RustyBamboo",
+                                        )),
+                                )
+                                .components(Vec::new()),
+                        )
+                        .await
+                        .unwrap();
+                }
+
+                let mut timeout_check = true;
+
+                while let Some(reaction) = reactions.next().await {
+                    let react_id = reaction.member.clone().unwrap_or_default().user.id;
+                    let react_str = reaction.data.custom_id.to_string();
+                    let string_split: Vec<&str> = react_str.split('-').collect();
+
+                    if react_id == user_id && string_split[0] == "choose" {
+                        match string_split[1] {
+                            "Bulbasaur" => {
+                                let mut user_data = u.write().await;
+                                user_data.get_event().add_pokemon(bulbasaur.clone());
+                                not_choose = false;
+                            }
+
+                            "Squirtle" => {
+                                let mut user_data = u.write().await;
+                                user_data.get_event().add_pokemon(squirtle.clone());
+                                not_choose = false;
+                            }
+
+                            "Charmander" => {
+                                let mut user_data = u.write().await;
+                                user_data.get_event().add_pokemon(charmander.clone());
+                                not_choose = false;
+                            }
+
+                            _ => {
+                                not_choose = true;
+                            }
+                        }
+
+                        if !not_choose {
+                            msg.write()
+                                .await
+                                .edit(
+                                    &ctx,
+                                    EditMessage::default()
+                                        .embed(
+                                            serenity::CreateEmbed::default()
+                                                .title("Prof Oak".to_string())
+                                                .description(&oak_text6)
+                                                .image(oak_img)
+                                                .thumbnail(&user_avatar)
+                                                .colour(data::EMBED_CYAN)
+                                                .footer(serenity::CreateEmbedFooter::new(
+                                                    "@~ powered by UwUntu & RustyBamboo",
+                                                )),
+                                        )
+                                        .components(Vec::new()),
+                                )
+                                .await
+                                .unwrap();
+                        }
+
+                        timeout_check = false;
+                        break;
+                    }
+
+                    if react_id == user_id && reaction.data.custom_id.as_str() == "back" {
+                        let mut buttons = Vec::new();
+
+                        let left_btn = serenity::CreateButton::new("open_modal")
+                            .label("Left Poké Ball")
+                            .custom_id("left".to_string())
+                            .style(poise::serenity_prelude::ButtonStyle::Primary);
+                        buttons.push(left_btn);
+
+                        let center_btn = serenity::CreateButton::new("open_modal")
+                            .label("Center Poké Ball")
+                            .custom_id("center".to_string())
+                            .style(poise::serenity_prelude::ButtonStyle::Primary);
+                        buttons.push(center_btn);
+
+                        let right_btn = serenity::CreateButton::new("open_modal")
+                            .label("Right Poké Ball")
+                            .custom_id("right".to_string())
+                            .style(poise::serenity_prelude::ButtonStyle::Primary);
+                        buttons.push(right_btn);
+
+                        let components = vec![serenity::CreateActionRow::Buttons(buttons)];
+                        msg.write()
+                            .await
+                            .edit(
+                                &ctx,
+                                EditMessage::default()
+                                    .embed(
+                                        serenity::CreateEmbed::default()
+                                            .title("Prof Oak".to_string())
+                                            .description(&oak_text5)
+                                            .image(poke_img)
+                                            .thumbnail(&user_avatar)
+                                            .colour(data::EMBED_DEFAULT)
+                                            .footer(serenity::CreateEmbedFooter::new(
+                                                "@~ powered by UwUntu & RustyBamboo",
+                                            )),
+                                    )
+                                    .components(components),
+                            )
+                            .await
+                            .unwrap();
+
+                        timeout_check = false;
+                        break;
+                    }
+                }
+
+                if timeout_check {
+                    let desc =
+                        "Hey! Response timed out... try again tomorrow (next: `/uwu`)".to_string();
+                    msg.write()
+                        .await
+                        .edit(
+                            &ctx,
+                            EditMessage::default()
+                                .embed(
+                                    serenity::CreateEmbed::default()
+                                        .title("????????".to_string())
+                                        .description(&desc)
+                                        .image(oak_img)
+                                        .thumbnail(&user_avatar)
+                                        .colour(data::EMBED_ERROR)
+                                        .footer(serenity::CreateEmbedFooter::new(
+                                            "@~ powered by UwUntu & RustyBamboo",
+                                        )),
+                                )
+                                .components(Vec::new()),
+                        )
+                        .await
+                        .unwrap();
+                }
+            }
+        });
+    } else {
+        wild_pokemon();
+    }
+
+    Ok(())
+}
+
+#[poise::command(slash_command)]
+pub async fn buddy(ctx: Context<'_>) -> Result<(), Error> {
+    let user = ctx.author();
+    let data = &ctx.data().users;
+    let u = data.get(&user.id).unwrap();
+    let user_data = u.read().await;
+
+    let team = user_data.get_event().get_team();
+    let buddy = user_data.get_event().get_buddy();
+
+    if !team.is_empty() {
+        let pokemon = get_pokedata(ctx, Some(team[buddy].get_name()), None);
+
+        let name: String = pokemon.get_name();
+        let types: String = pokemon.get_types();
+        let sprite: String = pokemon.get_sprite();
+
+        let type_split: Vec<&str> = types.split('/').collect();
+        let first_type = type_split
+            .first()
+            .expect("search_Pokemon(): Failed to expand first_type")
+            .to_string();
+        let poke_color = get_type_color(&first_type);
+
+        let health = pokemon.get_health();
+        let current = pokemon.get_current_health();
+        let hp_percent = current as f32 / health as f32;
+
+        let desc = if hp_percent > 0.80 {
+            format!("**{}** is brimming with energy!", name)
+        } else if (0.50..0.80).contains(&hp_percent) {
+            format!("**{}** is happy.", name)
+        } else if (0.30..0.50).contains(&hp_percent) {
+            format!("**{}** is tired...", name)
+        } else {
+            format!("**{}** is knocked out...", name)
+        };
+
+        ctx.send(
+            poise::CreateReply::default().embed(
+                serenity::CreateEmbed::new()
+                    .title("Buddy")
+                    .description(desc)
+                    .color(Color::new(poke_color))
+                    .thumbnail(sprite)
+                    .footer(serenity::CreateEmbedFooter::new(
+                        "@~ powered by UwUntu & RustyBamboo",
+                    )),
+            ),
+        )
+        .await?;
+    } else {
+        ctx.send(
+            poise::CreateReply::default().embed(
+                serenity::CreateEmbed::new()
+                    .title("Buddy")
+                    .description("You don't have anyone in your team right now...")
+                    .color(data::EMBED_ERROR)
+                    .thumbnail("https://cdn.discordapp.com/attachments/1196582162057662484/1206389369880059954/pokeballs.png?ex=65dbd4a7&is=65c95fa7&hm=06799355aeafcb5d59614e9d810975adec64d6538410b869ac036007d10ac46a&")
+                    .footer(serenity::CreateEmbedFooter::new(
+                        "@~ powered by UwUntu & RustyBamboo",
+                    )),
+            ),
+        )
+        .await?;
+    }
+
+    Ok(())
+}
+
+#[poise::command(slash_command)]
+pub async fn wild_pokemon(ctx: Context<'_>) -> Result<(), Error> {
     // TODO: create 3 vectors with specific indexi for common, rare, mythic, legendary pokemon
     //       create persisting message with attack, capture, or run
 
     let pokemon = spawn_pokemon(ctx);
     let name: String = pokemon.get_name();
-    let sprite: String = pokemon.get_sprite();
+    // let sprite: String = pokemon.get_sprite();
 
-    let msg_txt = format!("A wild {} appeared!", name);
+    let msg_txt = format!("A wild **{}** appeared!", name);
 
     let types: String = pokemon.get_types();
     let type_split: Vec<&str> = types.split('/').collect();
@@ -167,14 +905,16 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
         .expect("search_Pokemon(): Failed to expand first_type")
         .to_string();
     let poke_color = get_type_color(&first_type);
+    let poke_img = pokemon.get_wallpaper();
 
     ctx.send(
         poise::CreateReply::default().embed(
             serenity::CreateEmbed::new()
-                .title("Wild Encounter")
+                .title("Wild Pokemon")
                 .description(msg_txt)
                 .color(Color::new(poke_color))
-                .image(sprite)
+                .thumbnail("https://cdn.discordapp.com/attachments/1196582162057662484/1206129126470193162/Untitled-1.png?ex=65dae248&is=65c86d48&hm=f5f74d83901446f6e548943cd227b723d6dd27c380dcad929ac804e63414fbd7&")
+                .image(poke_img)
                 .footer(serenity::CreateEmbedFooter::new(
                     "@~ powered by UwUntu & RustyBamboo",
                 )),
@@ -186,7 +926,7 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
 }
 
 #[poise::command(slash_command)]
-pub async fn trainer_encounter(ctx: Context<'_>, level: u32) -> Result<(), Error> {
+pub async fn trainer_battle(ctx: Context<'_>, level: u32) -> Result<(), Error> {
     let trainer = spawn_trainer(ctx, level as i32);
 
     let msg_txt: String = match trainer.get_tier().as_str() {

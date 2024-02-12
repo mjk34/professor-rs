@@ -486,13 +486,13 @@ pub async fn leaderboard(
     }
     let buttons = vec![
         serenity::CreateButton::new("open_modal")
-            .label("<-")
+            .label("<")
             .custom_id("back".to_string())
-            .style(poise::serenity_prelude::ButtonStyle::Primary),
+            .style(poise::serenity_prelude::ButtonStyle::Secondary),
         serenity::CreateButton::new("open_modal")
-            .label("->")
+            .label(">")
             .custom_id("next".to_string())
-            .style(poise::serenity_prelude::ButtonStyle::Primary),
+            .style(poise::serenity_prelude::ButtonStyle::Secondary),
     ];
     let components = vec![serenity::CreateActionRow::Buttons(buttons)];
 

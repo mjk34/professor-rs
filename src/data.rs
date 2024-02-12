@@ -108,14 +108,14 @@ impl PokeData {
             return 0;
         }
 
-        return self.health.clone().unwrap();
+        self.health.unwrap()
     }
     pub fn get_current_health(&self) -> i32 {
         if self.current_hp.is_none() {
             return 0;
         }
 
-        return self.current_hp.clone().unwrap();
+        self.current_hp.unwrap()
     }
 
     pub fn get_types(&self) -> String {
@@ -157,9 +157,28 @@ impl TrainerData {
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct EventData {
     name: String,
-    buddy: i32,
+    buddy: usize,
     team: Vec<PokeData>,
+    // add a personal pokedex that shows what you've caught
     store: Vec<ItemData>,
+}
+
+impl EventData {
+    pub fn set_buddy(&mut self, buddy: usize) {
+        self.buddy = buddy
+    }
+
+    pub fn add_pokemon(&mut self, pokemon: PokeData) {
+        self.team.push(pokemon)
+    }
+
+    pub fn get_buddy(&self) -> usize {
+        self.buddy
+    }
+
+    pub fn get_team(&self) -> Vec<PokeData> {
+        self.team.clone()
+    }
 }
 
 // User profile
@@ -323,6 +342,10 @@ impl UserData {
 
     pub fn get_next_level(&self) -> i32 {
         500 + self.get_level() * 80
+    }
+
+    pub fn get_event(&self) -> EventData {
+        self.event.clone()
     }
 
     pub fn add_submit(&mut self, new_submit: ClipData) -> bool {
@@ -489,12 +512,11 @@ impl Data {
 
             data.insert(user_id, Default::default());
         }
-        // self.save().await;
-        ctx.send(poise::CreateReply::default().content(format!("<@{}>", ctx.author().id)))
-            .await?;
 
         ctx.send(
-            poise::CreateReply::default().embed(
+            poise::CreateReply::default()
+            .content(format!("<@{}>", ctx.author().id))
+            .embed(
                 serenity::CreateEmbed::new()
                     .title("Account Created!")
                     .description(format!("Welcome <@{}>! You are now registered with ProfessorBot, feel free to checkout Professors Commands in https://discord.com/channels/1194668798830194850/1194700756306108437", ctx.author().id))
@@ -731,7 +753,7 @@ impl Data {
 
             let trainer_tier = if trainer_index < 15 {
                 "Common".to_string()
-            } else if (15..25).contains(&trainer_index) {
+            } else if (15..26).contains(&trainer_index) {
                 "Mythic".to_string()
             } else {
                 "Legendary".to_string()

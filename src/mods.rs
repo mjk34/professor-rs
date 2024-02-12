@@ -111,13 +111,10 @@ pub async fn give_creds(
         }
     }
 
-    if pre_text != String::new() {
-        ctx.send(poise::CreateReply::default().content(pre_text))
-            .await?;
-    }
-
     ctx.send(
-        poise::CreateReply::default().embed(
+        poise::CreateReply::default()
+        .content(pre_text)
+        .embed(
             serenity::CreateEmbed::new()
                 .title("Give Creds")
                 .description(desc)
@@ -195,11 +192,10 @@ pub async fn take_creds(
         if !data.contains_key(&user_id) {
             data.insert(user_id, Default::default());
 
-            ctx.send(poise::CreateReply::default().content(format!("<@{}>", user_id)))
-                .await?;
-
             ctx.send(
-                poise::CreateReply::default().embed(
+                poise::CreateReply::default()
+                .content(format!("<@{}>", user_id))
+                .embed(
                     serenity::CreateEmbed::new()
                         .title("Account Created!")
                         .description(format!("Welcome <@{}>! You are now registered with ProfessorBot, feel free to checkout Professors Commands in https://discord.com/channels/1194668798830194850/1194700756306108437", user_id))
@@ -237,13 +233,10 @@ pub async fn take_creds(
         }
     }
 
-    if pre_text != String::new() {
-        ctx.send(poise::CreateReply::default().content(pre_text))
-            .await?;
-    }
-
     ctx.send(
-        poise::CreateReply::default().embed(
+        poise::CreateReply::default()
+        .content(pre_text)
+        .embed(
             serenity::CreateEmbed::new()
                 .title("Take Creds")
                 .description(desc)
