@@ -804,6 +804,7 @@ pub async fn poke_event(ctx: Context<'_>) -> Result<(), Error> {
                             .unwrap();
 
                         timeout_check = false;
+                        not_choose = true;
                         break;
                     }
                 }
@@ -852,7 +853,7 @@ pub async fn buddy(ctx: Context<'_>) -> Result<(), Error> {
     let buddy = user_data.event.get_buddy();
 
     if !team.is_empty() {
-        let pokemon = get_pokedata(ctx, Some(team[buddy].get_name()), None);
+        let pokemon = &team[buddy];
 
         let name: String = pokemon.get_name();
         let types: String = pokemon.get_types();
