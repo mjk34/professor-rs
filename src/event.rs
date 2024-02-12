@@ -66,7 +66,7 @@ fn get_pokedata(
         // handle for user giving an index
         (None, Some(pokemon_index)) => {
             let pokedex = &ctx.data().pokedex;
-            let pokemon = if pokemon_index < 151 {
+            let pokemon = if pokemon_index < 152 {
                 pokedex
                     .get(pokemon_index)
                     .expect("get_pokedata(): Failed to load Pokemon from index")
@@ -1050,25 +1050,21 @@ fn spawn_trainer(ctx: Context<'_>, level: i32) -> TrainerData {
             "Mythic"
         }
     } else if (10..20).contains(&level) {
-        if random_trainer < 75 {
-            "Common"
-        } else if (75..98).contains(&random_trainer) {
-            "Mythic"
-        } else {
-            "Legendary"
-        }
-    } else if (20..30).contains(&level) {
         if random_trainer < 60 {
             "Common"
-        } else if (60..95).contains(&random_trainer) {
+        } else {
+            "Mythic"
+        }
+    } else if (20..30).contains(&level) {
+        if random_trainer < 30 {
+            "Common"
+        } else if (30..95).contains(&random_trainer) {
             "Mythic"
         } else {
             "Legendary"
         }
     } else {
-        if random_trainer < 40 {
-            "Common"
-        } else if (40..80).contains(&random_trainer) {
+        if random_trainer < 60 {
             "Mythic"
         } else {
             "Legendary"
@@ -1269,6 +1265,7 @@ fn spawn_trainer(ctx: Context<'_>, level: i32) -> TrainerData {
                         mythic_index.choose(&mut thread_rng()).unwrap()
                     }
                 }
+
                 "Legendary" => {
                     if random_tier < 20 {
                         rare_index.choose(&mut thread_rng()).unwrap()
@@ -1278,6 +1275,7 @@ fn spawn_trainer(ctx: Context<'_>, level: i32) -> TrainerData {
                         legendary_index.choose(&mut thread_rng()).unwrap()
                     }
                 }
+
                 _ => {
                     if random_tier < 70 {
                         common_index.choose(&mut thread_rng()).unwrap()
@@ -1288,7 +1286,7 @@ fn spawn_trainer(ctx: Context<'_>, level: i32) -> TrainerData {
             };
 
             // check if pokemon is already in team (no duplicates)
-            if !team_index.contains(poke_index) {
+            if !team_index.contains(poke_index) && poke_index > &0 {
                 team_index.push(*poke_index);
                 check = false;
             }
