@@ -965,6 +965,7 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
         .to_string();
     let my_color = get_type_color(&my_type);
     let my_sprite = my_pokemon.get_sprite();
+    let my_bsprite = my_pokemon.get_bsprite();
 
     // create buttons
     let mut buttons = Vec::new();
@@ -1016,6 +1017,7 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
     let ctx = ctx.serenity_context().clone();
 
     let user_id = user.id;
+    let user_name = user.name.clone();
     let user_avatar = user.avatar_url().unwrap_or_default().to_string();
     let u = Arc::clone(&u);
 
@@ -1028,15 +1030,15 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
                 .unwrap();
             let react_id = reaction.member.clone().unwrap_or_default().user.id;
             if react_id == user_id && reaction.data.custom_id.as_str() == "fight" {
-                let mut desc = format!(
-                    "\u{3000}\u{3000}\u{3000}\u{3000}Wild {}\n\u{3000}\u{3000}\u{3000}\u{3000}\u{3000}HP: {}/{}\u{3000}",
-                    wild_name, wild_pokemon.get_current_health(), wild_pokemon.get_health()
-                );
+                let mut desc = "\nRolling for initiative!\n\n\n\n\n".to_string();
 
                 desc += format!(
-                    "\u{3000}Wild {}\u{3000}\u{3000}\u{3000}\u{3000}\u{3000}\n\u{3000}HP: {}/{}\u{3000}\u{3000}\u{3000}\u{3000}\u{3000}",
-                    my_name, my_pokemon.get_current_health(), my_pokemon.get_health()
-                ).as_str();
+                    "\n\n**{}** |  HP: {}/{}",
+                    my_name,
+                    my_pokemon.get_current_health(),
+                    my_pokemon.get_health()
+                )
+                .as_str();
 
                 msg.write()
                     .await
@@ -1045,10 +1047,15 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
                         EditMessage::default()
                             .embed(
                                 serenity::CreateEmbed::default()
-                                    .title("Wild Pokemon".to_string())
+                                    .title(format!(
+                                        "Wild **{}** |  HP: {}/{}",
+                                        wild_name,
+                                        wild_pokemon.get_current_health(),
+                                        wild_pokemon.get_health()
+                                    ))
                                     .description(desc)
                                     .thumbnail(wild_sprite)
-                                    .image("https://www.pokencyclopedia.info/sprites/gen3/spr-b_firered-leafgreen/b_frlg_004.png")
+                                    .image(my_bsprite)
                                     .colour(data::EMBED_DEFAULT)
                                     .footer(serenity::CreateEmbedFooter::new(
                                         "@~ powered by UwUntu & RustyBamboo",

@@ -73,6 +73,7 @@ pub struct PokeData {
     desc: String,
     nickname: Option<String>,
     sprite: String,
+    bsprite: String,
     wallpaper: String,
     current_hp: Option<i32>,
     health: Option<i32>,
@@ -99,6 +100,9 @@ impl PokeData {
     // }
     pub fn get_sprite(&self) -> String {
         self.sprite.clone()
+    }
+    pub fn get_bsprite(&self) -> String {
+        self.bsprite.clone()
     }
     pub fn get_wallpaper(&self) -> String {
         self.wallpaper.clone()
@@ -581,6 +585,7 @@ impl Data {
             index: 0,
             desc: "????????????".to_string(),
             types: "Normal".to_string(),
+            bsprite: "".to_string(),
             sprite: "https://archives.bulbagarden.net/media/upload/9/98/Missingno_RB.png"
                 .to_string(),
             wallpaper: "https://cdn.discordapp.com/attachments/1196582162057662484/1205737290186629150/000.png?ex=65d9755b&is=65c7005b&hm=5b4c8a00352fc53e6be6930f5b960090ca955a02bfcc838299ba59a6be7ed888&".to_string(),
@@ -592,7 +597,7 @@ impl Data {
 
         let mut poke_counter = 1;
         for poke_line in poke_string {
-            let line_split: Vec<&str> = poke_line.split('=').collect();
+            let line_split: Vec<&str> = poke_line.split('*').collect();
 
             let poke_name: String = line_split
                 .first()
@@ -614,6 +619,10 @@ impl Data {
                 .get(4)
                 .unwrap_or_else(|| panic!("Failed to load Wallpaper for No. {}", poke_counter))
                 .to_string();
+            let poke_back: String = line_split
+                .get(5)
+                .unwrap_or_else(|| panic!("Failed to load back sprite for No. {}", poke_counter))
+                .to_string();
 
             let pokemon_info = PokeData {
                 name: poke_name,
@@ -621,6 +630,7 @@ impl Data {
                 desc: poke_desc,
                 types: poke_types,
                 sprite: poke_sprite,
+                bsprite: poke_back,
                 wallpaper: poke_wallpaper,
                 nickname: None,
                 current_hp: None,
