@@ -153,13 +153,15 @@ pub async fn search_pokemon(
 }
 
 #[poise::command(slash_command)]
-pub async fn poke_event(ctx: Context<'_>) -> Result<(), Error> {
+pub async fn choose_starter(ctx: Context<'_>) -> Result<(), Error> {
     let user = ctx.author();
     let data = &ctx.data().users;
     let u = data.get(&user.id).unwrap();
     let user_data = u.read().await;
 
     let team = user_data.event.get_team();
+    let oak_img = "https://cdn.discordapp.com/attachments/1196582162057662484/1206355418889064539/c8bfe05ab93e2bcb0bc78301c1a3933a.jpg?ex=65dbb508&is=65c94008&hm=985b07f671001518f422fe541b8c91ee9ac106a273a8bb023a6fe1fdb617dd50&";
+
     if team.is_empty() {
         // Oak dialogue
         let oak_text1 = format!(
@@ -713,18 +715,21 @@ pub async fn poke_event(ctx: Context<'_>) -> Result<(), Error> {
                             "Bulbasaur" => {
                                 let mut user_data = u.write().await;
                                 user_data.event.add_pokemon(bulbasaur.clone());
+                                user_data.event.set_buddy(0);
                                 not_choose = false;
                             }
 
                             "Squirtle" => {
                                 let mut user_data = u.write().await;
                                 user_data.event.add_pokemon(squirtle.clone());
+                                user_data.event.set_buddy(0);
                                 not_choose = false;
                             }
 
                             "Charmander" => {
                                 let mut user_data = u.write().await;
                                 user_data.event.add_pokemon(charmander.clone());
+                                user_data.event.set_buddy(0);
                                 not_choose = false;
                             }
 
@@ -836,7 +841,21 @@ pub async fn poke_event(ctx: Context<'_>) -> Result<(), Error> {
             }
         });
     } else {
-        wild_pokemon();
+        let oaktextf = format!("Oh, <@{}>! How is my old Pokémon?\n\nWell, it seems to like you a lot. You must be talented as a Pokémon trainer!", user.id);
+        ctx.send(
+            poise::CreateReply::default().embed(
+                serenity::CreateEmbed::new()
+                    .title("Prof Oak".to_string())
+                    .description(oaktextf)
+                    .color(data::EMBED_ERROR)
+                    .image(oak_img)
+                    .thumbnail(user.avatar_url().unwrap_or_default().to_string())
+                    .footer(serenity::CreateEmbedFooter::new(
+                        "@~ powered by UwUntu & RustyBamboo",
+                    )),
+            ),
+        )
+        .await?;
     }
 
     Ok(())
@@ -913,39 +932,209 @@ pub async fn buddy(ctx: Context<'_>) -> Result<(), Error> {
 }
 
 #[poise::command(slash_command)]
-pub async fn wild_pokemon(ctx: Context<'_>) -> Result<(), Error> {
-    // TODO: create 3 vectors with specific indexi for common, rare, mythic, legendary pokemon
-    //       create persisting message with attack, capture, or run
+pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
+    let user = ctx.author();
+    let data = &ctx.data().users;
+    let u = data.get(&user.id).unwrap();
+    let user_data = u.read().await;
 
-    let pokemon = spawn_pokemon(ctx);
-    let name: String = pokemon.get_name();
-    // let sprite: String = pokemon.get_sprite();
+    let mut wild_pokemon = spawn_pokemon(ctx);
+    wild_pokemon.set_health(generate_hp(wild_pokemon.get_index()));
 
-    let msg_txt = format!("A wild **{}** appeared!", name);
-
-    let types: String = pokemon.get_types();
-    let type_split: Vec<&str> = types.split('/').collect();
-    let first_type = type_split
+    let wild_name: String = wild_pokemon.get_name();
+    let wild_types: String = wild_pokemon.get_types();
+    let wild_type_split: Vec<&str> = wild_types.split('/').collect();
+    let first_type = wild_type_split
         .first()
         .expect("search_Pokemon(): Failed to expand first_type")
         .to_string();
-    let poke_color = get_type_color(&first_type);
-    let poke_img = pokemon.get_wallpaper();
+    let wild_color = get_type_color(&first_type);
+    let wild_sprite = wild_pokemon.get_sprite();
+    let wild_img = wild_pokemon.get_wallpaper();
 
-    ctx.send(
+    let buddy = user_data.event.get_buddy();
+    let my_team = user_data.event.get_team().clone();
+    let my_pokemon = my_team.get(buddy).unwrap().clone();
+
+    let my_name: String = my_pokemon.get_name();
+    let my_types: String = my_pokemon.get_types();
+    let my_type_split: Vec<&str> = my_types.split('/').collect();
+    let my_type = my_type_split
+        .first()
+        .expect("search_Pokemon(): Failed to expand first_type")
+        .to_string();
+    let my_color = get_type_color(&my_type);
+    let my_sprite = my_pokemon.get_sprite();
+
+    // create buttons
+    let mut buttons = Vec::new();
+
+    let fight_btn = serenity::CreateButton::new("open_modal")
+        .label(":fight:")
+        .custom_id("fight".to_string())
+        .style(poise::serenity_prelude::ButtonStyle::Success);
+    buttons.push(fight_btn);
+
+    let catch_btn = serenity::CreateButton::new("open_modal")
+        .label(":pokeball")
+        .custom_id("catch".to_string())
+        .style(poise::serenity_prelude::ButtonStyle::Success);
+    buttons.push(catch_btn);
+
+    let bag_btn = serenity::CreateButton::new("open_modal")
+        .label(":bag:")
+        .custom_id("bag".to_string())
+        .style(poise::serenity_prelude::ButtonStyle::Success);
+    buttons.push(bag_btn);
+
+    let components = vec![serenity::CreateActionRow::Buttons(buttons)];
+
+    let reply = ctx.send(
         poise::CreateReply::default().embed(
             serenity::CreateEmbed::new()
                 .title("Wild Pokemon")
-                .description(msg_txt)
-                .color(Color::new(poke_color))
+                .description(format!("A wild **{}** appeared!", wild_name))
+                .color(Color::new(wild_color))
                 .thumbnail("https://cdn.discordapp.com/attachments/1196582162057662484/1206129126470193162/Untitled-1.png?ex=65dae248&is=65c86d48&hm=f5f74d83901446f6e548943cd227b723d6dd27c380dcad929ac804e63414fbd7&")
-                .image(poke_img)
+                .image(wild_img)
                 .footer(serenity::CreateEmbedFooter::new(
                     "@~ powered by UwUntu & RustyBamboo",
                 )),
-        ),
+        ).components(components)
     )
     .await?;
+
+    let msg_og = Arc::new(RwLock::new(reply.into_message().await?));
+    let msg = Arc::clone(&msg_og);
+    let mut reactions = msg
+        .read()
+        .await
+        .await_component_interactions(ctx)
+        .timeout(Duration::new(120, 0))
+        .stream();
+
+    let ctx = ctx.serenity_context().clone();
+
+    let user_id = user.id;
+    let user_avatar = user.avatar_url().unwrap_or_default().to_string();
+    let u = Arc::clone(&u);
+
+    tokio::spawn(async move {
+        let mut timeout_check = true;
+        while let Some(reaction) = reactions.next().await {
+            reaction
+                .create_response(&ctx, serenity::CreateInteractionResponse::Acknowledge)
+                .await
+                .unwrap();
+            let react_id = reaction.member.clone().unwrap_or_default().user.id;
+            if react_id == user_id && reaction.data.custom_id.as_str() == "fight" {
+                let mut desc = format!(
+                    "\u{3000}\u{3000}\u{3000}\u{3000}Wild {}\n\u{3000}\u{3000}\u{3000}\u{3000}\u{3000}HP: {}/{}\u{3000}",
+                    wild_name, wild_pokemon.get_current_health(), wild_pokemon.get_health()
+                );
+
+                desc += format!(
+                    "\u{3000}Wild {}\u{3000}\u{3000}\u{3000}\u{3000}\u{3000}\n\u{3000}HP: {}/{}\u{3000}\u{3000}\u{3000}\u{3000}\u{3000}",
+                    my_name, my_pokemon.get_current_health(), my_pokemon.get_health()
+                ).as_str();
+
+                msg.write()
+                    .await
+                    .edit(
+                        &ctx,
+                        EditMessage::default()
+                            .embed(
+                                serenity::CreateEmbed::default()
+                                    .title("Wild Pokemon".to_string())
+                                    .description(desc)
+                                    .thumbnail(wild_sprite)
+                                    .image("https://www.pokencyclopedia.info/sprites/gen3/spr-b_firered-leafgreen/b_frlg_004.png")
+                                    .colour(data::EMBED_DEFAULT)
+                                    .footer(serenity::CreateEmbedFooter::new(
+                                        "@~ powered by UwUntu & RustyBamboo",
+                                    )),
+                            )
+                            .components(Vec::new()),
+                    )
+                    .await
+                    .unwrap();
+
+                timeout_check = false;
+                break;
+            }
+
+            if react_id == user_id && reaction.data.custom_id.as_str() == "catch" {
+                msg.write()
+                    .await
+                    .edit(
+                        &ctx,
+                        EditMessage::default()
+                            .embed(
+                                serenity::CreateEmbed::default()
+                                    .title("You chose to Catch!".to_string())
+                                    .thumbnail(&user_avatar)
+                                    .colour(data::EMBED_CYAN)
+                                    .footer(serenity::CreateEmbedFooter::new(
+                                        "@~ powered by UwUntu & RustyBamboo",
+                                    )),
+                            )
+                            .components(Vec::new()),
+                    )
+                    .await
+                    .unwrap();
+
+                timeout_check = false;
+                break;
+            }
+
+            if react_id == user_id && reaction.data.custom_id.as_str() == "bag" {
+                msg.write()
+                    .await
+                    .edit(
+                        &ctx,
+                        EditMessage::default()
+                            .embed(
+                                serenity::CreateEmbed::default()
+                                    .title("You chose to use your Bag!".to_string())
+                                    .thumbnail(&user_avatar)
+                                    .colour(data::EMBED_CYAN)
+                                    .footer(serenity::CreateEmbedFooter::new(
+                                        "@~ powered by UwUntu & RustyBamboo",
+                                    )),
+                            )
+                            .components(Vec::new()),
+                    )
+                    .await
+                    .unwrap();
+
+                timeout_check = false;
+                break;
+            }
+        }
+
+        if timeout_check {
+            let desc = "[Response timed out... try again tomorrow (next: `/uwu`)]".to_string();
+            msg.write()
+                .await
+                .edit(
+                    &ctx,
+                    EditMessage::default()
+                        .embed(
+                            serenity::CreateEmbed::default()
+                                .title("????????".to_string())
+                                .description(&desc)
+                                .thumbnail(&user_avatar)
+                                .colour(data::EMBED_ERROR)
+                                .footer(serenity::CreateEmbedFooter::new(
+                                    "@~ powered by UwUntu & RustyBamboo",
+                                )),
+                        )
+                        .components(Vec::new()),
+                )
+                .await
+                .unwrap();
+        }
+    });
 
     Ok(())
 }
@@ -1296,16 +1485,10 @@ fn spawn_trainer(ctx: Context<'_>, level: i32) -> TrainerData {
     team_index.shuffle(&mut thread_rng());
     for index in team_index {
         let mut pokemon = get_pokedata(ctx, None, Some(index));
-
-        // Generate health based on tier
-        if LEGENDARY.contains(&index) {
-            pokemon.set_health(thread_rng().gen_range(55..65));
-        } else if MYTHIC.contains(&index) {
-            pokemon.set_health(thread_rng().gen_range(40..50));
-        } else if RARE.contains(&index) {
-            pokemon.set_health(thread_rng().gen_range(25..35));
-        } else {
-            pokemon.set_health(thread_rng().gen_range(10..20));
+        match trainer.get_tier().as_str() {
+            "Mythic" => pokemon.set_health(thread_rng().gen_range(40..55)),
+            "Legendary" => pokemon.set_health(thread_rng().gen_range(55..70)),
+            _ => pokemon.set_health(thread_rng().gen_range(25..40)),
         }
 
         trainer.give_pokemon(pokemon);
@@ -1363,6 +1546,19 @@ pub async fn test_matchup(
     .await?;
 
     Ok(())
+}
+
+fn generate_hp(index: usize) -> i32 {
+    // Generate health based on tier
+    if LEGENDARY.contains(&index) {
+        thread_rng().gen_range(55..65)
+    } else if MYTHIC.contains(&index) {
+        thread_rng().gen_range(40..50)
+    } else if RARE.contains(&index) {
+        thread_rng().gen_range(25..35)
+    } else {
+        thread_rng().gen_range(10..20)
+    }
 }
 
 fn get_advantage(ctx: Context<'_>, type1: String, type2: String) -> f32 {
