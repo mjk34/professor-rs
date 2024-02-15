@@ -81,6 +81,10 @@ pub struct PokeData {
 }
 
 impl PokeData {
+    pub fn set_current_health(&mut self, health: i32) {
+        self.current_hp = Some(health);
+    }
+
     pub fn set_health(&mut self, health: i32) {
         self.health = Some(health);
         self.current_hp = Some(health);
@@ -89,24 +93,31 @@ impl PokeData {
     pub fn get_name(&self) -> String {
         self.name.clone()
     }
+
     pub fn get_index(&self) -> usize {
         self.index
     }
+
     pub fn get_desc(&self) -> String {
         self.desc.clone()
     }
+
     // pub fn get_nickname(&self) -> Option<String> {
     //     return self.nickname.clone();
     // }
+
     pub fn get_sprite(&self) -> String {
         self.sprite.clone()
     }
+
     pub fn get_bsprite(&self) -> String {
         self.bsprite.clone()
     }
+
     pub fn get_wallpaper(&self) -> String {
         self.wallpaper.clone()
     }
+
     pub fn get_health(&self) -> i32 {
         if self.health.is_none() {
             return 0;
@@ -114,6 +125,7 @@ impl PokeData {
 
         self.health.unwrap()
     }
+
     pub fn get_current_health(&self) -> i32 {
         if self.current_hp.is_none() {
             return 0;

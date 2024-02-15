@@ -14,6 +14,7 @@
 use crate::data::{self, PokeData, TrainerData};
 use crate::serenity;
 use crate::{Context, Error};
+use core::time;
 use poise::serenity_prelude::futures::StreamExt;
 use poise::serenity_prelude::EditMessage;
 use rand::seq::SliceRandom;
@@ -938,66 +939,48 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
     let u = data.get(&user.id).unwrap();
     let user_data = u.read().await;
 
+    // Wild pokemon object
     let mut wild_pokemon = spawn_pokemon(ctx);
     wild_pokemon.set_health(generate_hp(wild_pokemon.get_index()));
 
-    let wild_name: String = wild_pokemon.get_name();
-    let wild_types: String = wild_pokemon.get_types();
-    let wild_type_split: Vec<&str> = wild_types.split('/').collect();
-    let first_type = wild_type_split
+    // Wild pokemon information
+    let wild_pokemon_name: String = wild_pokemon.get_name().clone();
+    let wild_pokemon_types: String = wild_pokemon.get_types().clone();
+    let type_split: Vec<&str> = wild_pokemon_types.split('/').collect();
+    let first_type = type_split
         .first()
         .expect("search_Pokemon(): Failed to expand first_type")
         .to_string();
-    let wild_color = get_type_color(&first_type);
-    let wild_sprite = wild_pokemon.get_sprite();
-    let wild_img = wild_pokemon.get_wallpaper();
+    let wild_pokemon_color = get_type_color(&first_type);
+    let wild_pokemon_sprite = wild_pokemon.get_sprite().clone();
+    let wild_pokemon_image = wild_pokemon.get_wallpaper().clone();
 
+    // Player pokemon team and first pokemon (buddy) object
     let buddy = user_data.event.get_buddy();
-    let my_team = user_data.event.get_team().clone();
-    let my_pokemon = my_team.get(buddy).unwrap().clone();
+    let mut player_team = user_data.event.get_team().clone();
+    let mut player_pokemon = player_team.get(buddy).unwrap().clone();
 
-    let my_name: String = my_pokemon.get_name();
-    let my_types: String = my_pokemon.get_types();
-    let my_type_split: Vec<&str> = my_types.split('/').collect();
-    let my_type = my_type_split
-        .first()
-        .expect("search_Pokemon(): Failed to expand first_type")
-        .to_string();
-    let my_color = get_type_color(&my_type);
-    let my_sprite = my_pokemon.get_sprite();
-    let my_bsprite = my_pokemon.get_bsprite();
+    // Player pokemon information
+    let player_pokemon_name: String = player_pokemon.get_name().clone();
+    let player_pokemon_types: String = player_pokemon.get_types().clone();
+    let player_pokemon_sprite = player_pokemon.get_sprite().clone();
+    let player_pokemon_back_sprite = player_pokemon.get_bsprite().clone();
 
-    // create buttons
-    let mut buttons = Vec::new();
-
-    let fight_btn = serenity::CreateButton::new("open_modal")
-        .label(":fight:")
-        .custom_id("fight".to_string())
+    let continue_btn = serenity::CreateButton::new("open_modal")
+        .label("Continue")
+        .custom_id("continue".to_string())
         .style(poise::serenity_prelude::ButtonStyle::Success);
-    buttons.push(fight_btn);
 
-    let catch_btn = serenity::CreateButton::new("open_modal")
-        .label(":pokeball")
-        .custom_id("catch".to_string())
-        .style(poise::serenity_prelude::ButtonStyle::Success);
-    buttons.push(catch_btn);
-
-    let bag_btn = serenity::CreateButton::new("open_modal")
-        .label(":bag:")
-        .custom_id("bag".to_string())
-        .style(poise::serenity_prelude::ButtonStyle::Success);
-    buttons.push(bag_btn);
-
-    let components = vec![serenity::CreateActionRow::Buttons(buttons)];
+    let components = vec![serenity::CreateActionRow::Buttons(vec![continue_btn])];
 
     let reply = ctx.send(
         poise::CreateReply::default().embed(
             serenity::CreateEmbed::new()
                 .title("Wild Pokemon")
-                .description(format!("A wild **{}** appeared!", wild_name))
-                .color(Color::new(wild_color))
+                .description(format!("A wild **{}** appeared!", wild_pokemon_name))
+                .color(Color::new(wild_pokemon_color))
                 .thumbnail("https://cdn.discordapp.com/attachments/1196582162057662484/1206129126470193162/Untitled-1.png?ex=65dae248&is=65c86d48&hm=f5f74d83901446f6e548943cd227b723d6dd27c380dcad929ac804e63414fbd7&")
-                .image(wild_img)
+                .image(wild_pokemon_image)
                 .footer(serenity::CreateEmbedFooter::new(
                     "@~ powered by UwUntu & RustyBamboo",
                 )),
@@ -1017,26 +1000,67 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
     let ctx = ctx.serenity_context().clone();
 
     let user_id = user.id;
-    let user_name = user.name.clone();
     let user_avatar = user.avatar_url().unwrap_or_default().to_string();
     let u = Arc::clone(&u);
 
     tokio::spawn(async move {
         let mut timeout_check = true;
+        let mut catch_success = false;
+        let mut defeat_pokemon = false;
+        let mut wild_go_first = false;
+
         while let Some(reaction) = reactions.next().await {
             reaction
                 .create_response(&ctx, serenity::CreateInteractionResponse::Acknowledge)
                 .await
                 .unwrap();
+
             let react_id = reaction.member.clone().unwrap_or_default().user.id;
-            if react_id == user_id && reaction.data.custom_id.as_str() == "fight" {
-                let mut desc = "\nRolling for initiative!\n\n\n\n\n".to_string();
+            if react_id == user_id && reaction.data.custom_id.as_str() == "continue" {
+                // create buttons
+                let mut buttons = Vec::new();
+
+                let fight_btn = serenity::CreateButton::new("open_modal")
+                    .label("Fight")
+                    .custom_id("fight".to_string())
+                    .style(poise::serenity_prelude::ButtonStyle::Primary);
+                buttons.push(fight_btn);
+
+                let catch_btn = serenity::CreateButton::new("open_modal")
+                    .label("Switch")
+                    .custom_id("switch".to_string())
+                    .style(poise::serenity_prelude::ButtonStyle::Primary);
+                buttons.push(catch_btn);
+
+                let bag_btn = serenity::CreateButton::new("open_modal")
+                    .label("Bag")
+                    .custom_id("bag".to_string())
+                    .style(poise::serenity_prelude::ButtonStyle::Primary);
+                buttons.push(bag_btn);
+
+                let components = vec![serenity::CreateActionRow::Buttons(buttons)];
+
+                let wild_roll = thread_rng().gen_range(1..21);
+                let player_roll = thread_rng().gen_range(1..21);
+
+                let mut desc = "﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n\n".to_string();
 
                 desc += format!(
-                    "\n\n**{}** |  HP: {}/{}",
-                    my_name,
-                    my_pokemon.get_current_health(),
-                    my_pokemon.get_health()
+                    "Rolling for initiative... \nWild **{}** rolled a... . . . **{}**\n**{}** rolled a... . . . **{}**\n\n",
+                    wild_pokemon_name, wild_roll, player_pokemon_name, player_roll
+                ).as_str();
+
+                if player_roll > wild_roll || player_roll == 1 && wild_roll == 1 {
+                    desc += format!("**{}** goes first!", player_pokemon_name).as_str();
+                } else {
+                    desc += format!("Wild **{}** goes first!", wild_pokemon_name).as_str();
+                }
+
+                desc += format!(
+                    "\n\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n**{}** |  HP: {}/{}",
+                    &player_pokemon_name,
+                    player_pokemon.get_current_health(),
+                    player_pokemon.get_health()
                 )
                 .as_str();
 
@@ -1049,67 +1073,19 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
                                 serenity::CreateEmbed::default()
                                     .title(format!(
                                         "Wild **{}** |  HP: {}/{}",
-                                        wild_name,
+                                        wild_pokemon_name,
                                         wild_pokemon.get_current_health(),
                                         wild_pokemon.get_health()
                                     ))
                                     .description(desc)
-                                    .thumbnail(wild_sprite)
-                                    .image(my_bsprite)
+                                    .thumbnail(&wild_pokemon_sprite)
+                                    .image(&player_pokemon_back_sprite)
                                     .colour(data::EMBED_DEFAULT)
                                     .footer(serenity::CreateEmbedFooter::new(
                                         "@~ powered by UwUntu & RustyBamboo",
                                     )),
                             )
-                            .components(Vec::new()),
-                    )
-                    .await
-                    .unwrap();
-
-                timeout_check = false;
-                break;
-            }
-
-            if react_id == user_id && reaction.data.custom_id.as_str() == "catch" {
-                msg.write()
-                    .await
-                    .edit(
-                        &ctx,
-                        EditMessage::default()
-                            .embed(
-                                serenity::CreateEmbed::default()
-                                    .title("You chose to Catch!".to_string())
-                                    .thumbnail(&user_avatar)
-                                    .colour(data::EMBED_CYAN)
-                                    .footer(serenity::CreateEmbedFooter::new(
-                                        "@~ powered by UwUntu & RustyBamboo",
-                                    )),
-                            )
-                            .components(Vec::new()),
-                    )
-                    .await
-                    .unwrap();
-
-                timeout_check = false;
-                break;
-            }
-
-            if react_id == user_id && reaction.data.custom_id.as_str() == "bag" {
-                msg.write()
-                    .await
-                    .edit(
-                        &ctx,
-                        EditMessage::default()
-                            .embed(
-                                serenity::CreateEmbed::default()
-                                    .title("You chose to use your Bag!".to_string())
-                                    .thumbnail(&user_avatar)
-                                    .colour(data::EMBED_CYAN)
-                                    .footer(serenity::CreateEmbedFooter::new(
-                                        "@~ powered by UwUntu & RustyBamboo",
-                                    )),
-                            )
-                            .components(Vec::new()),
+                            .components(components),
                     )
                     .await
                     .unwrap();
@@ -1140,7 +1116,192 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
                 )
                 .await
                 .unwrap();
+            return;
         }
+
+        // Create a check for who goes first ---- roll for initiative
+
+        while !catch_success && !defeat_pokemon {
+            timeout_check = true;
+            while let Some(reaction) = reactions.next().await {
+                reaction
+                    .create_response(&ctx, serenity::CreateInteractionResponse::Acknowledge)
+                    .await
+                    .unwrap();
+
+                // create buttons
+                let mut buttons = Vec::new();
+
+                let fight_btn = serenity::CreateButton::new("open_modal")
+                    .label("Fight")
+                    .custom_id("fight".to_string())
+                    .style(poise::serenity_prelude::ButtonStyle::Primary);
+                buttons.push(fight_btn);
+
+                let catch_btn = serenity::CreateButton::new("open_modal")
+                    .label("Switch")
+                    .custom_id("switch".to_string())
+                    .style(poise::serenity_prelude::ButtonStyle::Primary);
+                buttons.push(catch_btn);
+
+                let bag_btn = serenity::CreateButton::new("open_modal")
+                    .label("Bag")
+                    .custom_id("bag".to_string())
+                    .style(poise::serenity_prelude::ButtonStyle::Primary);
+                buttons.push(bag_btn);
+
+                let components = vec![serenity::CreateActionRow::Buttons(buttons)];
+                let react_id = reaction.member.clone().unwrap_or_default().user.id;
+
+                if react_id == user_id && reaction.data.custom_id.as_str() == "fight" {
+                    if wild_pokemon.get_current_health() - 9 < 0 {
+                        wild_pokemon.set_current_health(0);
+                    } else {
+                        wild_pokemon.set_current_health(wild_pokemon.get_current_health() - 9);
+                    }
+
+                    let mut desc = "﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n\n\n".to_string();
+
+                    desc += "Attacking!\n";
+
+                    desc += format!(
+                        "\n\n\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n**{}** |  HP: {}/{}",
+                        &player_pokemon_name,
+                        player_pokemon.get_current_health(),
+                        player_pokemon.get_health()
+                    )
+                    .as_str();
+
+                    msg.write()
+                        .await
+                        .edit(
+                            &ctx,
+                            EditMessage::default()
+                                .embed(
+                                    serenity::CreateEmbed::default()
+                                        .title(format!(
+                                            "Wild **{}** |  HP: {}/{}",
+                                            wild_pokemon_name,
+                                            wild_pokemon.get_current_health(),
+                                            wild_pokemon.get_health()
+                                        ))
+                                        .description(desc)
+                                        .thumbnail(&wild_pokemon_sprite)
+                                        .image(&player_pokemon_back_sprite)
+                                        .colour(data::EMBED_DEFAULT)
+                                        .footer(serenity::CreateEmbedFooter::new(
+                                            "@~ powered by UwUntu & RustyBamboo",
+                                        )),
+                                )
+                                .components(components),
+                        )
+                        .await
+                        .unwrap();
+
+                    timeout_check = false;
+                    break;
+                }
+
+                // provide list of pokemon and buttons to switch pokemon
+                if react_id == user_id && reaction.data.custom_id.as_str() == "switch" {
+                    msg.write()
+                        .await
+                        .edit(
+                            &ctx,
+                            EditMessage::default()
+                                .embed(
+                                    serenity::CreateEmbed::default()
+                                        .title("Switch is not yet implemented".to_string())
+                                        .thumbnail(&user_avatar)
+                                        .colour(data::EMBED_ERROR)
+                                        .footer(serenity::CreateEmbedFooter::new(
+                                            "@~ powered by UwUntu & RustyBamboo",
+                                        )),
+                                )
+                                .components(Vec::new()),
+                        )
+                        .await
+                        .unwrap();
+
+                    timeout_check = false;
+                    break;
+                }
+
+                // create a bag menu that shows potions, pokeballs and berries
+                if react_id == user_id && reaction.data.custom_id.as_str() == "bag" {
+                    msg.write()
+                        .await
+                        .edit(
+                            &ctx,
+                            EditMessage::default()
+                                .embed(
+                                    serenity::CreateEmbed::default()
+                                        .title("Bag is not yet implemented! (EXITING)".to_string())
+                                        .thumbnail(&user_avatar)
+                                        .colour(data::EMBED_ERROR)
+                                        .footer(serenity::CreateEmbedFooter::new(
+                                            "@~ powered by UwUntu & RustyBamboo",
+                                        )),
+                                )
+                                .components(Vec::new()),
+                        )
+                        .await
+                        .unwrap();
+
+                    return;
+                    // timeout_check = false;
+                    // break;
+                }
+            }
+
+            if !timeout_check && wild_pokemon.get_current_health() == 0 {
+                defeat_pokemon = true;
+            }
+
+            if timeout_check {
+                let desc = "[Response timed out... try again tomorrow (next: `/uwu`)]".to_string();
+                msg.write()
+                    .await
+                    .edit(
+                        &ctx,
+                        EditMessage::default()
+                            .embed(
+                                serenity::CreateEmbed::default()
+                                    .title("????????".to_string())
+                                    .description(&desc)
+                                    .thumbnail(&user_avatar)
+                                    .colour(data::EMBED_ERROR)
+                                    .footer(serenity::CreateEmbedFooter::new(
+                                        "@~ powered by UwUntu & RustyBamboo",
+                                    )),
+                            )
+                            .components(Vec::new()),
+                    )
+                    .await
+                    .unwrap();
+                return;
+            }
+        }
+
+        msg.write()
+            .await
+            .edit(
+                &ctx,
+                EditMessage::default()
+                    .embed(
+                        serenity::CreateEmbed::default()
+                            .title("Battle Won!".to_string())
+                            .thumbnail(&user_avatar)
+                            .image("https://cdn.discordapp.com/attachments/1196582162057662484/1207548518131048468/gojo-jujutsu-kaisen.gif?ex=65e00c31&is=65cd9731&hm=8cff8d1defe87d2f529bb7e582a3d72e5a3ddb52daa64a07b3dc219b276e5f20&")
+                            .colour(data::EMBED_CYAN)
+                            .footer(serenity::CreateEmbedFooter::new(
+                                "@~ powered by UwUntu & RustyBamboo",
+                            )),
+                    )
+                    .components(Vec::new()),
+            )
+            .await
+            .unwrap();
     });
 
     Ok(())
