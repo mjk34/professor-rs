@@ -29,6 +29,7 @@ pub const EMBED_SUCCESS: Color = Color::new(65280); // green - major success
 pub const EMBED_ERROR: Color = Color::new(6053215); // grey - soft fails
 pub const EMBED_MOD: Color = Color::new(16749300); // pink - moderator commands
 pub const EMBED_TRAINER: Color = Color::new(3756519); // blue - trainer battles
+pub const EMBED_WILD: Color = Color::new(14845763); // orange - wild encounter
 
 // General Structures
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
