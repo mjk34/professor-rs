@@ -14,7 +14,7 @@
 use crate::data::{self, PokeData, TrainerData};
 use crate::serenity;
 use crate::{Context, Error};
-use core::time;
+use dashmap::setref::multiple;
 use poise::serenity_prelude::futures::StreamExt;
 use poise::serenity_prelude::EditMessage;
 use rand::seq::SliceRandom;
@@ -24,6 +24,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::vec;
 use tokio::sync::RwLock;
+use tokio::time::sleep;
 
 const COMMON: [usize; 61] = [
     1, 4, 7, 10, 11, 13, 14, 16, 19, 20, 21, 23, 27, 29, 32, 35, 39, 41, 43, 46, 47, 48, 50, 51,
@@ -939,6 +940,9 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
     let u = data.get(&user.id).unwrap();
     let user_data = u.read().await;
 
+    let type_matrix = ctx.data().type_matrix.clone();
+    let type_name = ctx.data().type_name.clone();
+
     // Wild pokemon object
     let mut wild_pokemon = spawn_pokemon(ctx);
     wild_pokemon.set_health(generate_hp(wild_pokemon.get_index()));
@@ -963,7 +967,6 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
     // Player pokemon information
     let player_pokemon_name: String = player_pokemon.get_name().clone();
     let player_pokemon_types: String = player_pokemon.get_types().clone();
-    let player_pokemon_sprite = player_pokemon.get_sprite().clone();
     let player_pokemon_back_sprite = player_pokemon.get_bsprite().clone();
 
     let continue_btn = serenity::CreateButton::new("open_modal")
@@ -1045,15 +1048,164 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
 
                 let mut desc = "﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n\n".to_string();
 
+                desc += " \u{3000} \u{3000} \u{3000} \u{3000}Rolling for initiative... \n";
+
                 desc += format!(
-                    "Rolling for initiative... \nWild **{}** rolled a... . . . **{}**\n**{}** rolled a... . . . **{}**\n\n",
-                    wild_pokemon_name, wild_roll, player_pokemon_name, player_roll
-                ).as_str();
+                    "\n\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n**{}** |  HP: {}/{}",
+                    &player_pokemon_name,
+                    player_pokemon.get_current_health(),
+                    player_pokemon.get_health()
+                )
+                .as_str();
+
+                msg.write()
+                    .await
+                    .edit(
+                        &ctx,
+                        EditMessage::default().embed(
+                            serenity::CreateEmbed::default()
+                                .title(format!(
+                                    "Wild **{}** |  HP: {}/{}",
+                                    wild_pokemon_name,
+                                    wild_pokemon.get_current_health(),
+                                    wild_pokemon.get_health()
+                                ))
+                                .description(desc)
+                                .thumbnail(&wild_pokemon_sprite)
+                                .image(&player_pokemon_back_sprite)
+                                .colour(data::EMBED_DEFAULT)
+                                .footer(serenity::CreateEmbedFooter::new(
+                                    "@~ powered by UwUntu & RustyBamboo",
+                                )),
+                        ),
+                    )
+                    .await
+                    .unwrap();
+
+                sleep(Duration::from_millis(700)).await;
+
+                let mut desc = "﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n\n".to_string();
+
+                desc += " \u{3000} \u{3000} \u{3000} \u{3000}Rolling for initiative... \n";
+
+                desc += format!(
+                    " \u{3000} \u{3000} \u{3000} \u{3000}Wild **{}** rolled a... . . . **{}**\n",
+                    wild_pokemon_name, wild_roll
+                )
+                .as_str();
+
+                desc += format!(
+                    "\n\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n**{}** |  HP: {}/{}",
+                    &player_pokemon_name,
+                    player_pokemon.get_current_health(),
+                    player_pokemon.get_health()
+                )
+                .as_str();
+
+                msg.write()
+                    .await
+                    .edit(
+                        &ctx,
+                        EditMessage::default().embed(
+                            serenity::CreateEmbed::default()
+                                .title(format!(
+                                    "Wild **{}** |  HP: {}/{}",
+                                    wild_pokemon_name,
+                                    wild_pokemon.get_current_health(),
+                                    wild_pokemon.get_health()
+                                ))
+                                .description(desc)
+                                .thumbnail(&wild_pokemon_sprite)
+                                .image(&player_pokemon_back_sprite)
+                                .colour(data::EMBED_DEFAULT)
+                                .footer(serenity::CreateEmbedFooter::new(
+                                    "@~ powered by UwUntu & RustyBamboo",
+                                )),
+                        ),
+                    )
+                    .await
+                    .unwrap();
+
+                sleep(Duration::from_millis(700)).await;
+
+                let mut desc = "﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n\n".to_string();
+
+                desc += " \u{3000} \u{3000} \u{3000} \u{3000}Rolling for initiative... \n";
+
+                desc += format!(
+                    " \u{3000} \u{3000} \u{3000} \u{3000}Wild **{}** rolled a... . . . **{}**\n",
+                    wild_pokemon_name, wild_roll
+                )
+                .as_str();
+
+                desc += format!(
+                    " \u{3000} \u{3000} \u{3000} \u{3000}**{}** rolled a... . . . **{}**\n\n",
+                    player_pokemon_name, player_roll
+                )
+                .as_str();
+
+                desc += format!(
+                    "\n\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n**{}** |  HP: {}/{}",
+                    &player_pokemon_name,
+                    player_pokemon.get_current_health(),
+                    player_pokemon.get_health()
+                )
+                .as_str();
+
+                msg.write()
+                    .await
+                    .edit(
+                        &ctx,
+                        EditMessage::default().embed(
+                            serenity::CreateEmbed::default()
+                                .title(format!(
+                                    "Wild **{}** |  HP: {}/{}",
+                                    wild_pokemon_name,
+                                    wild_pokemon.get_current_health(),
+                                    wild_pokemon.get_health()
+                                ))
+                                .description(desc)
+                                .thumbnail(&wild_pokemon_sprite)
+                                .image(&player_pokemon_back_sprite)
+                                .colour(data::EMBED_DEFAULT)
+                                .footer(serenity::CreateEmbedFooter::new(
+                                    "@~ powered by UwUntu & RustyBamboo",
+                                )),
+                        ),
+                    )
+                    .await
+                    .unwrap();
+
+                sleep(Duration::from_millis(700)).await;
+
+                let mut desc = "﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n\n".to_string();
+
+                desc += " \u{3000} \u{3000} \u{3000} \u{3000}Rolling for initiative... \n";
+
+                desc += format!(
+                    " \u{3000} \u{3000} \u{3000} \u{3000}Wild **{}** rolled a... . . . **{}**\n",
+                    wild_pokemon_name, wild_roll
+                )
+                .as_str();
+
+                desc += format!(
+                    " \u{3000} \u{3000} \u{3000} \u{3000}**{}** rolled a... . . . **{}**\n\n",
+                    player_pokemon_name, player_roll
+                )
+                .as_str();
 
                 if player_roll > wild_roll || player_roll == 1 && wild_roll == 1 {
-                    desc += format!("**{}** goes first!", player_pokemon_name).as_str();
+                    desc += format!(
+                        " \u{3000} \u{3000} \u{3000} \u{3000}**{}** goes first!\n",
+                        player_pokemon_name
+                    )
+                    .as_str();
                 } else {
-                    desc += format!("Wild **{}** goes first!", wild_pokemon_name).as_str();
+                    desc += format!(
+                        " \u{3000} \u{3000} \u{3000} \u{3000}Wild **{}** goes first!\n",
+                        wild_pokemon_name
+                    )
+                    .as_str();
                 }
 
                 desc += format!(
@@ -1154,18 +1306,150 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
                 let react_id = reaction.member.clone().unwrap_or_default().user.id;
 
                 if react_id == user_id && reaction.data.custom_id.as_str() == "fight" {
-                    if wild_pokemon.get_current_health() - 9 < 0 {
-                        wild_pokemon.set_current_health(0);
+                    let attack_roll = if COMMON.contains(&player_pokemon.get_index()) {
+                        thread_rng().gen_range(1..4)
+                    } else if RARE.contains(&player_pokemon.get_index()) {
+                        thread_rng().gen_range(1..6) + 1
+                    } else if MYTHIC.contains(&player_pokemon.get_index()) {
+                        thread_rng().gen_range(1..8) + 2
                     } else {
-                        wild_pokemon.set_current_health(wild_pokemon.get_current_health() - 9);
-                    }
+                        thread_rng().gen_range(1..10) + 3
+                    };
 
-                    let mut desc = "﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n\n\n".to_string();
+                    let multiplier = get_advantage(
+                        &type_matrix,
+                        &type_name,
+                        &player_pokemon_types,
+                        &wild_pokemon_types,
+                    );
 
-                    desc += "Attacking!\n";
+                    let mut desc = "﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n\n".to_string();
 
                     desc += format!(
-                        "\n\n\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n**{}** |  HP: {}/{}",
+                        " \u{3000} \u{3000}**{}** rolling to attack... \n",
+                        player_pokemon_name
+                    )
+                    .as_str();
+
+                    desc += format!(
+                        "\n\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n**{}** |  HP: {}/{}",
+                        &player_pokemon_name,
+                        player_pokemon.get_current_health(),
+                        player_pokemon.get_health()
+                    )
+                    .as_str();
+
+                    msg.write()
+                        .await
+                        .edit(
+                            &ctx,
+                            EditMessage::default().embed(
+                                serenity::CreateEmbed::default()
+                                    .title(format!(
+                                        "Wild **{}** |  HP: {}/{}",
+                                        wild_pokemon_name,
+                                        wild_pokemon.get_current_health(),
+                                        wild_pokemon.get_health()
+                                    ))
+                                    .description(desc)
+                                    .thumbnail(&wild_pokemon_sprite)
+                                    .image(&player_pokemon_back_sprite)
+                                    .colour(data::EMBED_DEFAULT)
+                                    .footer(serenity::CreateEmbedFooter::new(
+                                        "@~ powered by UwUntu & RustyBamboo",
+                                    )),
+                            ),
+                        )
+                        .await
+                        .unwrap();
+
+                    sleep(Duration::from_millis(700)).await;
+
+                    let mut desc = "﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n\n".to_string();
+
+                    desc += format!(
+                        " \u{3000} \u{3000}**{}** rolling to attack... \n",
+                        player_pokemon_name
+                    )
+                    .as_str();
+
+                    desc += format!(
+                        " \u{3000} \u{3000}**{}** rolled a... . . . **{}**\n",
+                        player_pokemon_name, attack_roll
+                    )
+                    .as_str();
+
+                    desc += format!(
+                        "\n\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n**{}** |  HP: {}/{}",
+                        &player_pokemon_name,
+                        player_pokemon.get_current_health(),
+                        player_pokemon.get_health()
+                    )
+                    .as_str();
+
+                    msg.write()
+                        .await
+                        .edit(
+                            &ctx,
+                            EditMessage::default().embed(
+                                serenity::CreateEmbed::default()
+                                    .title(format!(
+                                        "Wild **{}** |  HP: {}/{}",
+                                        wild_pokemon_name,
+                                        wild_pokemon.get_current_health(),
+                                        wild_pokemon.get_health()
+                                    ))
+                                    .description(desc)
+                                    .thumbnail(&wild_pokemon_sprite)
+                                    .image(&player_pokemon_back_sprite)
+                                    .colour(data::EMBED_DEFAULT)
+                                    .footer(serenity::CreateEmbedFooter::new(
+                                        "@~ powered by UwUntu & RustyBamboo",
+                                    )),
+                            ),
+                        )
+                        .await
+                        .unwrap();
+
+                    sleep(Duration::from_millis(700)).await;
+
+                    let damage = (attack_roll as f32 * multiplier).round() as i32;
+                    if wild_pokemon.get_current_health() - damage < 0 {
+                        wild_pokemon.set_current_health(0);
+                    } else {
+                        wild_pokemon.set_current_health(wild_pokemon.get_current_health() - damage);
+                    }
+
+                    let mut desc = "﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n\n".to_string();
+
+                    desc += format!(
+                        " \u{3000} \u{3000}**{}** rolling to attack... \n",
+                        player_pokemon_name
+                    )
+                    .as_str();
+
+                    desc += format!(
+                        " \u{3000} \u{3000}**{}** rolled a... . . . **{}**\n\n",
+                        player_pokemon_name, attack_roll
+                    )
+                    .as_str();
+
+                    desc += format!(
+                        " \u{3000} \u{3000}**{}** attacks for **{}** damage!\n",
+                        player_pokemon_name, damage
+                    )
+                    .as_str();
+
+                    if multiplier >= 2.0 {
+                        desc += " \u{3000} \u{3000}... . . Super Effective!!";
+                    } else if (1.0..2.0).contains(&multiplier) {
+                        desc += " \u{3000} \u{3000}... . . Effective.";
+                    } else {
+                        desc += " \u{3000} \u{3000}... . . Not very Effective...";
+                    }
+
+                    desc += format!(
+                        "\n\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n**{}** |  HP: {}/{}",
                         &player_pokemon_name,
                         player_pokemon.get_current_health(),
                         player_pokemon.get_health()
@@ -1665,57 +1949,6 @@ fn spawn_trainer(ctx: Context<'_>, level: i32) -> TrainerData {
     trainer
 }
 
-#[poise::command(slash_command)]
-pub async fn test_matchup(
-    ctx: Context<'_>,
-    #[description = "name of the first pokemon e.g. bulbasaur, charmander, squirtle..."]
-    pokemon1: String,
-    #[description = "name of the second pokemon e.g. bulbasaur, charmander, squirtle..."]
-    pokemon2: String,
-) -> Result<(), Error> {
-    let pokemon1 = get_pokedata(ctx, Some(pokemon1), None);
-    let pokemon2 = get_pokedata(ctx, Some(pokemon2), None);
-
-    let poke1_type = pokemon1.get_types().clone();
-    let poke2_type = pokemon2.get_types().clone();
-
-    let poke1_emojis = get_type_emoji(&poke1_type);
-    let poke2_emojis = get_type_emoji(&poke2_type);
-
-    let type_advantage = get_advantage(ctx, poke1_type, poke2_type);
-
-    let phrase = if type_advantage >= 2.0 {
-        "Super Effective!".to_string()
-    } else if type_advantage == 1.0 {
-        "Neutral.".to_string()
-    } else {
-        "Not Very Effective...".to_string()
-    };
-
-    let title_txt = format!(
-        "{} :crossed_swords: {}",
-        pokemon1.get_name(),
-        pokemon2.get_name()
-    );
-    let msg_txt = format!("{} vs {} is **{}**", poke1_emojis, poke2_emojis, phrase);
-
-    ctx.send(
-        poise::CreateReply::default().embed(
-            serenity::CreateEmbed::new()
-                .title(title_txt)
-                .description(msg_txt)
-                .color(Color::new(16760399))
-                .thumbnail("https://archives.bulbagarden.net/media/upload/3/37/RG_Pok%C3%A9dex.png")
-                .footer(serenity::CreateEmbedFooter::new(
-                    "@~ powered by UwUntu & RustyBamboo",
-                )),
-        ),
-    )
-    .await?;
-
-    Ok(())
-}
-
 fn generate_hp(index: usize) -> i32 {
     // Generate health based on tier
     if LEGENDARY.contains(&index) {
@@ -1729,9 +1962,12 @@ fn generate_hp(index: usize) -> i32 {
     }
 }
 
-fn get_advantage(ctx: Context<'_>, type1: String, type2: String) -> f32 {
-    let matrix = &ctx.data().type_matrix;
-    let names = &ctx.data().type_name;
+fn get_advantage(
+    matrix: &Vec<Vec<f32>>,
+    names: &Vec<String>,
+    type1: &String,
+    type2: &String,
+) -> f32 {
     let dual_type1: Vec<&str> = type1.split('/').collect();
     let dual_type2: Vec<&str> = type2.split('/').collect();
 
