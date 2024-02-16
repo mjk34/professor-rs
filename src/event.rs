@@ -130,12 +130,7 @@ pub async fn search_pokemon(
     let sprite: String = pokemon.get_sprite();
 
     let msg_txt = format!("**{}**: {}\n{}", name, types, desc);
-    let type_split: Vec<&str> = types.split('/').collect();
-    let first_type = type_split
-        .first()
-        .expect("search_Pokemon(): Failed to expand first_type")
-        .to_string();
-    let poke_color = get_type_color(&first_type);
+    let poke_color = get_type_color(&types);
 
     ctx.send(
         poise::CreateReply::default().embed(
@@ -949,16 +944,8 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
     wild_pokemon.set_health(generate_hp(wild_pokemon.get_index()));
 
     // Wild pokemon information
-    let wild_pokemon_name: String = wild_pokemon.get_name().clone();
     let wild_pokemon_types: String = wild_pokemon.get_types().clone();
-    let type_split: Vec<&str> = wild_pokemon_types.split('/').collect();
-    let first_type = type_split
-        .first()
-        .expect("search_Pokemon(): Failed to expand first_type")
-        .to_string();
-    let wild_pokemon_color = get_type_color(&first_type);
-    let wild_pokemon_sprite = wild_pokemon.get_sprite().clone();
-    let wild_pokemon_image = wild_pokemon.get_wallpaper().clone();
+    let wild_pokemon_color = get_type_color(&wild_pokemon_types);
 
     // Player pokemon team and first pokemon (buddy) object
     let buddy = user_data.event.get_buddy();
@@ -966,15 +953,8 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
     let mut player_pokemon = player_team.get(buddy).unwrap().clone();
 
     // Player pokemon information
-    let player_pokemon_name: String = player_pokemon.get_name().clone();
     let player_pokemon_types: String = player_pokemon.get_types().clone();
-    let player_type_split: Vec<&str> = player_pokemon_types.split('/').collect();
-    let player_first_type = player_type_split
-        .first()
-        .expect("search_Pokemon(): Failed to expand first_type")
-        .to_string();
-    let player_pokemon_color = get_type_color(&player_first_type);
-    let player_pokemon_back_sprite = player_pokemon.get_bsprite().clone();
+    let player_pokemon_color = get_type_color(&player_pokemon_types);
 
     let continue_btn = serenity::CreateButton::new("open_modal")
         .label("Continue")
@@ -987,10 +967,10 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
         poise::CreateReply::default().embed(
             serenity::CreateEmbed::new()
                 .title("Wild Pokemon")
-                .description(format!("A wild **{}** appeared!", wild_pokemon_name))
+                .description(format!("A wild **{}** appeared!", &wild_pokemon.get_name()))
                 .color(Color::new(wild_pokemon_color))
                 .thumbnail("https://cdn.discordapp.com/attachments/1196582162057662484/1206129126470193162/Untitled-1.png?ex=65dae248&is=65c86d48&hm=f5f74d83901446f6e548943cd227b723d6dd27c380dcad929ac804e63414fbd7&")
-                .image(wild_pokemon_image)
+                .image(&wild_pokemon.get_wallpaper())
                 .footer(serenity::CreateEmbedFooter::new(
                     "@~ powered by UwUntu & RustyBamboo",
                 )),
@@ -1020,6 +1000,267 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
         let mut wild_go_first = false;
         let mut forced_switch = false;
 
+        async fn timeout_exit(
+            msg: &std::sync::Arc<tokio::sync::RwLock<poise::serenity_prelude::Message>>,
+            ctx: &poise::serenity_prelude::Context,
+            user_avatar: &String,
+        ) {
+            let desc = "[Response timed out... try again tomorrow (next: `/uwu`)]".to_string();
+            msg.write()
+                .await
+                .edit(
+                    ctx,
+                    EditMessage::default()
+                        .embed(
+                            serenity::CreateEmbed::default()
+                                .title("????????".to_string())
+                                .description(&desc)
+                                .thumbnail(user_avatar)
+                                .colour(data::EMBED_ERROR)
+                                .footer(serenity::CreateEmbedFooter::new(
+                                    "@~ powered by UwUntu & RustyBamboo",
+                                )),
+                        )
+                        .components(Vec::new()),
+                )
+                .await
+                .unwrap();
+            return;
+        }
+
+        async fn wild_pokemeon_turn(
+            msg: &std::sync::Arc<tokio::sync::RwLock<poise::serenity_prelude::Message>>,
+            ctx: &poise::serenity_prelude::Context,
+            wild_pokemon: &mut PokeData,
+            player_pokemon: &mut PokeData,
+            type_matrix: &Vec<Vec<f32>>,
+            type_name: &Vec<String>,
+        ) {
+            let wild_attack_roll = if COMMON.contains(&wild_pokemon.get_index()) {
+                thread_rng().gen_range(2..8)
+            } else if RARE.contains(&wild_pokemon.get_index()) {
+                thread_rng().gen_range(3..10)
+            } else if MYTHIC.contains(&wild_pokemon.get_index()) {
+                thread_rng().gen_range(4..12)
+            } else {
+                thread_rng().gen_range(5..14)
+            };
+
+            let wild_multiplier = get_advantage(
+                type_matrix,
+                type_name,
+                &wild_pokemon.get_types(),
+                &player_pokemon.get_types(),
+            );
+
+            let wild_pokemon_color = get_type_color(&wild_pokemon.get_types());
+            let mut forced_switch = false;
+
+            let mut desc = "﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n\n".to_string();
+
+            desc += format!(
+                " \u{3000} \u{3000}Wild **{}**'s turn... \n",
+                &wild_pokemon.get_name()
+            )
+            .as_str();
+
+            desc += format!(
+                "\n\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n**{}** |  HP: {}/{}",
+                &player_pokemon.get_name(),
+                &player_pokemon.get_current_health(),
+                &player_pokemon.get_health()
+            )
+            .as_str();
+
+            msg.write()
+                .await
+                .edit(
+                    &ctx,
+                    EditMessage::default().embed(
+                        serenity::CreateEmbed::default()
+                            .title(format!(
+                                "Wild **{}** |  HP: {}/{}",
+                                &wild_pokemon.get_name(),
+                                &wild_pokemon.get_current_health(),
+                                &wild_pokemon.get_health()
+                            ))
+                            .description(desc)
+                            .thumbnail(&wild_pokemon.get_sprite())
+                            .image(&player_pokemon.get_bsprite())
+                            .colour(wild_pokemon_color)
+                            .footer(serenity::CreateEmbedFooter::new(
+                                "@~ powered by UwUntu & RustyBamboo",
+                            )),
+                    ),
+                )
+                .await
+                .unwrap();
+
+            sleep(Duration::from_millis(1400)).await;
+
+            let mut desc = "﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n\n".to_string();
+
+            desc += format!(
+                " \u{3000} \u{3000}Wild **{}** rolling to attack... \n",
+                &wild_pokemon.get_name()
+            )
+            .as_str();
+
+            desc += format!(
+                "\n\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n**{}** |  HP: {}/{}",
+                &player_pokemon.get_name(),
+                &player_pokemon.get_current_health(),
+                &player_pokemon.get_health()
+            )
+            .as_str();
+
+            msg.write()
+                .await
+                .edit(
+                    &ctx,
+                    EditMessage::default().embed(
+                        serenity::CreateEmbed::default()
+                            .title(format!(
+                                "Wild **{}** |  HP: {}/{}",
+                                &wild_pokemon.get_name(),
+                                &wild_pokemon.get_current_health(),
+                                &wild_pokemon.get_health()
+                            ))
+                            .description(desc)
+                            .thumbnail(&wild_pokemon.get_sprite())
+                            .image(&player_pokemon.get_bsprite())
+                            .colour(wild_pokemon_color)
+                            .footer(serenity::CreateEmbedFooter::new(
+                                "@~ powered by UwUntu & RustyBamboo",
+                            )),
+                    ),
+                )
+                .await
+                .unwrap();
+
+            sleep(Duration::from_millis(700)).await;
+
+            let mut desc = "﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n\n".to_string();
+
+            desc += format!(
+                " \u{3000} \u{3000}Wild **{}** rolling to attack... \n",
+                &wild_pokemon.get_name()
+            )
+            .as_str();
+
+            desc += format!(
+                " \u{3000} \u{3000}Wild **{}** rolled a... . . . **{}**\n",
+                &wild_pokemon.get_name(),
+                wild_attack_roll
+            )
+            .as_str();
+
+            desc += format!(
+                "\n\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n**{}** |  HP: {}/{}",
+                &player_pokemon.get_name(),
+                &player_pokemon.get_current_health(),
+                &player_pokemon.get_health()
+            )
+            .as_str();
+
+            msg.write()
+                .await
+                .edit(
+                    &ctx,
+                    EditMessage::default().embed(
+                        serenity::CreateEmbed::default()
+                            .title(format!(
+                                "Wild **{}** |  HP: {}/{}",
+                                &wild_pokemon.get_name(),
+                                &wild_pokemon.get_current_health(),
+                                &wild_pokemon.get_health()
+                            ))
+                            .description(desc)
+                            .thumbnail(&wild_pokemon.get_sprite())
+                            .image(&player_pokemon.get_bsprite())
+                            .colour(wild_pokemon_color)
+                            .footer(serenity::CreateEmbedFooter::new(
+                                "@~ powered by UwUntu & RustyBamboo",
+                            )),
+                    ),
+                )
+                .await
+                .unwrap();
+
+            sleep(Duration::from_millis(700)).await;
+
+            let wild_damage = (wild_attack_roll as f32 * wild_multiplier).round() as i32;
+            if player_pokemon.get_current_health() - wild_damage < 0 {
+                &player_pokemon.set_current_health(0);
+                forced_switch = true;
+            } else {
+                &player_pokemon
+                    .set_current_health(&player_pokemon.get_current_health() - wild_damage);
+            }
+
+            let mut desc = "﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n\n".to_string();
+
+            desc += format!(
+                " \u{3000} \u{3000}Wild **{}** rolling to attack... \n",
+                wild_pokemon.get_name()
+            )
+            .as_str();
+
+            desc += format!(
+                " \u{3000} \u{3000}Wild **{}** rolled a... . . . **{}**\n\n",
+                wild_pokemon.get_name(),
+                wild_attack_roll
+            )
+            .as_str();
+
+            desc += format!(
+                " \u{3000} \u{3000}Wild **{}** attacks for **{}** damage!\n\n",
+                wild_pokemon.get_name(),
+                wild_damage
+            )
+            .as_str();
+
+            if wild_multiplier >= 2.0 {
+                desc += " \u{3000} \u{3000} **Super Effective**!!";
+            } else if (1.0..2.0).contains(&wild_multiplier) {
+                desc += " \u{3000} \u{3000} Effective.";
+            } else {
+                desc += " \u{3000} \u{3000} *Not very Effective*...";
+            }
+
+            desc += format!(
+                "\n\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n**{}** |  HP: {}/{}",
+                &player_pokemon.get_name(),
+                &player_pokemon.get_current_health(),
+                &player_pokemon.get_health()
+            )
+            .as_str();
+
+            msg.write()
+                .await
+                .edit(
+                    &ctx,
+                    EditMessage::default().embed(
+                        serenity::CreateEmbed::default()
+                            .title(format!(
+                                "Wild **{}** |  HP: {}/{}",
+                                &wild_pokemon.get_name(),
+                                &wild_pokemon.get_current_health(),
+                                &wild_pokemon.get_health()
+                            ))
+                            .description(desc)
+                            .thumbnail(&wild_pokemon.get_sprite())
+                            .image(&player_pokemon.get_bsprite())
+                            .colour(wild_pokemon_color)
+                            .footer(serenity::CreateEmbedFooter::new(
+                                "@~ powered by UwUntu & RustyBamboo",
+                            )),
+                    ),
+                )
+                .await
+                .unwrap();
+        }
+
         while let Some(reaction) = reactions.next().await {
             reaction
                 .create_response(&ctx, serenity::CreateInteractionResponse::Acknowledge)
@@ -1037,9 +1278,9 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
 
                 desc += format!(
                     "\n\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n**{}** |  HP: {}/{}",
-                    &player_pokemon_name,
-                    player_pokemon.get_current_health(),
-                    player_pokemon.get_health()
+                    &player_pokemon.get_name(),
+                    &player_pokemon.get_current_health(),
+                    &player_pokemon.get_health()
                 )
                 .as_str();
 
@@ -1052,13 +1293,13 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
                                 serenity::CreateEmbed::default()
                                     .title(format!(
                                         "Wild **{}** |  HP: {}/{}",
-                                        wild_pokemon_name,
-                                        wild_pokemon.get_current_health(),
-                                        wild_pokemon.get_health()
+                                        &wild_pokemon.get_name(),
+                                        &wild_pokemon.get_current_health(),
+                                        &wild_pokemon.get_health()
                                     ))
                                     .description(desc)
-                                    .thumbnail(&wild_pokemon_sprite)
-                                    .image(&player_pokemon_back_sprite)
+                                    .thumbnail(&wild_pokemon.get_sprite())
+                                    .image(&player_pokemon.get_bsprite())
                                     .colour(data::EMBED_DEFAULT)
                                     .footer(serenity::CreateEmbedFooter::new(
                                         "@~ powered by UwUntu & RustyBamboo",
@@ -1077,15 +1318,16 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
 
                 desc += format!(
                     " \u{3000} \u{3000} \u{3000}Wild **{}** rolled a... . . . **{}**\n",
-                    wild_pokemon_name, wild_roll
+                    wild_pokemon.get_name(),
+                    wild_roll
                 )
                 .as_str();
 
                 desc += format!(
                     "\n\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n**{}** |  HP: {}/{}",
-                    &player_pokemon_name,
-                    player_pokemon.get_current_health(),
-                    player_pokemon.get_health()
+                    &player_pokemon.get_name(),
+                    &player_pokemon.get_current_health(),
+                    &player_pokemon.get_health()
                 )
                 .as_str();
 
@@ -1097,13 +1339,13 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
                             serenity::CreateEmbed::default()
                                 .title(format!(
                                     "Wild **{}** |  HP: {}/{}",
-                                    wild_pokemon_name,
-                                    wild_pokemon.get_current_health(),
-                                    wild_pokemon.get_health()
+                                    &wild_pokemon.get_name(),
+                                    &wild_pokemon.get_current_health(),
+                                    &wild_pokemon.get_health()
                                 ))
                                 .description(desc)
-                                .thumbnail(&wild_pokemon_sprite)
-                                .image(&player_pokemon_back_sprite)
+                                .thumbnail(&wild_pokemon.get_sprite())
+                                .image(&player_pokemon.get_bsprite())
                                 .colour(data::EMBED_DEFAULT)
                                 .footer(serenity::CreateEmbedFooter::new(
                                     "@~ powered by UwUntu & RustyBamboo",
@@ -1121,21 +1363,23 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
 
                 desc += format!(
                     " \u{3000} \u{3000} \u{3000}Wild **{}** rolled a... . . . **{}**\n",
-                    wild_pokemon_name, wild_roll
+                    wild_pokemon.get_name(),
+                    wild_roll
                 )
                 .as_str();
 
                 desc += format!(
                     " \u{3000} \u{3000} \u{3000}**{}** rolled a... . . . **{}**\n\n",
-                    player_pokemon_name, player_roll
+                    &player_pokemon.get_name(),
+                    player_roll
                 )
                 .as_str();
 
                 desc += format!(
                     "\n\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n**{}** |  HP: {}/{}",
-                    &player_pokemon_name,
-                    player_pokemon.get_current_health(),
-                    player_pokemon.get_health()
+                    &player_pokemon.get_name(),
+                    &player_pokemon.get_current_health(),
+                    &player_pokemon.get_health()
                 )
                 .as_str();
 
@@ -1147,13 +1391,13 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
                             serenity::CreateEmbed::default()
                                 .title(format!(
                                     "Wild **{}** |  HP: {}/{}",
-                                    wild_pokemon_name,
-                                    wild_pokemon.get_current_health(),
-                                    wild_pokemon.get_health()
+                                    &wild_pokemon.get_name(),
+                                    &wild_pokemon.get_current_health(),
+                                    &wild_pokemon.get_health()
                                 ))
                                 .description(desc)
-                                .thumbnail(&wild_pokemon_sprite)
-                                .image(&player_pokemon_back_sprite)
+                                .thumbnail(&wild_pokemon.get_sprite())
+                                .image(&player_pokemon.get_bsprite())
                                 .colour(data::EMBED_DEFAULT)
                                 .footer(serenity::CreateEmbedFooter::new(
                                     "@~ powered by UwUntu & RustyBamboo",
@@ -1171,13 +1415,15 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
 
                 desc += format!(
                     " \u{3000} \u{3000} \u{3000}Wild **{}** rolled a... . . . **{}**\n",
-                    wild_pokemon_name, wild_roll
+                    &wild_pokemon.get_name(),
+                    wild_roll
                 )
                 .as_str();
 
                 desc += format!(
                     " \u{3000} \u{3000} \u{3000}**{}** rolled a... . . . **{}**\n\n",
-                    player_pokemon_name, player_roll
+                    &player_pokemon.get_name(),
+                    player_roll
                 )
                 .as_str();
 
@@ -1185,7 +1431,7 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
                 if player_roll > wild_roll || player_roll == 1 && wild_roll == 1 {
                     desc += format!(
                         " \u{3000} \u{3000} \u{3000}**{}** goes first!\n",
-                        player_pokemon_name
+                        &player_pokemon.get_name()
                     )
                     .as_str();
 
@@ -1193,7 +1439,7 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
                 } else {
                     desc += format!(
                         " \u{3000} \u{3000} \u{3000}Wild **{}** goes first!\n",
-                        wild_pokemon_name
+                        &wild_pokemon.get_name()
                     )
                     .as_str();
 
@@ -1203,9 +1449,9 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
 
                 desc += format!(
                     "\n\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n**{}** |  HP: {}/{}",
-                    &player_pokemon_name,
-                    player_pokemon.get_current_health(),
-                    player_pokemon.get_health()
+                    &player_pokemon.get_name(),
+                    &player_pokemon.get_current_health(),
+                    &player_pokemon.get_health()
                 )
                 .as_str();
 
@@ -1217,13 +1463,13 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
                             serenity::CreateEmbed::default()
                                 .title(format!(
                                     "Wild **{}** |  HP: {}/{}",
-                                    wild_pokemon_name,
-                                    wild_pokemon.get_current_health(),
-                                    wild_pokemon.get_health()
+                                    &wild_pokemon.get_name(),
+                                    &wild_pokemon.get_current_health(),
+                                    &wild_pokemon.get_health()
                                 ))
                                 .description(desc)
-                                .thumbnail(&wild_pokemon_sprite)
-                                .image(&player_pokemon_back_sprite)
+                                .thumbnail(&wild_pokemon.get_sprite())
+                                .image(&player_pokemon.get_bsprite())
                                 .colour(tmp_color)
                                 .footer(serenity::CreateEmbedFooter::new(
                                     "@~ powered by UwUntu & RustyBamboo",
@@ -1236,264 +1482,35 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
                 if wild_go_first {
                     sleep(Duration::from_millis(1000)).await;
 
-                    let wild_attack_roll = if COMMON.contains(&wild_pokemon.get_index()) {
-                        thread_rng().gen_range(2..8)
-                    } else if RARE.contains(&wild_pokemon.get_index()) {
-                        thread_rng().gen_range(3..10)
-                    } else if MYTHIC.contains(&wild_pokemon.get_index()) {
-                        thread_rng().gen_range(4..12)
-                    } else {
-                        thread_rng().gen_range(5..14)
-                    };
-
-                    let wild_multiplier = get_advantage(
+                    // potentiall return if forced switch
+                    wild_pokemeon_turn(
+                        &msg,
+                        &ctx,
+                        &mut wild_pokemon,
+                        &mut player_pokemon,
                         &type_matrix,
                         &type_name,
-                        &wild_pokemon_types,
-                        &player_pokemon_types,
-                    );
-
-                    let mut desc = "﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n\n".to_string();
-
-                    desc += format!(
-                        " \u{3000} \u{3000}Wild **{}**'s turn... \n",
-                        wild_pokemon_name
                     )
-                    .as_str();
-
-                    desc += format!(
-                        "\n\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n**{}** |  HP: {}/{}",
-                        &player_pokemon_name,
-                        player_pokemon.get_current_health(),
-                        player_pokemon.get_health()
-                    )
-                    .as_str();
-
-                    msg.write()
-                        .await
-                        .edit(
-                            &ctx,
-                            EditMessage::default().embed(
-                                serenity::CreateEmbed::default()
-                                    .title(format!(
-                                        "Wild **{}** |  HP: {}/{}",
-                                        wild_pokemon_name,
-                                        wild_pokemon.get_current_health(),
-                                        wild_pokemon.get_health()
-                                    ))
-                                    .description(desc)
-                                    .thumbnail(&wild_pokemon_sprite)
-                                    .image(&player_pokemon_back_sprite)
-                                    .colour(wild_pokemon_color)
-                                    .footer(serenity::CreateEmbedFooter::new(
-                                        "@~ powered by UwUntu & RustyBamboo",
-                                    )),
-                            ),
-                        )
-                        .await
-                        .unwrap();
-
-                    sleep(Duration::from_millis(1400)).await;
-
-                    let mut desc = "﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n\n".to_string();
-
-                    desc += format!(
-                        " \u{3000} \u{3000}Wild **{}** rolling to attack... \n",
-                        wild_pokemon_name
-                    )
-                    .as_str();
-
-                    desc += format!(
-                        "\n\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n**{}** |  HP: {}/{}",
-                        &player_pokemon_name,
-                        player_pokemon.get_current_health(),
-                        player_pokemon.get_health()
-                    )
-                    .as_str();
-
-                    msg.write()
-                        .await
-                        .edit(
-                            &ctx,
-                            EditMessage::default().embed(
-                                serenity::CreateEmbed::default()
-                                    .title(format!(
-                                        "Wild **{}** |  HP: {}/{}",
-                                        wild_pokemon_name,
-                                        wild_pokemon.get_current_health(),
-                                        wild_pokemon.get_health()
-                                    ))
-                                    .description(desc)
-                                    .thumbnail(&wild_pokemon_sprite)
-                                    .image(&player_pokemon_back_sprite)
-                                    .colour(wild_pokemon_color)
-                                    .footer(serenity::CreateEmbedFooter::new(
-                                        "@~ powered by UwUntu & RustyBamboo",
-                                    )),
-                            ),
-                        )
-                        .await
-                        .unwrap();
-
-                    sleep(Duration::from_millis(700)).await;
-
-                    let mut desc = "﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n\n".to_string();
-
-                    desc += format!(
-                        " \u{3000} \u{3000}Wild **{}** rolling to attack... \n",
-                        wild_pokemon_name
-                    )
-                    .as_str();
-
-                    desc += format!(
-                        " \u{3000} \u{3000}Wild **{}** rolled a... . . . **{}**\n",
-                        wild_pokemon_name, wild_attack_roll
-                    )
-                    .as_str();
-
-                    desc += format!(
-                        "\n\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n**{}** |  HP: {}/{}",
-                        &player_pokemon_name,
-                        player_pokemon.get_current_health(),
-                        player_pokemon.get_health()
-                    )
-                    .as_str();
-
-                    msg.write()
-                        .await
-                        .edit(
-                            &ctx,
-                            EditMessage::default().embed(
-                                serenity::CreateEmbed::default()
-                                    .title(format!(
-                                        "Wild **{}** |  HP: {}/{}",
-                                        wild_pokemon_name,
-                                        wild_pokemon.get_current_health(),
-                                        wild_pokemon.get_health()
-                                    ))
-                                    .description(desc)
-                                    .thumbnail(&wild_pokemon_sprite)
-                                    .image(&player_pokemon_back_sprite)
-                                    .colour(wild_pokemon_color)
-                                    .footer(serenity::CreateEmbedFooter::new(
-                                        "@~ powered by UwUntu & RustyBamboo",
-                                    )),
-                            ),
-                        )
-                        .await
-                        .unwrap();
-
-                    sleep(Duration::from_millis(700)).await;
-
-                    let wild_damage = (wild_attack_roll as f32 * wild_multiplier).round() as i32;
-                    if player_pokemon.get_current_health() - wild_damage < 0 {
-                        player_pokemon.set_current_health(0);
-                        forced_switch = true;
-                    } else {
-                        player_pokemon
-                            .set_current_health(player_pokemon.get_current_health() - wild_damage);
-                    }
-
-                    let mut desc = "﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n\n".to_string();
-
-                    desc += format!(
-                        " \u{3000} \u{3000}Wild **{}** rolling to attack... \n",
-                        wild_pokemon_name
-                    )
-                    .as_str();
-
-                    desc += format!(
-                        " \u{3000} \u{3000}Wild **{}** rolled a... . . . **{}**\n\n",
-                        wild_pokemon_name, wild_attack_roll
-                    )
-                    .as_str();
-
-                    desc += format!(
-                        " \u{3000} \u{3000}Wild **{}** attacks for **{}** damage!\n\n",
-                        wild_pokemon_name, wild_damage
-                    )
-                    .as_str();
-
-                    if wild_multiplier >= 2.0 {
-                        desc += " \u{3000} \u{3000} **Super Effective**!!";
-                    } else if (1.0..2.0).contains(&wild_multiplier) {
-                        desc += " \u{3000} \u{3000} Effective.";
-                    } else {
-                        desc += " \u{3000} \u{3000} *Not very Effective*...";
-                    }
-
-                    desc += format!(
-                        "\n\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n**{}** |  HP: {}/{}",
-                        &player_pokemon_name,
-                        player_pokemon.get_current_health(),
-                        player_pokemon.get_health()
-                    )
-                    .as_str();
-
-                    msg.write()
-                        .await
-                        .edit(
-                            &ctx,
-                            EditMessage::default().embed(
-                                serenity::CreateEmbed::default()
-                                    .title(format!(
-                                        "Wild **{}** |  HP: {}/{}",
-                                        wild_pokemon_name,
-                                        wild_pokemon.get_current_health(),
-                                        wild_pokemon.get_health()
-                                    ))
-                                    .description(desc)
-                                    .thumbnail(&wild_pokemon_sprite)
-                                    .image(&player_pokemon_back_sprite)
-                                    .colour(wild_pokemon_color)
-                                    .footer(serenity::CreateEmbedFooter::new(
-                                        "@~ powered by UwUntu & RustyBamboo",
-                                    )),
-                            ),
-                        )
-                        .await
-                        .unwrap();
+                    .await;
 
                     // create force switch here to make playr switch, if user has no team left, battle finishes,
                     // player looses creds and buddy goes back to 1 hp
                 }
 
-                // create buttons
-                let mut buttons = Vec::new();
-
-                let fight_btn = serenity::CreateButton::new("open_modal")
-                    .label("Fight")
-                    .custom_id("fight".to_string())
-                    .style(poise::serenity_prelude::ButtonStyle::Primary);
-                buttons.push(fight_btn);
-
-                let catch_btn = serenity::CreateButton::new("open_modal")
-                    .label("Switch")
-                    .custom_id("switch".to_string())
-                    .style(poise::serenity_prelude::ButtonStyle::Primary);
-                buttons.push(catch_btn);
-
-                let bag_btn = serenity::CreateButton::new("open_modal")
-                    .label("Bag")
-                    .custom_id("bag".to_string())
-                    .style(poise::serenity_prelude::ButtonStyle::Primary);
-                buttons.push(bag_btn);
-
-                let components = vec![serenity::CreateActionRow::Buttons(buttons)];
-
-                sleep(Duration::from_millis(1000)).await;
+                sleep(Duration::from_millis(1700)).await;
 
                 let mut desc = "﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n\n".to_string();
 
                 desc += " \u{3000} \u{3000}Your turn... \n";
                 desc += format!(
                     "\n\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n**{}** |  HP: {}/{}",
-                    &player_pokemon_name,
-                    player_pokemon.get_current_health(),
-                    player_pokemon.get_health()
+                    &player_pokemon.get_name(),
+                    &player_pokemon.get_current_health(),
+                    &player_pokemon.get_health()
                 )
                 .as_str();
 
+                let components = generate_btns();
                 msg.write()
                     .await
                     .edit(
@@ -1503,13 +1520,13 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
                                 serenity::CreateEmbed::default()
                                     .title(format!(
                                         "Wild **{}** |  HP: {}/{}",
-                                        wild_pokemon_name,
-                                        wild_pokemon.get_current_health(),
-                                        wild_pokemon.get_health()
+                                        &wild_pokemon.get_name(),
+                                        &wild_pokemon.get_current_health(),
+                                        &wild_pokemon.get_health()
                                     ))
                                     .description(desc)
-                                    .thumbnail(&wild_pokemon_sprite)
-                                    .image(&player_pokemon_back_sprite)
+                                    .thumbnail(&wild_pokemon.get_sprite())
+                                    .image(&wild_pokemon.get_bsprite())
                                     .colour(data::EMBED_DEFAULT)
                                     .footer(serenity::CreateEmbedFooter::new(
                                         "@~ powered by UwUntu & RustyBamboo",
@@ -1526,27 +1543,7 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
         }
 
         if timeout_check {
-            let desc = "[Response timed out... try again tomorrow (next: `/uwu`)]".to_string();
-            msg.write()
-                .await
-                .edit(
-                    &ctx,
-                    EditMessage::default()
-                        .embed(
-                            serenity::CreateEmbed::default()
-                                .title("????????".to_string())
-                                .description(&desc)
-                                .thumbnail(&user_avatar)
-                                .colour(data::EMBED_ERROR)
-                                .footer(serenity::CreateEmbedFooter::new(
-                                    "@~ powered by UwUntu & RustyBamboo",
-                                )),
-                        )
-                        .components(Vec::new()),
-                )
-                .await
-                .unwrap();
-            return;
+            timeout_exit(&msg, &ctx, &user_avatar).await
         }
 
         // Create a check for who goes first ---- roll for initiative
@@ -1584,15 +1581,15 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
 
                     desc += format!(
                         " \u{3000} \u{3000}**{}** rolling to attack... \n",
-                        player_pokemon_name
+                        player_pokemon.get_name()
                     )
                     .as_str();
 
                     desc += format!(
                         "\n\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n**{}** |  HP: {}/{}",
-                        &player_pokemon_name,
-                        player_pokemon.get_current_health(),
-                        player_pokemon.get_health()
+                        &player_pokemon.get_name(),
+                        &player_pokemon.get_current_health(),
+                        &player_pokemon.get_health()
                     )
                     .as_str();
 
@@ -1605,13 +1602,13 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
                                     serenity::CreateEmbed::default()
                                         .title(format!(
                                             "Wild **{}** |  HP: {}/{}",
-                                            wild_pokemon_name,
-                                            wild_pokemon.get_current_health(),
-                                            wild_pokemon.get_health()
+                                            &wild_pokemon.get_name(),
+                                            &wild_pokemon.get_current_health(),
+                                            &wild_pokemon.get_health()
                                         ))
                                         .description(desc)
-                                        .thumbnail(&wild_pokemon_sprite)
-                                        .image(&player_pokemon_back_sprite)
+                                        .thumbnail(&wild_pokemon.get_sprite())
+                                        .image(&player_pokemon.get_bsprite())
                                         .colour(player_pokemon_color)
                                         .footer(serenity::CreateEmbedFooter::new(
                                             "@~ powered by UwUntu & RustyBamboo",
@@ -1628,21 +1625,22 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
 
                     desc += format!(
                         " \u{3000} \u{3000}**{}** rolling to attack... \n",
-                        player_pokemon_name
+                        &player_pokemon.get_name()
                     )
                     .as_str();
 
                     desc += format!(
                         " \u{3000} \u{3000}**{}** rolled a... . . . **{}**\n",
-                        player_pokemon_name, attack_roll
+                        &player_pokemon.get_name(),
+                        attack_roll
                     )
                     .as_str();
 
                     desc += format!(
                         "\n\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n**{}** |  HP: {}/{}",
-                        &player_pokemon_name,
-                        player_pokemon.get_current_health(),
-                        player_pokemon.get_health()
+                        &player_pokemon.get_name(),
+                        &player_pokemon.get_current_health(),
+                        &player_pokemon.get_health()
                     )
                     .as_str();
 
@@ -1654,13 +1652,13 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
                                 serenity::CreateEmbed::default()
                                     .title(format!(
                                         "Wild **{}** |  HP: {}/{}",
-                                        wild_pokemon_name,
-                                        wild_pokemon.get_current_health(),
-                                        wild_pokemon.get_health()
+                                        &wild_pokemon.get_name(),
+                                        &wild_pokemon.get_current_health(),
+                                        &wild_pokemon.get_health()
                                     ))
                                     .description(desc)
-                                    .thumbnail(&wild_pokemon_sprite)
-                                    .image(&player_pokemon_back_sprite)
+                                    .thumbnail(&wild_pokemon.get_sprite())
+                                    .image(&player_pokemon.get_bsprite())
                                     .colour(player_pokemon_color)
                                     .footer(serenity::CreateEmbedFooter::new(
                                         "@~ powered by UwUntu & RustyBamboo",
@@ -1683,19 +1681,21 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
 
                     desc += format!(
                         " \u{3000} \u{3000}**{}** rolling to attack... \n",
-                        player_pokemon_name
+                        &player_pokemon.get_name()
                     )
                     .as_str();
 
                     desc += format!(
                         " \u{3000} \u{3000}**{}** rolled a... . . . **{}**\n\n",
-                        player_pokemon_name, attack_roll
+                        &player_pokemon.get_name(),
+                        attack_roll
                     )
                     .as_str();
 
                     desc += format!(
                         " \u{3000} \u{3000}**{}** attacks for **{}** damage!\n\n",
-                        player_pokemon_name, damage
+                        &player_pokemon.get_name(),
+                        damage
                     )
                     .as_str();
 
@@ -1709,9 +1709,9 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
 
                     desc += format!(
                         "\n\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n**{}** |  HP: {}/{}",
-                        &player_pokemon_name,
-                        player_pokemon.get_current_health(),
-                        player_pokemon.get_health()
+                        &player_pokemon.get_name(),
+                        &player_pokemon.get_current_health(),
+                        &player_pokemon.get_health()
                     )
                     .as_str();
 
@@ -1723,13 +1723,13 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
                                 serenity::CreateEmbed::default()
                                     .title(format!(
                                         "Wild **{}** |  HP: {}/{}",
-                                        wild_pokemon_name,
-                                        wild_pokemon.get_current_health(),
-                                        wild_pokemon.get_health()
+                                        &wild_pokemon.get_name(),
+                                        &wild_pokemon.get_current_health(),
+                                        &wild_pokemon.get_health()
                                     ))
                                     .description(desc)
-                                    .thumbnail(&wild_pokemon_sprite)
-                                    .image(&player_pokemon_back_sprite)
+                                    .thumbnail(&wild_pokemon.get_sprite())
+                                    .image(&player_pokemon.get_bsprite())
                                     .colour(player_pokemon_color)
                                     .footer(serenity::CreateEmbedFooter::new(
                                         "@~ powered by UwUntu & RustyBamboo",
@@ -1738,8 +1738,6 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
                         )
                         .await
                         .unwrap();
-
-                    sleep(Duration::from_millis(1700)).await;
 
                     timeout_check = false;
                     break;
@@ -1805,248 +1803,18 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
             }
 
             if !timeout_check && !defeat_pokemon && !catch_success {
-                // create buttons
-                let mut buttons = Vec::new();
-
-                let fight_btn = serenity::CreateButton::new("open_modal")
-                    .label("Fight")
-                    .custom_id("fight".to_string())
-                    .style(poise::serenity_prelude::ButtonStyle::Primary);
-                buttons.push(fight_btn);
-
-                let catch_btn = serenity::CreateButton::new("open_modal")
-                    .label("Switch")
-                    .custom_id("switch".to_string())
-                    .style(poise::serenity_prelude::ButtonStyle::Primary);
-                buttons.push(catch_btn);
-
-                let bag_btn = serenity::CreateButton::new("open_modal")
-                    .label("Bag")
-                    .custom_id("bag".to_string())
-                    .style(poise::serenity_prelude::ButtonStyle::Primary);
-                buttons.push(bag_btn);
-
-                let components = vec![serenity::CreateActionRow::Buttons(buttons)];
-
-                let wild_attack_roll = if COMMON.contains(&wild_pokemon.get_index()) {
-                    thread_rng().gen_range(2..8)
-                } else if RARE.contains(&wild_pokemon.get_index()) {
-                    thread_rng().gen_range(3..10)
-                } else if MYTHIC.contains(&wild_pokemon.get_index()) {
-                    thread_rng().gen_range(4..12)
-                } else {
-                    thread_rng().gen_range(5..14)
-                };
-
-                let wild_multiplier = get_advantage(
-                    &type_matrix,
-                    &type_name,
-                    &wild_pokemon_types,
-                    &player_pokemon_types,
-                );
-
-                let mut desc = "﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n\n".to_string();
-
-                desc += format!(
-                    " \u{3000} \u{3000}Wild **{}**'s turn... \n",
-                    wild_pokemon_name
-                )
-                .as_str();
-
-                desc += format!(
-                    "\n\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n**{}** |  HP: {}/{}",
-                    &player_pokemon_name,
-                    player_pokemon.get_current_health(),
-                    player_pokemon.get_health()
-                )
-                .as_str();
-
-                msg.write()
-                    .await
-                    .edit(
-                        &ctx,
-                        EditMessage::default()
-                            .embed(
-                                serenity::CreateEmbed::default()
-                                    .title(format!(
-                                        "Wild **{}** |  HP: {}/{}",
-                                        wild_pokemon_name,
-                                        wild_pokemon.get_current_health(),
-                                        wild_pokemon.get_health()
-                                    ))
-                                    .description(desc)
-                                    .thumbnail(&wild_pokemon_sprite)
-                                    .image(&player_pokemon_back_sprite)
-                                    .colour(wild_pokemon_color)
-                                    .footer(serenity::CreateEmbedFooter::new(
-                                        "@~ powered by UwUntu & RustyBamboo",
-                                    )),
-                            )
-                            .components(Vec::new()),
-                    )
-                    .await
-                    .unwrap();
-
                 sleep(Duration::from_millis(1400)).await;
 
-                let mut desc = "﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n\n".to_string();
-
-                desc += format!(
-                    " \u{3000} \u{3000}Wild **{}** rolling to attack... \n",
-                    wild_pokemon_name
+                // potentiall return if forced switch
+                wild_pokemeon_turn(
+                    &msg,
+                    &ctx,
+                    &mut wild_pokemon,
+                    &mut player_pokemon,
+                    &type_matrix,
+                    &type_name,
                 )
-                .as_str();
-
-                desc += format!(
-                    "\n\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n**{}** |  HP: {}/{}",
-                    &player_pokemon_name,
-                    player_pokemon.get_current_health(),
-                    player_pokemon.get_health()
-                )
-                .as_str();
-
-                msg.write()
-                    .await
-                    .edit(
-                        &ctx,
-                        EditMessage::default().embed(
-                            serenity::CreateEmbed::default()
-                                .title(format!(
-                                    "Wild **{}** |  HP: {}/{}",
-                                    wild_pokemon_name,
-                                    wild_pokemon.get_current_health(),
-                                    wild_pokemon.get_health()
-                                ))
-                                .description(desc)
-                                .thumbnail(&wild_pokemon_sprite)
-                                .image(&player_pokemon_back_sprite)
-                                .colour(wild_pokemon_color)
-                                .footer(serenity::CreateEmbedFooter::new(
-                                    "@~ powered by UwUntu & RustyBamboo",
-                                )),
-                        ),
-                    )
-                    .await
-                    .unwrap();
-
-                sleep(Duration::from_millis(700)).await;
-
-                let mut desc = "﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n\n".to_string();
-
-                desc += format!(
-                    " \u{3000} \u{3000}Wild **{}** rolling to attack... \n",
-                    wild_pokemon_name
-                )
-                .as_str();
-
-                desc += format!(
-                    " \u{3000} \u{3000}Wild **{}** rolled a... . . . **{}**\n",
-                    wild_pokemon_name, wild_attack_roll
-                )
-                .as_str();
-
-                desc += format!(
-                    "\n\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n**{}** |  HP: {}/{}",
-                    &player_pokemon_name,
-                    player_pokemon.get_current_health(),
-                    player_pokemon.get_health()
-                )
-                .as_str();
-
-                msg.write()
-                    .await
-                    .edit(
-                        &ctx,
-                        EditMessage::default().embed(
-                            serenity::CreateEmbed::default()
-                                .title(format!(
-                                    "Wild **{}** |  HP: {}/{}",
-                                    wild_pokemon_name,
-                                    wild_pokemon.get_current_health(),
-                                    wild_pokemon.get_health()
-                                ))
-                                .description(desc)
-                                .thumbnail(&wild_pokemon_sprite)
-                                .image(&player_pokemon_back_sprite)
-                                .colour(wild_pokemon_color)
-                                .footer(serenity::CreateEmbedFooter::new(
-                                    "@~ powered by UwUntu & RustyBamboo",
-                                )),
-                        ),
-                    )
-                    .await
-                    .unwrap();
-
-                sleep(Duration::from_millis(700)).await;
-
-                let wild_damage = (wild_attack_roll as f32 * wild_multiplier).round() as i32;
-                if player_pokemon.get_current_health() - wild_damage < 0 {
-                    player_pokemon.set_current_health(0);
-                    forced_switch = true;
-                } else {
-                    player_pokemon
-                        .set_current_health(player_pokemon.get_current_health() - wild_damage);
-                }
-
-                let mut desc = "﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n\n".to_string();
-
-                desc += format!(
-                    " \u{3000} \u{3000}Wild **{}** rolling to attack... \n",
-                    wild_pokemon_name
-                )
-                .as_str();
-
-                desc += format!(
-                    " \u{3000} \u{3000}Wild **{}** rolled a... . . . **{}**\n\n",
-                    wild_pokemon_name, wild_attack_roll
-                )
-                .as_str();
-
-                desc += format!(
-                    " \u{3000} \u{3000}Wild **{}** attacks for **{}** damage!\n\n",
-                    wild_pokemon_name, wild_damage
-                )
-                .as_str();
-
-                if wild_multiplier >= 2.0 {
-                    desc += " \u{3000} \u{3000} **Super Effective**!!";
-                } else if (1.0..2.0).contains(&wild_multiplier) {
-                    desc += " \u{3000} \u{3000} Effective.";
-                } else {
-                    desc += " \u{3000} \u{3000} *Not very Effective*...";
-                }
-
-                desc += format!(
-                    "\n\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n**{}** |  HP: {}/{}",
-                    &player_pokemon_name,
-                    player_pokemon.get_current_health(),
-                    player_pokemon.get_health()
-                )
-                .as_str();
-
-                msg.write()
-                    .await
-                    .edit(
-                        &ctx,
-                        EditMessage::default().embed(
-                            serenity::CreateEmbed::default()
-                                .title(format!(
-                                    "Wild **{}** |  HP: {}/{}",
-                                    wild_pokemon_name,
-                                    wild_pokemon.get_current_health(),
-                                    wild_pokemon.get_health()
-                                ))
-                                .description(desc)
-                                .thumbnail(&wild_pokemon_sprite)
-                                .image(&player_pokemon_back_sprite)
-                                .colour(wild_pokemon_color)
-                                .footer(serenity::CreateEmbedFooter::new(
-                                    "@~ powered by UwUntu & RustyBamboo",
-                                )),
-                        ),
-                    )
-                    .await
-                    .unwrap();
+                .await;
 
                 // create force switch here to make playr switch, if user has no team left, battle finishes,
                 // player looses creds and buddy goes back to 1 hp
@@ -2058,12 +1826,13 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
                 desc += " \u{3000} \u{3000}Your turn... \n";
                 desc += format!(
                     "\n\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n**{}** |  HP: {}/{}",
-                    &player_pokemon_name,
-                    player_pokemon.get_current_health(),
-                    player_pokemon.get_health()
+                    &player_pokemon.get_name(),
+                    &player_pokemon.get_current_health(),
+                    &player_pokemon.get_health()
                 )
                 .as_str();
 
+                let components = generate_btns();
                 msg.write()
                     .await
                     .edit(
@@ -2073,13 +1842,13 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
                                 serenity::CreateEmbed::default()
                                     .title(format!(
                                         "Wild **{}** |  HP: {}/{}",
-                                        wild_pokemon_name,
-                                        wild_pokemon.get_current_health(),
-                                        wild_pokemon.get_health()
+                                        &wild_pokemon.get_name(),
+                                        &wild_pokemon.get_current_health(),
+                                        &wild_pokemon.get_health()
                                     ))
                                     .description(desc)
-                                    .thumbnail(&wild_pokemon_sprite)
-                                    .image(&player_pokemon_back_sprite)
+                                    .thumbnail(&wild_pokemon.get_sprite())
+                                    .image(&player_pokemon.get_bsprite())
                                     .colour(data::EMBED_DEFAULT)
                                     .footer(serenity::CreateEmbedFooter::new(
                                         "@~ powered by UwUntu & RustyBamboo",
@@ -2092,27 +1861,7 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
             }
 
             if timeout_check {
-                let desc = "[Response timed out... try again tomorrow (next: `/uwu`)]".to_string();
-                msg.write()
-                    .await
-                    .edit(
-                        &ctx,
-                        EditMessage::default()
-                            .embed(
-                                serenity::CreateEmbed::default()
-                                    .title("????????".to_string())
-                                    .description(&desc)
-                                    .thumbnail(&user_avatar)
-                                    .colour(data::EMBED_ERROR)
-                                    .footer(serenity::CreateEmbedFooter::new(
-                                        "@~ powered by UwUntu & RustyBamboo",
-                                    )),
-                            )
-                            .components(Vec::new()),
-                    )
-                    .await
-                    .unwrap();
-                return;
+                timeout_exit(&msg, &ctx, &user_avatar).await
             }
         }
 
@@ -2565,6 +2314,31 @@ fn spawn_trainer(ctx: Context<'_>, level: i32) -> TrainerData {
     trainer
 }
 
+fn generate_btns() -> Vec<serenity::CreateActionRow> {
+    // create buttons
+    let mut buttons = Vec::new();
+
+    let fight_btn = serenity::CreateButton::new("open_modal")
+        .label("Fight")
+        .custom_id("fight".to_string())
+        .style(poise::serenity_prelude::ButtonStyle::Primary);
+    buttons.push(fight_btn);
+
+    let catch_btn = serenity::CreateButton::new("open_modal")
+        .label("Switch")
+        .custom_id("switch".to_string())
+        .style(poise::serenity_prelude::ButtonStyle::Primary);
+    buttons.push(catch_btn);
+
+    let bag_btn = serenity::CreateButton::new("open_modal")
+        .label("Bag")
+        .custom_id("bag".to_string())
+        .style(poise::serenity_prelude::ButtonStyle::Primary);
+    buttons.push(bag_btn);
+
+    vec![serenity::CreateActionRow::Buttons(buttons)]
+}
+
 fn generate_hp(index: usize) -> i32 {
     // Generate health based on tier
     if LEGENDARY.contains(&index) {
@@ -2601,8 +2375,14 @@ fn get_advantage(
     type_advantage
 }
 
-fn get_type_color(typing: &str) -> u32 {
-    match typing.to_lowercase().as_str() {
+fn get_type_color(types: &String) -> u32 {
+    let type_split: Vec<&str> = types.split('/').collect();
+    let first_type = type_split
+        .first()
+        .expect("search_Pokemon(): Failed to expand first_type")
+        .to_string();
+
+    match first_type.to_lowercase().as_str() {
         "normal" => 11053176,
         "fire" => 15761456,
         "water" => 6852848,
