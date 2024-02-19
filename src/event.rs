@@ -811,7 +811,7 @@ pub async fn buddy(ctx: Context<'_>) -> Result<(), Error> {
         ctx.send(
             poise::CreateReply::default().embed(
                 serenity::CreateEmbed::new()
-                    .title("Buddy")
+                    .title(format!("{}'s Buddy", ctx.author().name))
                     .description(desc)
                     .color(Color::new(poke_color))
                     .thumbnail(sprite)
@@ -826,7 +826,7 @@ pub async fn buddy(ctx: Context<'_>) -> Result<(), Error> {
             poise::CreateReply::default().embed(
                 serenity::CreateEmbed::new()
                     .title("Buddy")
-                    .description("You don't have anyone in your team right now...")
+                    .description("You don't have a buddy right now...")
                     .color(data::EMBED_ERROR)
                     .thumbnail("https://cdn.discordapp.com/attachments/1196582162057662484/1206389369880059954/pokeballs.png?ex=65dbd4a7&is=65c95fa7&hm=06799355aeafcb5d59614e9d810975adec64d6538410b869ac036007d10ac46a&")
                     .footer(serenity::CreateEmbedFooter::new(
@@ -836,6 +836,141 @@ pub async fn buddy(ctx: Context<'_>) -> Result<(), Error> {
         )
         .await?;
     }
+
+    Ok(())
+}
+
+#[poise::command(slash_command)]
+pub async fn switch_buddy(ctx: Context<'_>, index: usize) -> Result<(), Error> {
+    let user = ctx.author();
+    let data = &ctx.data().users;
+    let u = data.get(&user.id).unwrap();
+    let mut user_data = u.write().await;
+
+    let team = user_data.event.get_team();
+
+    if index <= team.len() {
+        user_data.event.set_buddy(index - 1);
+        let pokemon = &team[index - 1];
+
+        let name: String = pokemon.get_name();
+        let types: String = pokemon.get_types();
+        let sprite: String = pokemon.get_sprite();
+
+        let type_split: Vec<&str> = types.split('/').collect();
+        let first_type = type_split
+            .first()
+            .expect("search_Pokemon(): Failed to expand first_type")
+            .to_string();
+        let poke_color = get_type_color(&first_type);
+
+        let health = pokemon.get_health();
+        let current = pokemon.get_current_health();
+        let hp_percent = current as f32 / health as f32;
+
+        let desc = if hp_percent > 0.80 {
+            format!(
+                "**{}** is brimming with energy! (HP: {}/{})",
+                name, current, health
+            )
+        } else if (0.50..0.80).contains(&hp_percent) {
+            format!("**{}** is happy. (HP: {}/{})", name, current, health)
+        } else if (0.30..0.50).contains(&hp_percent) {
+            format!("**{}** is tired... (HP: {}/{})", name, current, health)
+        } else {
+            format!(
+                "**{}** is knocked out... (HP: {}/{})",
+                name, current, health
+            )
+        };
+
+        ctx.send(
+            poise::CreateReply::default().embed(
+                serenity::CreateEmbed::new()
+                    .title(format!("{}'s Buddy", ctx.author().name))
+                    .description(desc)
+                    .color(Color::new(poke_color))
+                    .thumbnail(sprite)
+                    .footer(serenity::CreateEmbedFooter::new(
+                        "@~ powered by UwUntu & RustyBamboo",
+                    )),
+            ),
+        )
+        .await?;
+    } else {
+        ctx.send(
+            poise::CreateReply::default().embed(
+                serenity::CreateEmbed::new()
+                    .title("Change Buddy")
+                    .description("Failed to set new buddy, refer to `/team` for pokemon index.")
+                    .color(data::EMBED_ERROR)
+                    .thumbnail("https://cdn.discordapp.com/attachments/1196582162057662484/1206389369880059954/pokeballs.png?ex=65dbd4a7&is=65c95fa7&hm=06799355aeafcb5d59614e9d810975adec64d6538410b869ac036007d10ac46a&")
+                    .footer(serenity::CreateEmbedFooter::new(
+                        "@~ powered by UwUntu & RustyBamboo",
+                    )),
+            ),
+        )
+        .await?;
+    }
+
+    Ok(())
+}
+
+#[poise::command(slash_command)]
+pub async fn team(ctx: Context<'_>) -> Result<(), Error> {
+    let user = ctx.author();
+    let data = &ctx.data().users;
+    let u = data.get(&user.id).unwrap();
+    let user_data = u.read().await;
+
+    let team = user_data.event.get_team();
+    let buddy = user_data.event.get_buddy();
+    let mut desc = String::new();
+
+    let embed_color: Color = if team.is_empty() {
+        desc += "You don't have anyone in your team...";
+        data::EMBED_ERROR
+    } else {
+        desc += "\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n";
+
+        for (index, pokemon) in team.into_iter().enumerate() {
+            let name = pokemon.get_name();
+            let types = pokemon.get_types();
+            let current = pokemon.get_current_health();
+            let health = pokemon.get_health();
+
+            if index == buddy {
+                desc += format!(
+                    "{}. **{:20}**  {:20}  HP: {}/{}\n",
+                    index, name, types, current, health
+                )
+                .as_str();
+            } else {
+                desc += format!(
+                    "{}. {:20}  {:20}  HP: {}/{}\n",
+                    index, name, types, current, health
+                )
+                .as_str();
+            }
+        }
+
+        desc += "\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n";
+        data::EMBED_CYAN
+    };
+
+    ctx.send(
+        poise::CreateReply::default().embed(
+            serenity::CreateEmbed::new()
+                .title(format!("{}'s Team", ctx.author().name))
+                .description(desc)
+                .color(embed_color)
+                .thumbnail("https://cdn.discordapp.com/attachments/1196582162057662484/1206389369880059954/pokeballs.png?ex=65dbd4a7&is=65c95fa7&hm=06799355aeafcb5d59614e9d810975adec64d6538410b869ac036007d10ac46a&")
+                .footer(serenity::CreateEmbedFooter::new(
+                    "@~ powered by UwUntu & RustyBamboo",
+                )),
+        ),
+    )
+    .await?;
 
     Ok(())
 }
@@ -966,6 +1101,7 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
             // );
 
             let wild_pokemon_color = get_type_color(&wild_pokemon.get_types());
+            let random_idle = thread_rng().gen_range(0..100);
             let mut forced_switch = false;
 
             let mut desc = "﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n\n".to_string();
@@ -1009,6 +1145,50 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
                 .unwrap();
 
             sleep(Duration::from_millis(1400)).await;
+
+            if random_idle < 12 {
+                let mut desc = "﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n\n".to_string();
+
+                desc += format!(
+                    " \u{3000} \u{3000}Wild **{}** dazed into the horizon... \n",
+                    &wild_pokemon.get_name()
+                )
+                .as_str();
+
+                desc += format!(
+                    "\n\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n**{}** |  HP: {}/{}",
+                    &player_pokemon.get_name(),
+                    &player_pokemon.get_current_health(),
+                    &player_pokemon.get_health()
+                )
+                .as_str();
+
+                msg.write()
+                    .await
+                    .edit(
+                        &ctx,
+                        EditMessage::default().embed(
+                            serenity::CreateEmbed::default()
+                                .title(format!(
+                                    "Wild **{}** |  HP: {}/{}",
+                                    &wild_pokemon.get_name(),
+                                    &wild_pokemon.get_current_health(),
+                                    &wild_pokemon.get_health()
+                                ))
+                                .description(desc)
+                                .thumbnail(&wild_pokemon.get_sprite())
+                                .image(&player_pokemon.get_bsprite())
+                                .colour(wild_pokemon_color)
+                                .footer(serenity::CreateEmbedFooter::new(
+                                    "@~ powered by UwUntu & RustyBamboo",
+                                )),
+                        ),
+                    )
+                    .await
+                    .unwrap();
+
+                return;
+            }
 
             let mut desc = "﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n\n".to_string();
 
@@ -1899,6 +2079,40 @@ pub async fn trainer_battle(ctx: Context<'_>, level: u32) -> Result<(), Error> {
     Ok(())
 }
 
+#[poise::command(slash_command)]
+pub async fn pre_populate(ctx: Context<'_>) -> Result<(), Error> {
+    let user = ctx.author();
+    let data = &ctx.data().users;
+    let u = data.get(&user.id).unwrap();
+    let mut user_data = u.write().await;
+
+    let team_size = user_data.event.get_team().len();
+    let generate = 5 - team_size;
+
+    for i in 0..generate {
+        let mut pokemon = spawn_pokemon(ctx, 1);
+        let health = generate_hp(pokemon.get_index());
+        pokemon.set_health(health);
+
+        user_data.event.add_pokemon(pokemon);
+    }
+
+    ctx.send(
+        poise::CreateReply::default().embed(
+            serenity::CreateEmbed::new()
+                .title("TESTING - Pre-Populate Team")
+                .description("Team full!")
+                .color(data::EMBED_ERROR)
+                .footer(serenity::CreateEmbedFooter::new(
+                    "@~ powered by UwUntu & RustyBamboo",
+                )),
+        ),
+    )
+    .await?;
+
+    Ok(())
+}
+
 fn spawn_pokemon(ctx: Context<'_>, level: i32) -> PokeData {
     let random_spawn = thread_rng().gen_range(0..100);
 
@@ -2287,12 +2501,7 @@ fn generate_hp(index: usize) -> i32 {
     }
 }
 
-fn get_advantage(
-    matrix: &Vec<Vec<f32>>,
-    names: &Vec<String>,
-    type1: &String,
-    type2: &String,
-) -> f32 {
+fn get_advantage(matrix: &[Vec<f32>], names: &[String], type1: &str, type2: &str) -> f32 {
     let dual_type1: Vec<&str> = type1.split('/').collect();
     let dual_type2: Vec<&str> = type2.split('/').collect();
 
@@ -2310,7 +2519,7 @@ fn get_advantage(
     type_advantage
 }
 
-fn get_type_color(types: &String) -> u32 {
+fn get_type_color(types: &str) -> u32 {
     let type_split: Vec<&str> = types.split('/').collect();
     let first_type = type_split
         .first()
