@@ -11,10 +11,9 @@
 //!     [ ] - trainer_battle                                            !
 //!---------------------------------------------------------------------!
 
-use crate::data::{self, PokeData, TrainerData};
+use crate::data::{self, PokeData, TrainerData, UserData};
 use crate::serenity;
 use crate::{Context, Error};
-use dashmap::setref::multiple;
 use poise::serenity_prelude::futures::StreamExt;
 use poise::serenity_prelude::EditMessage;
 use rand::seq::SliceRandom;
@@ -228,6 +227,33 @@ pub async fn choose_starter(ctx: Context<'_>) -> Result<(), Error> {
         let u = Arc::clone(&u);
 
         tokio::spawn(async move {
+            async fn timeout_exit(
+                msg: &std::sync::Arc<tokio::sync::RwLock<poise::serenity_prelude::Message>>,
+                ctx: &poise::serenity_prelude::Context,
+                user_avatar: &String,
+            ) {
+                let desc = "[Response timed out... ]".to_string();
+                msg.write()
+                    .await
+                    .edit(
+                        ctx,
+                        EditMessage::default()
+                            .embed(
+                                serenity::CreateEmbed::default()
+                                    .title("Time Out - Choose Starter".to_string())
+                                    .description(&desc)
+                                    .thumbnail(user_avatar)
+                                    .colour(data::EMBED_ERROR)
+                                    .footer(serenity::CreateEmbedFooter::new(
+                                        "@~ powered by UwUntu & RustyBamboo",
+                                    )),
+                            )
+                            .components(Vec::new()),
+                    )
+                    .await
+                    .unwrap();
+            }
+
             let mut timeout_check = true;
             while let Some(reaction) = reactions.next().await {
                 reaction
@@ -269,28 +295,8 @@ pub async fn choose_starter(ctx: Context<'_>) -> Result<(), Error> {
             }
 
             if timeout_check {
-                let desc =
-                    "Hey! Response timed out... try again tomorrow (next: `/uwu`)".to_string();
-                msg.write()
-                    .await
-                    .edit(
-                        &ctx,
-                        EditMessage::default()
-                            .embed(
-                                serenity::CreateEmbed::default()
-                                    .title("????????".to_string())
-                                    .description(&desc)
-                                    .image(oak_img)
-                                    .thumbnail(&user_avatar)
-                                    .colour(data::EMBED_ERROR)
-                                    .footer(serenity::CreateEmbedFooter::new(
-                                        "@~ powered by UwUntu & RustyBamboo",
-                                    )),
-                            )
-                            .components(Vec::new()),
-                    )
-                    .await
-                    .unwrap();
+                timeout_exit(&msg, &ctx, &user_avatar).await;
+                return;
             }
 
             let mut timeout_check = true;
@@ -335,28 +341,8 @@ pub async fn choose_starter(ctx: Context<'_>) -> Result<(), Error> {
             }
 
             if timeout_check {
-                let desc =
-                    "Hey! Response timed out... try again tomorrow (next: `/uwu`)".to_string();
-                msg.write()
-                    .await
-                    .edit(
-                        &ctx,
-                        EditMessage::default()
-                            .embed(
-                                serenity::CreateEmbed::default()
-                                    .title("????????".to_string())
-                                    .description(&desc)
-                                    .image(oak_img)
-                                    .thumbnail(&user_avatar)
-                                    .colour(data::EMBED_ERROR)
-                                    .footer(serenity::CreateEmbedFooter::new(
-                                        "@~ powered by UwUntu & RustyBamboo",
-                                    )),
-                            )
-                            .components(Vec::new()),
-                    )
-                    .await
-                    .unwrap();
+                timeout_exit(&msg, &ctx, &user_avatar).await;
+                return;
             }
 
             let mut timeout_check = true;
@@ -401,28 +387,8 @@ pub async fn choose_starter(ctx: Context<'_>) -> Result<(), Error> {
             }
 
             if timeout_check {
-                let desc =
-                    "Hey! Response timed out... try again tomorrow (next: `/uwu`)".to_string();
-                msg.write()
-                    .await
-                    .edit(
-                        &ctx,
-                        EditMessage::default()
-                            .embed(
-                                serenity::CreateEmbed::default()
-                                    .title("????????".to_string())
-                                    .description(&desc)
-                                    .image(oak_img)
-                                    .thumbnail(&user_avatar)
-                                    .colour(data::EMBED_ERROR)
-                                    .footer(serenity::CreateEmbedFooter::new(
-                                        "@~ powered by UwUntu & RustyBamboo",
-                                    )),
-                            )
-                            .components(Vec::new()),
-                    )
-                    .await
-                    .unwrap();
+                timeout_exit(&msg, &ctx, &user_avatar).await;
+                return;
             }
 
             let mut timeout_check = true;
@@ -484,28 +450,8 @@ pub async fn choose_starter(ctx: Context<'_>) -> Result<(), Error> {
             }
 
             if timeout_check {
-                let desc =
-                    "Hey! Response timed out... try again tomorrow (next: `/uwu`)".to_string();
-                msg.write()
-                    .await
-                    .edit(
-                        &ctx,
-                        EditMessage::default()
-                            .embed(
-                                serenity::CreateEmbed::default()
-                                    .title("????????".to_string())
-                                    .description(&desc)
-                                    .image(oak_img)
-                                    .thumbnail(&user_avatar)
-                                    .colour(data::EMBED_ERROR)
-                                    .footer(serenity::CreateEmbedFooter::new(
-                                        "@~ powered by UwUntu & RustyBamboo",
-                                    )),
-                            )
-                            .components(Vec::new()),
-                    )
-                    .await
-                    .unwrap();
+                timeout_exit(&msg, &ctx, &user_avatar).await;
+                return;
             }
 
             while not_choose {
@@ -672,28 +618,8 @@ pub async fn choose_starter(ctx: Context<'_>) -> Result<(), Error> {
                 }
 
                 if timeout_check {
-                    let desc =
-                        "Hey! Response timed out... try again tomorrow (next: `/uwu`)".to_string();
-                    msg.write()
-                        .await
-                        .edit(
-                            &ctx,
-                            EditMessage::default()
-                                .embed(
-                                    serenity::CreateEmbed::default()
-                                        .title("????????".to_string())
-                                        .description(&desc)
-                                        .image(oak_img)
-                                        .thumbnail(&user_avatar)
-                                        .colour(data::EMBED_ERROR)
-                                        .footer(serenity::CreateEmbedFooter::new(
-                                            "@~ powered by UwUntu & RustyBamboo",
-                                        )),
-                                )
-                                .components(Vec::new()),
-                        )
-                        .await
-                        .unwrap();
+                    timeout_exit(&msg, &ctx, &user_avatar).await;
+                    return;
                 }
 
                 let mut timeout_check = true;
@@ -812,28 +738,8 @@ pub async fn choose_starter(ctx: Context<'_>) -> Result<(), Error> {
                 }
 
                 if timeout_check {
-                    let desc =
-                        "Hey! Response timed out... try again tomorrow (next: `/uwu`)".to_string();
-                    msg.write()
-                        .await
-                        .edit(
-                            &ctx,
-                            EditMessage::default()
-                                .embed(
-                                    serenity::CreateEmbed::default()
-                                        .title("????????".to_string())
-                                        .description(&desc)
-                                        .image(oak_img)
-                                        .thumbnail(&user_avatar)
-                                        .colour(data::EMBED_ERROR)
-                                        .footer(serenity::CreateEmbedFooter::new(
-                                            "@~ powered by UwUntu & RustyBamboo",
-                                        )),
-                                )
-                                .components(Vec::new()),
-                        )
-                        .await
-                        .unwrap();
+                    timeout_exit(&msg, &ctx, &user_avatar).await;
+                    return;
                 }
             }
         });
@@ -887,13 +793,19 @@ pub async fn buddy(ctx: Context<'_>) -> Result<(), Error> {
         let hp_percent = current as f32 / health as f32;
 
         let desc = if hp_percent > 0.80 {
-            format!("**{}** is brimming with energy!", name)
+            format!(
+                "**{}** is brimming with energy! (HP: {}/{})",
+                name, current, health
+            )
         } else if (0.50..0.80).contains(&hp_percent) {
-            format!("**{}** is happy.", name)
+            format!("**{}** is happy. (HP: {}/{})", name, current, health)
         } else if (0.30..0.50).contains(&hp_percent) {
-            format!("**{}** is tired...", name)
+            format!("**{}** is tired... (HP: {}/{})", name, current, health)
         } else {
-            format!("**{}** is knocked out...", name)
+            format!(
+                "**{}** is knocked out... (HP: {}/{})",
+                name, current, health
+            )
         };
 
         ctx.send(
@@ -948,9 +860,9 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
     let wild_pokemon_color = get_type_color(&wild_pokemon_types);
 
     // Player pokemon team and first pokemon (buddy) object
-    let buddy = user_data.event.get_buddy();
+    let mut current = user_data.event.get_buddy();
     let mut player_team = user_data.event.get_team().clone();
-    let mut player_pokemon = player_team.get(buddy).unwrap().clone();
+    let mut player_pokemon = player_team.get(current).unwrap().clone();
 
     // Player pokemon information
     let player_pokemon_types: String = player_pokemon.get_types().clone();
@@ -1025,16 +937,16 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
                 )
                 .await
                 .unwrap();
-            return;
         }
 
         async fn wild_pokemeon_turn(
             msg: &std::sync::Arc<tokio::sync::RwLock<poise::serenity_prelude::Message>>,
             ctx: &poise::serenity_prelude::Context,
+            u: &Arc<RwLock<data::UserData>>,
             wild_pokemon: &mut PokeData,
             player_pokemon: &mut PokeData,
-            type_matrix: &Vec<Vec<f32>>,
-            type_name: &Vec<String>,
+            current: &mut usize,
+            wild_multiplier: f32,
         ) {
             let wild_attack_roll = if COMMON.contains(&wild_pokemon.get_index()) {
                 thread_rng().gen_range(2..8)
@@ -1046,12 +958,12 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
                 thread_rng().gen_range(5..14)
             };
 
-            let wild_multiplier = get_advantage(
-                type_matrix,
-                type_name,
-                &wild_pokemon.get_types(),
-                &player_pokemon.get_types(),
-            );
+            // let wild_multiplier = get_advantage(
+            //     type_matrix,
+            //     type_name,
+            //     &wild_pokemon.get_types(),
+            //     &player_pokemon.get_types(),
+            // );
 
             let wild_pokemon_color = get_type_color(&wild_pokemon.get_types());
             let mut forced_switch = false;
@@ -1191,11 +1103,18 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
 
             let wild_damage = (wild_attack_roll as f32 * wild_multiplier).round() as i32;
             if player_pokemon.get_current_health() - wild_damage < 0 {
-                &player_pokemon.set_current_health(0);
+                let _ = &player_pokemon.set_current_health(0);
+
                 forced_switch = true;
+
+                let mut user_data = u.write().await;
+                user_data.event.take_damage(*current, 0);
             } else {
-                &player_pokemon
-                    .set_current_health(&player_pokemon.get_current_health() - wild_damage);
+                _ = &player_pokemon
+                    .set_current_health(player_pokemon.get_current_health() - wild_damage);
+
+                let mut user_data = u.write().await;
+                user_data.event.take_damage(*current, wild_damage);
             }
 
             let mut desc = "﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n\n".to_string();
@@ -1483,13 +1402,20 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
                     sleep(Duration::from_millis(1000)).await;
 
                     // potentiall return if forced switch
+                    let wild_multiplier = get_advantage(
+                        &type_matrix,
+                        &type_name,
+                        &wild_pokemon_types,
+                        &player_pokemon_types,
+                    );
                     wild_pokemeon_turn(
                         &msg,
                         &ctx,
+                        &u,
                         &mut wild_pokemon,
                         &mut player_pokemon,
-                        &type_matrix,
-                        &type_name,
+                        &mut current,
+                        wild_multiplier,
                     )
                     .await;
 
@@ -1526,7 +1452,7 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
                                     ))
                                     .description(desc)
                                     .thumbnail(&wild_pokemon.get_sprite())
-                                    .image(&wild_pokemon.get_bsprite())
+                                    .image(&player_pokemon.get_bsprite())
                                     .colour(data::EMBED_DEFAULT)
                                     .footer(serenity::CreateEmbedFooter::new(
                                         "@~ powered by UwUntu & RustyBamboo",
@@ -1543,7 +1469,8 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
         }
 
         if timeout_check {
-            timeout_exit(&msg, &ctx, &user_avatar).await
+            timeout_exit(&msg, &ctx, &user_avatar).await;
+            return;
         }
 
         // Create a check for who goes first ---- roll for initiative
@@ -1806,13 +1733,20 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
                 sleep(Duration::from_millis(1400)).await;
 
                 // potentiall return if forced switch
+                let wild_multiplier = get_advantage(
+                    &type_matrix,
+                    &type_name,
+                    &wild_pokemon_types,
+                    &player_pokemon_types,
+                );
                 wild_pokemeon_turn(
                     &msg,
                     &ctx,
+                    &u,
                     &mut wild_pokemon,
                     &mut player_pokemon,
-                    &type_matrix,
-                    &type_name,
+                    &mut current,
+                    wild_multiplier,
                 )
                 .await;
 
@@ -1861,7 +1795,8 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
             }
 
             if timeout_check {
-                timeout_exit(&msg, &ctx, &user_avatar).await
+                timeout_exit(&msg, &ctx, &user_avatar).await;
+                return;
             }
         }
 

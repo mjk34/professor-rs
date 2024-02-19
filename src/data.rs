@@ -189,6 +189,11 @@ impl EventData {
         self.team.push(pokemon)
     }
 
+    pub fn take_damage(&mut self, current: usize, damage: i32) {
+        let health = self.team[current].get_current_health();
+        self.team[current].set_current_health(health - damage);
+    }
+
     pub fn get_buddy(&self) -> usize {
         self.buddy
     }
