@@ -11,7 +11,7 @@
 //!     [ ] - trainer_battle                                            !
 //!---------------------------------------------------------------------!
 
-use crate::data::{self, PokeData, TrainerData, UserData};
+use crate::data::{self, PokeData, TrainerData};
 use crate::serenity;
 use crate::{Context, Error};
 use poise::serenity_prelude::futures::StreamExt;
@@ -940,21 +940,38 @@ pub async fn team(ctx: Context<'_>) -> Result<(), Error> {
             let health = pokemon.get_health();
 
             if index == buddy {
-                desc += format!(
-                    "{}. **{:20}**  {:20}  HP: {}/{}\n",
-                    index, name, types, current, health
-                )
-                .as_str();
+                if name.len() < 6 {
+                    desc += format!("\u{3000}{}. **{:18}**  \u{3000}\u{3000}", index + 1, name)
+                        .as_str();
+                } else if name.len() < 7 {
+                    desc += format!("\u{3000}{}. **{:18}**  \u{3000}\u{2000}", index + 1, name)
+                        .as_str();
+                } else {
+                    desc += format!("\u{3000}{}. **{:16}**  \u{3000}", index + 1, name).as_str();
+                }
+
+                desc += format!("{:16}  \u{3000}HP: {}/{}\n", types, current, health).as_str();
             } else {
-                desc += format!(
-                    "{}. {:20}  {:20}  HP: {}/{}\n",
-                    index, name, types, current, health
-                )
-                .as_str();
+                if name.len() < 6 {
+                    desc += format!(
+                        "\u{3000}{}. {:18}  \u{3000}\u{3000}\u{2000}",
+                        index + 1,
+                        name
+                    )
+                    .as_str();
+                } else if name.len() < 7 {
+                    desc +=
+                        format!("\u{3000}{}. {:20}  \u{3000}\u{3000}", index + 1, name).as_str();
+                } else {
+                    desc += format!("\u{3000}{}. {:16}  \u{3000}", index + 1, name).as_str();
+                }
+
+                desc += format!("{:16}  \u{3000}HP: {}/{}\n", types, current, health).as_str();
             }
         }
 
         desc += "\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n";
+
         data::EMBED_CYAN
     };
 
@@ -1082,7 +1099,7 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
             player_pokemon: &mut PokeData,
             current: &mut usize,
             wild_multiplier: f32,
-        ) {
+        ) -> bool {
             let wild_attack_roll = if COMMON.contains(&wild_pokemon.get_index()) {
                 thread_rng().gen_range(2..8)
             } else if RARE.contains(&wild_pokemon.get_index()) {
@@ -1092,13 +1109,6 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
             } else {
                 thread_rng().gen_range(5..14)
             };
-
-            // let wild_multiplier = get_advantage(
-            //     type_matrix,
-            //     type_name,
-            //     &wild_pokemon.get_types(),
-            //     &player_pokemon.get_types(),
-            // );
 
             let wild_pokemon_color = get_type_color(&wild_pokemon.get_types());
             let random_idle = thread_rng().gen_range(0..100);
@@ -1187,7 +1197,7 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
                     .await
                     .unwrap();
 
-                return;
+                return forced_switch;
             }
 
             let mut desc = "﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n\n".to_string();
@@ -1358,6 +1368,120 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
                 )
                 .await
                 .unwrap();
+
+            return forced_switch;
+        }
+
+        async fn switch_pokemon(
+            msg: &std::sync::Arc<tokio::sync::RwLock<poise::serenity_prelude::Message>>,
+            ctx: &poise::serenity_prelude::Context,
+            u: &Arc<RwLock<data::UserData>>,
+            player_team: &mut [PokeData],
+            current: &mut usize,
+            forced: bool,
+        ) -> usize {
+            // let mut player_team = user_data.event.get_team().clone();
+            // let mut player_pokemon = player_team.get(current).unwrap().clone();
+
+            let mut desc = "\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n".to_string();
+            let mut buttons = Vec::new();
+
+            if !forced {
+                let back_btn = serenity::CreateButton::new("open_modal")
+                    .label("back")
+                    .custom_id("back".to_string())
+                    .style(poise::serenity_prelude::ButtonStyle::Secondary);
+                buttons.push(back_btn);
+            }
+
+            for (index, pokemon) in player_team.iter_mut().enumerate() {
+                let name = pokemon.get_name();
+                let types = pokemon.get_types();
+                let curr_hp = pokemon.get_current_health();
+                let health = pokemon.get_health();
+
+                if index == *current && forced {
+                    if name.len() < 6 {
+                        desc += format!("\u{3000}{}. ~~{:18}~~  \u{3000}\u{3000}", index + 1, name)
+                            .as_str();
+                    } else if name.len() < 7 {
+                        desc += format!("\u{3000}{}. ~~{:18}~~  \u{3000}\u{2000}", index + 1, name)
+                            .as_str();
+                    } else {
+                        desc +=
+                            format!("\u{3000}{}. ~~{:16}~~  \u{3000}", index + 1, name).as_str();
+                    }
+
+                    desc += format!("{:16}  \u{3000}HP: {}/{}\n", types, curr_hp, health).as_str();
+                } else if index == *current && !forced {
+                    if name.len() < 6 {
+                        desc += format!("\u{3000}{}. **{:18}**  \u{3000}\u{3000}", index + 1, name)
+                            .as_str();
+                    } else if name.len() < 7 {
+                        desc += format!("\u{3000}{}. **{:18}**  \u{3000}\u{2000}", index + 1, name)
+                            .as_str();
+                    } else {
+                        desc +=
+                            format!("\u{3000}{}. **{:16}**  \u{3000}", index + 1, name).as_str();
+                    }
+
+                    desc += format!("{:16}  \u{3000}HP: {}/{}\n", types, curr_hp, health).as_str();
+                } else {
+                    if name.len() < 6 {
+                        desc += format!(
+                            "\u{3000}{}. {:18}  \u{3000}\u{3000}\u{2000}",
+                            index + 1,
+                            name
+                        )
+                        .as_str();
+                    } else if name.len() < 7 {
+                        desc += format!("\u{3000}{}. {:20}  \u{3000}\u{3000}", index + 1, name)
+                            .as_str();
+                    } else {
+                        desc += format!("\u{3000}{}. {:16}  \u{3000}", index + 1, name).as_str();
+                    }
+
+                    desc += format!("{:16}  \u{3000}HP: {}/{}\n", types, curr_hp, health).as_str();
+
+                    let pk_btn = serenity::CreateButton::new("open_modal")
+                        .label(&name)
+                        .custom_id(format!("pokemon-{}", index))
+                        .style(poise::serenity_prelude::ButtonStyle::Primary);
+                    buttons.push(pk_btn);
+                }
+            }
+
+            let components = vec![serenity::CreateActionRow::Buttons(buttons)];
+
+            desc += "\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n";
+
+            let title_text = if forced {
+                "Switch Pokemon"
+            } else {
+                "Switch Pokemon?"
+            };
+
+            msg.write()
+                .await
+                .edit(
+                    &ctx,
+                    EditMessage::default()
+                        .embed(
+                            serenity::CreateEmbed::default()
+                                .title(title_text)
+                                .description(desc)
+                                .thumbnail("https://cdn.discordapp.com/attachments/1196582162057662484/1206389369880059954/pokeballs.png?ex=65dbd4a7&is=65c95fa7&hm=06799355aeafcb5d59614e9d810975adec64d6538410b869ac036007d10ac46a&")
+                                .colour(data::EMBED_DEFAULT)
+                                .footer(serenity::CreateEmbedFooter::new(
+                                    "@~ powered by UwUntu & RustyBamboo",
+                                )),
+                        )
+                        .components(components),
+                )
+                .await
+                .unwrap();
+
+            0
         }
 
         while let Some(reaction) = reactions.next().await {
@@ -1588,7 +1712,7 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
                         &wild_pokemon_types,
                         &player_pokemon_types,
                     );
-                    wild_pokemeon_turn(
+                    forced_switch = wild_pokemeon_turn(
                         &msg,
                         &ctx,
                         &u,
@@ -1601,6 +1725,17 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
 
                     // create force switch here to make playr switch, if user has no team left, battle finishes,
                     // player looses creds and buddy goes back to 1 hp
+                    if forced_switch {
+                        let _ = switch_pokemon(
+                            &msg,
+                            &ctx,
+                            &u,
+                            &mut player_team,
+                            &mut current,
+                            forced_switch,
+                        )
+                        .await;
+                    }
                 }
 
                 sleep(Duration::from_millis(1700)).await;
@@ -1852,26 +1987,27 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
 
                 // provide list of pokemon and buttons to switch pokemon
                 if react_id == user_id && reaction.data.custom_id.as_str() == "switch" {
-                    msg.write()
-                        .await
-                        .edit(
-                            &ctx,
-                            EditMessage::default()
-                                .embed(
-                                    serenity::CreateEmbed::default()
-                                        .title(
-                                            "Switch is not yet implemented (EXITING)".to_string(),
-                                        )
-                                        .thumbnail(&user_avatar)
-                                        .colour(data::EMBED_ERROR)
-                                        .footer(serenity::CreateEmbedFooter::new(
-                                            "@~ powered by UwUntu & RustyBamboo",
-                                        )),
-                                )
-                                .components(Vec::new()),
-                        )
-                        .await
-                        .unwrap();
+                    switch_pokemon(&msg, &ctx, &u, &mut player_team, &mut current, false).await;
+                    // msg.write()
+                    //     .await
+                    //     .edit(
+                    //         &ctx,
+                    //         EditMessage::default()
+                    //             .embed(
+                    //                 serenity::CreateEmbed::default()
+                    //                     .title(
+                    //                         "Switch is not yet implemented (EXITING)".to_string(),
+                    //                     )
+                    //                     .thumbnail(&user_avatar)
+                    //                     .colour(data::EMBED_ERROR)
+                    //                     .footer(serenity::CreateEmbedFooter::new(
+                    //                         "@~ powered by UwUntu & RustyBamboo",
+                    //                     )),
+                    //             )
+                    //             .components(Vec::new()),
+                    //     )
+                    //     .await
+                    //     .unwrap();
 
                     return;
                     // timeout_check = false;
@@ -2089,7 +2225,7 @@ pub async fn pre_populate(ctx: Context<'_>) -> Result<(), Error> {
     let team_size = user_data.event.get_team().len();
     let generate = 5 - team_size;
 
-    for i in 0..generate {
+    for _i in 0..generate {
         let mut pokemon = spawn_pokemon(ctx, 1);
         let health = generate_hp(pokemon.get_index());
         pokemon.set_health(health);
@@ -2549,32 +2685,32 @@ fn get_type_color(types: &str) -> u32 {
     }
 }
 
-fn get_type_emoji(typing: &str) -> String {
-    let dual_type: Vec<&str> = typing.split('/').collect();
-    let mut emojis: String = "".to_string();
-    for element in dual_type {
-        emojis += match element.to_lowercase().as_str() {
-            "normal" => ":white_circle:",
-            "fire" => ":fire:",
-            "water" => ":droplet:",
-            "electric" => ":zap:",
-            "grass" => ":leaves:",
-            "ice" => ":snowflake:",
-            "fighting" => ":punch:",
-            "poison" => ":skull:",
-            "ground" => ":mountain:",
-            "flying" => ":wing:",
-            "psychic" => ":fish_cake:",
-            "bug" => ":lady_beetle:",
-            "rock" => ":ring:",
-            "ghost" => ":ghost:",
-            "dark" => ":waxing_crescent_moon:",
-            "steel" => "nut_and_bolt:",
-            "fairy" => ":fairy:",
-            "dragon" => ":dragon:",
-            _ => "",
-        }
-    }
+// fn get_type_emoji(typing: &str) -> String {
+//     let dual_type: Vec<&str> = typing.split('/').collect();
+//     let mut emojis: String = "".to_string();
+//     for element in dual_type {
+//         emojis += match element.to_lowercase().as_str() {
+//             "normal" => ":white_circle:",
+//             "fire" => ":fire:",
+//             "water" => ":droplet:",
+//             "electric" => ":zap:",
+//             "grass" => ":leaves:",
+//             "ice" => ":snowflake:",
+//             "fighting" => ":punch:",
+//             "poison" => ":skull:",
+//             "ground" => ":mountain:",
+//             "flying" => ":wing:",
+//             "psychic" => ":fish_cake:",
+//             "bug" => ":lady_beetle:",
+//             "rock" => ":ring:",
+//             "ghost" => ":ghost:",
+//             "dark" => ":waxing_crescent_moon:",
+//             "steel" => "nut_and_bolt:",
+//             "fairy" => ":fairy:",
+//             "dragon" => ":dragon:",
+//             _ => "",
+//         }
+//     }
 
-    emojis
-}
+//     emojis
+// }
