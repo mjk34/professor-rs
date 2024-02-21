@@ -15,7 +15,7 @@ use crate::data::{self, PokeData, TrainerData};
 use crate::serenity;
 use crate::{Context, Error};
 use poise::serenity_prelude::futures::StreamExt;
-use poise::serenity_prelude::EditMessage;
+use poise::serenity_prelude::{EditMessage, UserId};
 use rand::seq::SliceRandom;
 use rand::{thread_rng, Rng};
 use serenity::Color;
@@ -841,68 +841,223 @@ pub async fn buddy(ctx: Context<'_>) -> Result<(), Error> {
 }
 
 #[poise::command(slash_command)]
-pub async fn switch_buddy(ctx: Context<'_>, index: usize) -> Result<(), Error> {
-    let user = ctx.author();
+pub async fn switch_buddy(ctx: Context<'_>) -> Result<(), Error> {
+    let user = ctx.author().clone();
     let data = &ctx.data().users;
     let u = data.get(&user.id).unwrap();
-    let mut user_data = u.write().await;
+    let user_data = u.read().await;
 
+    let user_id = user.id;
+    let user_name = user.name;
+    let user_avatar = ctx.author().avatar_url().unwrap_or_default().to_string();
+
+    let buddy = user_data.event.get_buddy();
     let team = user_data.event.get_team();
 
-    if index <= team.len() {
-        user_data.event.set_buddy(index - 1);
-        let pokemon = &team[index - 1];
+    if !team.is_empty() {
+        let mut desc = "\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n".to_string();
+        let mut buttons = Vec::new();
 
-        let name: String = pokemon.get_name();
-        let types: String = pokemon.get_types();
-        let sprite: String = pokemon.get_sprite();
+        let cancel_btn = serenity::CreateButton::new("open_modal")
+            .label("cancel")
+            .custom_id("cancel".to_string())
+            .style(poise::serenity_prelude::ButtonStyle::Secondary);
+        buttons.push(cancel_btn);
 
-        let type_split: Vec<&str> = types.split('/').collect();
-        let first_type = type_split
-            .first()
-            .expect("search_Pokemon(): Failed to expand first_type")
-            .to_string();
-        let poke_color = get_type_color(&first_type);
+        for (index, pokemon) in team.iter().enumerate() {
+            let name = pokemon.get_name();
+            let types = pokemon.get_types();
+            let current_hp = pokemon.get_current_health();
+            let health = pokemon.get_health();
 
-        let health = pokemon.get_health();
-        let current = pokemon.get_current_health();
-        let hp_percent = current as f32 / health as f32;
+            if index == buddy {
+                if name.len() < 7 {
+                    desc += format!("- {}. **{:22}**  \u{2000}\u{2000}", index + 1, name).as_str();
+                } else {
+                    desc += format!("- {}. **{:20}**  ", index + 1, name).as_str();
+                }
 
-        let desc = if hp_percent > 0.80 {
-            format!(
-                "**{}** is brimming with energy! (HP: {}/{})",
-                name, current, health
-            )
-        } else if (0.50..0.80).contains(&hp_percent) {
-            format!("**{}** is happy. (HP: {}/{})", name, current, health)
-        } else if (0.30..0.50).contains(&hp_percent) {
-            format!("**{}** is tired... (HP: {}/{})", name, current, health)
-        } else {
-            format!(
-                "**{}** is knocked out... (HP: {}/{})",
-                name, current, health
-            )
-        };
+                desc += format!("{:20}  HP: {}/{}\n", types, current_hp, health).as_str();
+            } else {
+                if name.len() < 7 {
+                    desc += format!("- {}. {:22}  \u{2000}", index + 1, name).as_str();
+                } else {
+                    desc += format!("- {}. {:20}  ", index + 1, name).as_str();
+                }
 
-        ctx.send(
+                desc += format!("{:20}  HP: {}/{}\n", types, current_hp, health).as_str();
+
+                let pk_btn = serenity::CreateButton::new("open_modal")
+                    .label(&name)
+                    .custom_id(format!("pokemon-{}", index))
+                    .style(poise::serenity_prelude::ButtonStyle::Primary);
+                buttons.push(pk_btn);
+            }
+        }
+
+        let components = vec![serenity::CreateActionRow::Buttons(buttons)];
+
+        desc += "\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n";
+
+        let reply = ctx.send(
             poise::CreateReply::default().embed(
                 serenity::CreateEmbed::new()
-                    .title(format!("{}'s Buddy", ctx.author().name))
-                    .description(desc)
-                    .color(Color::new(poke_color))
-                    .thumbnail(sprite)
+                    .title("Switch Buddy")
+                    .description(&desc)
+                    .color(data::EMBED_DEFAULT)
+                    .thumbnail("https://cdn.discordapp.com/attachments/1196582162057662484/1206389369880059954/pokeballs.png?ex=65dbd4a7&is=65c95fa7&hm=06799355aeafcb5d59614e9d810975adec64d6538410b869ac036007d10ac46a&")
                     .footer(serenity::CreateEmbedFooter::new(
                         "@~ powered by UwUntu & RustyBamboo",
                     )),
-            ),
+            ).components(components)
         )
         .await?;
+
+        let msg_og = Arc::new(RwLock::new(reply.into_message().await?));
+        let msg = Arc::clone(&msg_og);
+        let mut reactions = msg
+            .read()
+            .await
+            .await_component_interactions(ctx)
+            .timeout(Duration::new(120, 0))
+            .stream();
+
+        let ctx = ctx.serenity_context().clone();
+        let u = Arc::clone(&u);
+
+        tokio::spawn(async move {
+            let mut timeout_check = true;
+
+            while let Some(reaction) = reactions.next().await {
+                reaction
+                    .create_response(&ctx, serenity::CreateInteractionResponse::Acknowledge)
+                    .await
+                    .unwrap();
+
+                let react_id = reaction.member.clone().unwrap_or_default().user.id;
+                if react_id == user_id && reaction.data.custom_id.as_str() == "cancel" {
+                    msg.write()
+                        .await
+                        .edit(
+                            &ctx,
+                            EditMessage::default()
+                                .embed(
+                                    serenity::CreateEmbed::default()
+                                        .title("Switch Buddy")
+                                        .description(&desc)
+                                        .color(data::EMBED_DEFAULT)
+                                        .thumbnail("https://cdn.discordapp.com/attachments/1196582162057662484/1206389369880059954/pokeballs.png?ex=65dbd4a7&is=65c95fa7&hm=06799355aeafcb5d59614e9d810975adec64d6538410b869ac036007d10ac46a&")
+                                        .footer(serenity::CreateEmbedFooter::new(
+                                            "@~ powered by UwUntu & RustyBamboo",
+                                        )),
+                                )
+                                .components(Vec::new()),
+                        )
+                        .await
+                        .unwrap();
+                }
+
+                let mut new_buddy = buddy;
+                if react_id == user_id {
+                    new_buddy = match reaction.data.custom_id.as_str() {
+                        "pokemon-0" => 0,
+                        "pokemon-1" => 1,
+                        "pokemon-2" => 2,
+                        "pokemon-3" => 3,
+                        "pokemon-4" => 4,
+                        _ => buddy,
+                    };
+
+                    let mut user_data = u.write().await;
+                    user_data.event.set_buddy(new_buddy);
+                    timeout_check = false;
+                }
+
+                if new_buddy != buddy {
+                    let pokemon = &team[new_buddy];
+
+                    let name: String = pokemon.get_name();
+                    let types: String = pokemon.get_types();
+                    let sprite: String = pokemon.get_sprite();
+
+                    let type_split: Vec<&str> = types.split('/').collect();
+                    let first_type = type_split
+                        .first()
+                        .expect("search_Pokemon(): Failed to expand first_type")
+                        .to_string();
+                    let poke_color = get_type_color(&first_type);
+
+                    let health = pokemon.get_health();
+                    let current = pokemon.get_current_health();
+                    let hp_percent = current as f32 / health as f32;
+
+                    let desc = if hp_percent > 0.80 {
+                        format!(
+                            "**{}** is brimming with energy! (HP: {}/{})",
+                            name, current, health
+                        )
+                    } else if (0.50..0.80).contains(&hp_percent) {
+                        format!("**{}** is happy. (HP: {}/{})", name, current, health)
+                    } else if (0.30..0.50).contains(&hp_percent) {
+                        format!("**{}** is tired... (HP: {}/{})", name, current, health)
+                    } else {
+                        format!(
+                            "**{}** is knocked out... (HP: {}/{})",
+                            name, current, health
+                        )
+                    };
+
+                    msg.write()
+                        .await
+                        .edit(
+                            &ctx,
+                            EditMessage::default()
+                                .embed(
+                                    serenity::CreateEmbed::default()
+                                        .title(format!("{}'s Buddy", user_name))
+                                        .description(desc)
+                                        .color(Color::new(poke_color))
+                                        .thumbnail(sprite)
+                                        .footer(serenity::CreateEmbedFooter::new(
+                                            "@~ powered by UwUntu & RustyBamboo",
+                                        )),
+                                )
+                                .components(Vec::new()),
+                        )
+                        .await
+                        .unwrap();
+                }
+            }
+
+            if timeout_check {
+                let desc = "[Response timed out... try again tomorrow (next: `/uwu`)]".to_string();
+                msg.write()
+                    .await
+                    .edit(
+                        ctx,
+                        EditMessage::default()
+                            .embed(
+                                serenity::CreateEmbed::default()
+                                    .title("????????".to_string())
+                                    .description(&desc)
+                                    .thumbnail(user_avatar)
+                                    .colour(data::EMBED_ERROR)
+                                    .footer(serenity::CreateEmbedFooter::new(
+                                        "@~ powered by UwUntu & RustyBamboo",
+                                    )),
+                            )
+                            .components(Vec::new()),
+                    )
+                    .await
+                    .unwrap();
+            }
+        });
     } else {
         ctx.send(
             poise::CreateReply::default().embed(
                 serenity::CreateEmbed::new()
-                    .title("Change Buddy")
-                    .description("Failed to set new buddy, refer to `/team` for pokemon index.")
+                    .title("Switch Buddy")
+                    .description("You don't have anyone in your team...")
                     .color(data::EMBED_ERROR)
                     .thumbnail("https://cdn.discordapp.com/attachments/1196582162057662484/1206389369880059954/pokeballs.png?ex=65dbd4a7&is=65c95fa7&hm=06799355aeafcb5d59614e9d810975adec64d6538410b869ac036007d10ac46a&")
                     .footer(serenity::CreateEmbedFooter::new(
@@ -940,33 +1095,21 @@ pub async fn team(ctx: Context<'_>) -> Result<(), Error> {
             let health = pokemon.get_health();
 
             if index == buddy {
-                if name.len() < 6 {
-                    desc += format!("\u{3000}{}. **{:18}**  \u{3000}\u{3000}", index + 1, name)
-                        .as_str();
-                } else if name.len() < 7 {
-                    desc += format!("\u{3000}{}. **{:18}**  \u{3000}\u{2000}", index + 1, name)
-                        .as_str();
+                if name.len() < 7 {
+                    desc += format!("- {}. **{:22}**  \u{2000}\u{2000}", index + 1, name).as_str();
                 } else {
-                    desc += format!("\u{3000}{}. **{:16}**  \u{3000}", index + 1, name).as_str();
+                    desc += format!("- {}. **{:20}**  ", index + 1, name).as_str();
                 }
 
-                desc += format!("{:16}  \u{3000}HP: {}/{}\n", types, current, health).as_str();
+                desc += format!("{:20}  HP: {}/{}\n", types, current, health).as_str();
             } else {
-                if name.len() < 6 {
-                    desc += format!(
-                        "\u{3000}{}. {:18}  \u{3000}\u{3000}\u{2000}",
-                        index + 1,
-                        name
-                    )
-                    .as_str();
-                } else if name.len() < 7 {
-                    desc +=
-                        format!("\u{3000}{}. {:20}  \u{3000}\u{3000}", index + 1, name).as_str();
+                if name.len() < 7 {
+                    desc += format!("- {}. {:22}  \u{2000}", index + 1, name).as_str();
                 } else {
-                    desc += format!("\u{3000}{}. {:16}  \u{3000}", index + 1, name).as_str();
+                    desc += format!("- {}. {:20}  ", index + 1, name).as_str();
                 }
 
-                desc += format!("{:16}  \u{3000}HP: {}/{}\n", types, current, health).as_str();
+                desc += format!("{:20}  HP: {}/{}\n", types, current, health).as_str();
             }
         }
 
@@ -1369,20 +1512,16 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
                 .await
                 .unwrap();
 
-            return forced_switch;
+            forced_switch
         }
 
-        async fn switch_pokemon(
+        async fn show_team(
             msg: &std::sync::Arc<tokio::sync::RwLock<poise::serenity_prelude::Message>>,
             ctx: &poise::serenity_prelude::Context,
-            u: &Arc<RwLock<data::UserData>>,
-            player_team: &mut [PokeData],
-            current: &mut usize,
+            player_team: &[PokeData],
+            current: &usize,
             forced: bool,
-        ) -> usize {
-            // let mut player_team = user_data.event.get_team().clone();
-            // let mut player_pokemon = player_team.get(current).unwrap().clone();
-
+        ) {
             let mut desc = "\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n".to_string();
             let mut buttons = Vec::new();
 
@@ -1394,54 +1533,38 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
                 buttons.push(back_btn);
             }
 
-            for (index, pokemon) in player_team.iter_mut().enumerate() {
+            for (index, pokemon) in player_team.iter().enumerate() {
                 let name = pokemon.get_name();
                 let types = pokemon.get_types();
-                let curr_hp = pokemon.get_current_health();
+                let current_hp = pokemon.get_current_health();
                 let health = pokemon.get_health();
 
                 if index == *current && forced {
-                    if name.len() < 6 {
-                        desc += format!("\u{3000}{}. ~~{:18}~~  \u{3000}\u{3000}", index + 1, name)
-                            .as_str();
-                    } else if name.len() < 7 {
-                        desc += format!("\u{3000}{}. ~~{:18}~~  \u{3000}\u{2000}", index + 1, name)
-                            .as_str();
-                    } else {
+                    if name.len() < 7 {
                         desc +=
-                            format!("\u{3000}{}. ~~{:16}~~  \u{3000}", index + 1, name).as_str();
+                            format!("- {}. ~~{:22}~~  \u{2000}\u{2000}", index + 1, name).as_str();
+                    } else {
+                        desc += format!("- {}. ~~{:20}~~  ", index + 1, name).as_str();
                     }
 
-                    desc += format!("{:16}  \u{3000}HP: {}/{}\n", types, curr_hp, health).as_str();
+                    desc += format!("{:20}  HP: {}/{}\n", types, current_hp, health).as_str();
                 } else if index == *current && !forced {
-                    if name.len() < 6 {
-                        desc += format!("\u{3000}{}. **{:18}**  \u{3000}\u{3000}", index + 1, name)
-                            .as_str();
-                    } else if name.len() < 7 {
-                        desc += format!("\u{3000}{}. **{:18}**  \u{3000}\u{2000}", index + 1, name)
-                            .as_str();
-                    } else {
+                    if name.len() < 7 {
                         desc +=
-                            format!("\u{3000}{}. **{:16}**  \u{3000}", index + 1, name).as_str();
-                    }
-
-                    desc += format!("{:16}  \u{3000}HP: {}/{}\n", types, curr_hp, health).as_str();
-                } else {
-                    if name.len() < 6 {
-                        desc += format!(
-                            "\u{3000}{}. {:18}  \u{3000}\u{3000}\u{2000}",
-                            index + 1,
-                            name
-                        )
-                        .as_str();
-                    } else if name.len() < 7 {
-                        desc += format!("\u{3000}{}. {:20}  \u{3000}\u{3000}", index + 1, name)
-                            .as_str();
+                            format!("- {}. **{:22}**  \u{2000}\u{2000}", index + 1, name).as_str();
                     } else {
-                        desc += format!("\u{3000}{}. {:16}  \u{3000}", index + 1, name).as_str();
+                        desc += format!("- {}. **{:20}**  ", index + 1, name).as_str();
                     }
 
-                    desc += format!("{:16}  \u{3000}HP: {}/{}\n", types, curr_hp, health).as_str();
+                    desc += format!("{:20}  HP: {}/{}\n", types, current_hp, health).as_str();
+                } else {
+                    if name.len() < 7 {
+                        desc += format!("- {}. {:22}  \u{2000}", index + 1, name).as_str();
+                    } else {
+                        desc += format!("- {}. {:20}  ", index + 1, name).as_str();
+                    }
+
+                    desc += format!("{:20}  HP: {}/{}\n", types, current_hp, health).as_str();
 
                     let pk_btn = serenity::CreateButton::new("open_modal")
                         .label(&name)
@@ -1480,8 +1603,6 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
                 )
                 .await
                 .unwrap();
-
-            0
         }
 
         while let Some(reaction) = reactions.next().await {
@@ -1702,82 +1823,6 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
                     .await
                     .unwrap();
 
-                if wild_go_first {
-                    sleep(Duration::from_millis(1000)).await;
-
-                    // potentiall return if forced switch
-                    let wild_multiplier = get_advantage(
-                        &type_matrix,
-                        &type_name,
-                        &wild_pokemon_types,
-                        &player_pokemon_types,
-                    );
-                    forced_switch = wild_pokemeon_turn(
-                        &msg,
-                        &ctx,
-                        &u,
-                        &mut wild_pokemon,
-                        &mut player_pokemon,
-                        &mut current,
-                        wild_multiplier,
-                    )
-                    .await;
-
-                    // create force switch here to make playr switch, if user has no team left, battle finishes,
-                    // player looses creds and buddy goes back to 1 hp
-                    if forced_switch {
-                        let _ = switch_pokemon(
-                            &msg,
-                            &ctx,
-                            &u,
-                            &mut player_team,
-                            &mut current,
-                            forced_switch,
-                        )
-                        .await;
-                    }
-                }
-
-                sleep(Duration::from_millis(1700)).await;
-
-                let mut desc = "﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n\n".to_string();
-
-                desc += " \u{3000} \u{3000}Your turn... \n";
-                desc += format!(
-                    "\n\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n**{}** |  HP: {}/{}",
-                    &player_pokemon.get_name(),
-                    &player_pokemon.get_current_health(),
-                    &player_pokemon.get_health()
-                )
-                .as_str();
-
-                let components = generate_btns();
-                msg.write()
-                    .await
-                    .edit(
-                        &ctx,
-                        EditMessage::default()
-                            .embed(
-                                serenity::CreateEmbed::default()
-                                    .title(format!(
-                                        "Wild **{}** |  HP: {}/{}",
-                                        &wild_pokemon.get_name(),
-                                        &wild_pokemon.get_current_health(),
-                                        &wild_pokemon.get_health()
-                                    ))
-                                    .description(desc)
-                                    .thumbnail(&wild_pokemon.get_sprite())
-                                    .image(&player_pokemon.get_bsprite())
-                                    .colour(data::EMBED_DEFAULT)
-                                    .footer(serenity::CreateEmbedFooter::new(
-                                        "@~ powered by UwUntu & RustyBamboo",
-                                    )),
-                            )
-                            .components(components),
-                    )
-                    .await
-                    .unwrap();
-
                 timeout_check = false;
                 break;
             }
@@ -1786,11 +1831,83 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
         if timeout_check {
             timeout_exit(&msg, &ctx, &user_avatar).await;
             return;
+        } else {
+            if wild_go_first {
+                sleep(Duration::from_millis(1000)).await;
+
+                // potentiall return if forced switch
+                let wild_multiplier = get_advantage(
+                    &type_matrix,
+                    &type_name,
+                    &wild_pokemon_types,
+                    &player_pokemon_types,
+                );
+                forced_switch = wild_pokemeon_turn(
+                    &msg,
+                    &ctx,
+                    &u,
+                    &mut wild_pokemon,
+                    &mut player_pokemon,
+                    &mut current,
+                    wild_multiplier,
+                )
+                .await;
+
+                // create force switch here to make playr switch, if user has no team left, battle finishes,
+                // player looses creds and buddy goes back to 1 hp
+                if forced_switch {
+                    show_team(&msg, &ctx, &player_team, &current, forced_switch).await;
+                }
+            }
+
+            sleep(Duration::from_millis(1700)).await;
+
+            let mut desc = "﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n\n".to_string();
+
+            desc += " \u{3000} \u{3000}Your turn... \n";
+            desc += format!(
+                "\n\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n**{}** |  HP: {}/{}",
+                &player_pokemon.get_name(),
+                &player_pokemon.get_current_health(),
+                &player_pokemon.get_health()
+            )
+            .as_str();
+
+            let components = generate_btns();
+            msg.write()
+                .await
+                .edit(
+                    &ctx,
+                    EditMessage::default()
+                        .embed(
+                            serenity::CreateEmbed::default()
+                                .title(format!(
+                                    "Wild **{}** |  HP: {}/{}",
+                                    &wild_pokemon.get_name(),
+                                    &wild_pokemon.get_current_health(),
+                                    &wild_pokemon.get_health()
+                                ))
+                                .description(desc)
+                                .thumbnail(&wild_pokemon.get_sprite())
+                                .image(&player_pokemon.get_bsprite())
+                                .colour(data::EMBED_DEFAULT)
+                                .footer(serenity::CreateEmbedFooter::new(
+                                    "@~ powered by UwUntu & RustyBamboo",
+                                )),
+                        )
+                        .components(components),
+                )
+                .await
+                .unwrap();
         }
 
         // Create a check for who goes first ---- roll for initiative
 
         while !catch_success && !defeat_pokemon {
+            let mut player_switch = false;
+            let mut switch_cancel = false;
+            // let mut  player_bag = false;
+
             forced_switch = false;
             timeout_check = true;
 
@@ -1987,31 +2104,8 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
 
                 // provide list of pokemon and buttons to switch pokemon
                 if react_id == user_id && reaction.data.custom_id.as_str() == "switch" {
-                    switch_pokemon(&msg, &ctx, &u, &mut player_team, &mut current, false).await;
-                    // msg.write()
-                    //     .await
-                    //     .edit(
-                    //         &ctx,
-                    //         EditMessage::default()
-                    //             .embed(
-                    //                 serenity::CreateEmbed::default()
-                    //                     .title(
-                    //                         "Switch is not yet implemented (EXITING)".to_string(),
-                    //                     )
-                    //                     .thumbnail(&user_avatar)
-                    //                     .colour(data::EMBED_ERROR)
-                    //                     .footer(serenity::CreateEmbedFooter::new(
-                    //                         "@~ powered by UwUntu & RustyBamboo",
-                    //                     )),
-                    //             )
-                    //             .components(Vec::new()),
-                    //     )
-                    //     .await
-                    //     .unwrap();
-
-                    return;
-                    // timeout_check = false;
-                    // break;
+                    player_switch = true;
+                    break;
                 }
 
                 // create a bag menu that shows potions, pokeballs and berries
@@ -2041,11 +2135,74 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
                 }
             }
 
-            if !timeout_check && wild_pokemon.get_current_health() == 0 {
+            if player_switch {
+                show_team(&msg, &ctx, &player_team, &current, forced_switch).await;
+
+                while let Some(reaction) = reactions.next().await {
+                    reaction
+                        .create_response(&ctx, serenity::CreateInteractionResponse::Acknowledge)
+                        .await
+                        .unwrap();
+
+                    let react_id = reaction.member.clone().unwrap_or_default().user.id;
+                    if react_id == user_id && reaction.data.custom_id.as_str() == "back" {
+                        let mut desc = "﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n\n".to_string();
+
+                        desc += " \u{3000} \u{3000}Your turn... \n";
+                        desc += format!(
+                            "\n\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n**{}** |  HP: {}/{}",
+                            &player_pokemon.get_name(),
+                            &player_pokemon.get_current_health(),
+                            &player_pokemon.get_health()
+                        )
+                        .as_str();
+
+                        let components = generate_btns();
+                        msg.write()
+                            .await
+                            .edit(
+                                &ctx,
+                                EditMessage::default()
+                                    .embed(
+                                        serenity::CreateEmbed::default()
+                                            .title(format!(
+                                                "Wild **{}** |  HP: {}/{}",
+                                                &wild_pokemon.get_name(),
+                                                &wild_pokemon.get_current_health(),
+                                                &wild_pokemon.get_health()
+                                            ))
+                                            .description(desc)
+                                            .thumbnail(&wild_pokemon.get_sprite())
+                                            .image(&player_pokemon.get_bsprite())
+                                            .colour(data::EMBED_DEFAULT)
+                                            .footer(serenity::CreateEmbedFooter::new(
+                                                "@~ powered by UwUntu & RustyBamboo",
+                                            )),
+                                    )
+                                    .components(components),
+                            )
+                            .await
+                            .unwrap();
+
+                        timeout_check = false;
+                        switch_cancel = true;
+                        break;
+                    }
+                }
+
+                if timeout_check {
+                    timeout_exit(&msg, &ctx, &user_avatar).await;
+                    return;
+                }
+            }
+
+            // if player_bag {}
+
+            if !switch_cancel && !timeout_check && wild_pokemon.get_current_health() == 0 {
                 defeat_pokemon = true;
             }
 
-            if !timeout_check && !defeat_pokemon && !catch_success {
+            if !switch_cancel && !timeout_check && !defeat_pokemon && !catch_success {
                 sleep(Duration::from_millis(1400)).await;
 
                 // potentiall return if forced switch
