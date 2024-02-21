@@ -193,6 +193,10 @@ impl EventData {
         self.team[current].set_current_health(health - damage);
     }
 
+    pub fn faint_pokemon(&mut self, current: usize) {
+        self.team[current].set_current_health(0);
+    }
+
     pub fn get_buddy(&self) -> usize {
         self.buddy
     }
