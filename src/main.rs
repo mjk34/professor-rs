@@ -3,10 +3,12 @@ mod clips;
 mod data;
 mod event;
 mod helper;
+mod llm;
 mod mods;
 
 use dashmap::DashMap;
 use data::{UserData, VoiceUser};
+use llm::LLM;
 use rand::{thread_rng, Rng};
 use std::{env, sync::Arc};
 use tokio::sync::RwLock;
@@ -26,6 +28,7 @@ async fn register(ctx: Context<'_>) -> Result<(), Error> {
 async fn main() {
     dotenv::dotenv().expect("Failed to read .env file");
     let token = env::var("DISCORD_TOKEN").expect("missing DISCORD_TOKEN");
+
     let data = data::Data::load();
 
     let intents = serenity::GatewayIntents::GUILD_MESSAGES
@@ -152,7 +155,7 @@ async fn event_handler(
                 let mut tries = 0;
                 let reading;
                 loop {
-                    match basic::gpt_string(data.gpt_key.clone(), prompt.clone()).await {
+                    match data.llm.gpt_string(prompt.clone()).await {
                         Ok(result) => {
                             reading = result;
                             break;
@@ -161,7 +164,7 @@ async fn event_handler(
                             println!("An error occurred: {:?}, retrying...", e);
                             tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                             if tries > 5 {
-                                return Err(Box::new(e));
+                                return Ok(());
                             }
                         }
                     }

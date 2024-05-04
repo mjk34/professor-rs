@@ -1,4 +1,4 @@
-use crate::serenity;
+use crate::{llm, serenity};
 use chrono::prelude::{DateTime, Utc};
 use dashmap::DashMap;
 use poise::serenity_prelude::RoleId;
@@ -513,12 +513,12 @@ pub struct Data {
     pub ponder: Vec<String>,
     pub pong: Vec<String>,
     pub d20f: Vec<String>,
-    pub gpt_key: String,
     pub mod_id: RoleId,
     pub pokedex: Vec<PokeData>,
     pub type_matrix: Vec<Vec<f32>>,
     pub type_name: Vec<String>,
     pub trainers: Vec<TrainerData>,
+    pub llm: llm::Ollama,
 }
 
 impl Data {
@@ -589,7 +589,15 @@ impl Data {
         let pong = read_lines("reference/pong.txt");
         let d20f = read_lines("reference/d20.txt");
 
-        let gpt_key = env::var("API_KEY").expect("missing GPT API_KEY");
+        // let gpt_key = env::var("API_KEY").expect("missing GPT API_KEY");
+
+        let ip = env::var("OLLAMA_IP").expect("missing OLLAMA IP");
+        let port: u16 = env::var("OLLAMA_PORT")
+            .expect("missing OLLAMA port")
+            .parse::<u16>()
+            .unwrap();
+
+        let ollama = llm::Ollama::new(ip, port);
 
         let mod_id = RoleId::new(
             env::var("MOD_ID")
@@ -805,12 +813,13 @@ impl Data {
             ponder,
             pong,
             d20f,
-            gpt_key,
+            // gpt_key,
             mod_id,
             pokedex,
             type_matrix,
             type_name,
             trainers,
+            llm: ollama,
         }
     }
 }

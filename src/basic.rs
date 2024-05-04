@@ -14,6 +14,7 @@
 //!---------------------------------------------------------------------!
 
 use crate::data::{self, VoiceUser};
+use crate::llm::LLM;
 use crate::{serenity, Context, Error};
 use chrono::prelude::Utc;
 use openai_api_rs::v1::api::Client;
@@ -189,7 +190,7 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
     let mut tries = 0;
     let reading;
     loop {
-        match gpt_string(ctx.data().gpt_key.clone(), prompt.to_string()).await {
+        match ctx.data().llm.gpt_string(prompt.to_string()).await {
             Ok(result) => {
                 reading = result;
                 break;
@@ -198,7 +199,7 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
                 println!("An error occurred: {:?}, retrying...", e);
                 tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                 if tries > 5 {
-                    return Err(Box::new(e));
+                    return Ok(());
                 }
             }
         }

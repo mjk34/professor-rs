@@ -17,6 +17,7 @@ serde = { version = "*", features = ["rc"] }
 serde_json = "1.0"
 rand = "*"
 
+ollama-rs = "0.1.9"
 openai-api-rs = "4.0.0"
 regex = "1"
 
