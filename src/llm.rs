@@ -1,7 +1,9 @@
 use ollama_rs::generation::completion::request::GenerationRequest;
+use ollama_rs::generation::options::GenerationOptions;
 use openai_api_rs::v1::api::Client;
 use openai_api_rs::v1::chat_completion::{self, ChatCompletionRequest};
 use openai_api_rs::v1::common::GPT3_5_TURBO_16K;
+use rand::random;
 
 pub(crate) trait LLM {
     async fn gpt_string(&self, prompt: String) -> Result<String, ()>;
@@ -60,9 +62,16 @@ impl Ollama {
 impl LLM for Ollama {
     async fn gpt_string(&self, prompt: String) -> Result<String, ()> {
         let model = "llama3".to_string();
+        let options = GenerationOptions::default()
+            // .temperature(0.3)
+            // .top_k(0)
+            // .top_p(1.0)
+            // .tfs_z(0.95)
+            .repeat_last_n(24);
+        // .seed(random());
         let res = self
             .client
-            .generate(GenerationRequest::new(model, prompt))
+            .generate(GenerationRequest::new(model, prompt).options(options))
             .await
             .unwrap();
         Ok(res.response.replace(['\"', '\\'], ""))

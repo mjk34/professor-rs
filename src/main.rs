@@ -9,6 +9,7 @@ mod mods;
 use dashmap::DashMap;
 use data::{UserData, VoiceUser};
 use llm::LLM;
+use poise::serenity_prelude::CacheHttp;
 use rand::{thread_rng, Rng};
 use std::{env, sync::Arc};
 use tokio::sync::RwLock;
@@ -153,6 +154,7 @@ async fn event_handler(
                 };
 
                 let mut tries = 0;
+                let _typing = ctx.http.start_typing(new_message.channel_id);
                 let reading;
                 loop {
                     match data.llm.gpt_string(prompt.clone()).await {

@@ -182,9 +182,9 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
     // generate fortune readings with gpt3.5
     tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
     let prompt = if d20 == 1 {
-        "give me a bad fortune that's funny, only the fortune, no quotes, like a fortune cookie, less than 20 words"
+        "provide a bad fortune that is short, and only say the fortune. Be creative"
     } else {
-        "give me a good fortune that's funny, only the fortune, no quotes, like a fortune cookie, less than 20 words"
+        "provide a good fortune that is short, and only say the fortune. Be creative."
     };
 
     let mut tries = 0;
