@@ -540,7 +540,7 @@ impl Data {
             .embed(
                 serenity::CreateEmbed::new()
                     .title("Account Created!")
-                    .description(format!("Welcome <@{}>! You are now registered with ProfessorBot, feel free to checkout Professors Commands in https://discord.com/channels/1194668798830194850/1194700756306108437", ctx.author().id))
+                    .description(format!("Welcome <@{}>! You are now registered with ProfessorBot, feel free to checkout Professors Commands in https://discord.com/channels/1236349546003566642/1236351799536123946", ctx.author().id))
                     .image(
                         "https://gifdb.com/images/high/anime-girl-okay-sign-b5zlye5h8mnjhdg2.gif",
                     )
