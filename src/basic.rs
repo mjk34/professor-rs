@@ -153,7 +153,7 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
     // generate daily orb/animeme
     let random_meme = thread_rng().gen_range(0..100);
     let ponder_image = if random_meme < 50 {
-        "https://cdn.discordapp.com/attachments/1196582162057662484/1196877964642623509/pondering-my-orb-header-art.png?ex=65b93a77&is=65a6c577&hm=9dcde7ef0ecd61463f39f2077311bbb52db20b4416609cbbe2c5028510f2047c&"
+        "https://cdn.discordapp.com/attachments/1260223476766343188/1260224780192452618/pondering-my-orb-header-art.png?ex=668e8b49&is=668d39c9&hm=fafc1ed2bebf240f904bdd1caba463fd15de8b846d6b0e79e38421afe606f292&"
     } else if (50..75).contains(&random_meme) {
         ctx.data().ponder.choose(&mut thread_rng()).unwrap()
     } else {
