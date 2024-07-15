@@ -156,7 +156,7 @@ pub async fn choose_starter(ctx: Context<'_>) -> Result<(), Error> {
     let user_data = u.read().await;
 
     let team = user_data.event.get_team();
-    let oak_img = "https://cdn.discordapp.com/attachments/1196582162057662484/1206355418889064539/c8bfe05ab93e2bcb0bc78301c1a3933a.jpg?ex=65dbb508&is=65c94008&hm=985b07f671001518f422fe541b8c91ee9ac106a273a8bb023a6fe1fdb617dd50&";
+    let oak_img = "https://cdn.discordapp.com/attachments/1260223476766343188/1262159431626657912/c8bfe05ab93e2bcb0bc78301c1a3933a.jpg?ex=66959512&is=66944392&hm=921650be90fd6411624a4f5c24cc16adcf8cbec021a053f9d96b64d55c43852c&";
 
     if team.is_empty() {
         // Oak dialogue
@@ -172,8 +172,8 @@ pub async fn choose_starter(ctx: Context<'_>) -> Result<(), Error> {
         let oak_text5 = format!("Now, <@{}>, which Pokémon do you want?", user.id);
         let oak_text6 = "Your very own Pokémon legend is about to unfold! A world of dreams and adventures with Pokémon awaits! Let's go!".to_string();
 
-        let oak_img = "https://cdn.discordapp.com/attachments/1196582162057662484/1206355418889064539/c8bfe05ab93e2bcb0bc78301c1a3933a.jpg?ex=65dbb508&is=65c94008&hm=985b07f671001518f422fe541b8c91ee9ac106a273a8bb023a6fe1fdb617dd50&";
-        let poke_img = "https://cdn.discordapp.com/attachments/1196582162057662484/1206355419153563668/nodemaster-pokemon-emerald-starter-selection-screen.jpg?ex=65dbb508&is=65c94008&hm=8a8595e4c8853a015b9c2ccd9c4e6403192c3d655e0f5b7250dd7cab269f214e&";
+        let oak_img = "https://cdn.discordapp.com/attachments/1260223476766343188/1262159431626657912/c8bfe05ab93e2bcb0bc78301c1a3933a.jpg?ex=66959512&is=66944392&hm=921650be90fd6411624a4f5c24cc16adcf8cbec021a053f9d96b64d55c43852c&";
+        let poke_img = "https://cdn.discordapp.com/attachments/1260223476766343188/1262159432117387304/nodemaster-pokemon-emerald-starter-selection-screen.jpg?ex=66959512&is=66944392&hm=c1180aaebf110c78a25470e42bbb23afb077140af7a159149c9eead778268569&";
 
         // continue
         let continue_btn = serenity::CreateButton::new("open_modal")
@@ -828,7 +828,7 @@ pub async fn buddy(ctx: Context<'_>) -> Result<(), Error> {
                     .title("Buddy")
                     .description("You don't have a buddy right now...")
                     .color(data::EMBED_ERROR)
-                    .thumbnail("https://cdn.discordapp.com/attachments/1196582162057662484/1206389369880059954/pokeballs.png?ex=65dbd4a7&is=65c95fa7&hm=06799355aeafcb5d59614e9d810975adec64d6538410b869ac036007d10ac46a&")
+                    .thumbnail("https://cdn.discordapp.com/attachments/1260223476766343188/1262210407167168603/pokeballs.png?ex=6695c48b&is=6694730b&hm=cd6c20793501c3a6bf2dc1ffcafd79606a2b3381920a5ffa89efb125d595ceb7&")
                     .footer(serenity::CreateEmbedFooter::new(
                         "@~ powered by UwUntu & RustyBamboo",
                     )),
@@ -905,7 +905,7 @@ pub async fn switch_buddy(ctx: Context<'_>) -> Result<(), Error> {
                     .title("Switch Buddy")
                     .description(&desc)
                     .color(data::EMBED_DEFAULT)
-                    .thumbnail("https://cdn.discordapp.com/attachments/1196582162057662484/1206389369880059954/pokeballs.png?ex=65dbd4a7&is=65c95fa7&hm=06799355aeafcb5d59614e9d810975adec64d6538410b869ac036007d10ac46a&")
+                    .thumbnail("https://cdn.discordapp.com/attachments/1260223476766343188/1262210407167168603/pokeballs.png?ex=6695c48b&is=6694730b&hm=cd6c20793501c3a6bf2dc1ffcafd79606a2b3381920a5ffa89efb125d595ceb7&")
                     .footer(serenity::CreateEmbedFooter::new(
                         "@~ powered by UwUntu & RustyBamboo",
                     )),
@@ -946,7 +946,7 @@ pub async fn switch_buddy(ctx: Context<'_>) -> Result<(), Error> {
                                         .title("Switch Buddy")
                                         .description(&desc)
                                         .color(data::EMBED_DEFAULT)
-                                        .thumbnail("https://cdn.discordapp.com/attachments/1196582162057662484/1206389369880059954/pokeballs.png?ex=65dbd4a7&is=65c95fa7&hm=06799355aeafcb5d59614e9d810975adec64d6538410b869ac036007d10ac46a&")
+                                        .thumbnail("https://cdn.discordapp.com/attachments/1260223476766343188/1262210407167168603/pokeballs.png?ex=6695c48b&is=6694730b&hm=cd6c20793501c3a6bf2dc1ffcafd79606a2b3381920a5ffa89efb125d595ceb7&")
                                         .footer(serenity::CreateEmbedFooter::new(
                                             "@~ powered by UwUntu & RustyBamboo",
                                         )),
@@ -1059,7 +1059,7 @@ pub async fn switch_buddy(ctx: Context<'_>) -> Result<(), Error> {
                     .title("Switch Buddy")
                     .description("You don't have anyone in your team...")
                     .color(data::EMBED_ERROR)
-                    .thumbnail("https://cdn.discordapp.com/attachments/1196582162057662484/1206389369880059954/pokeballs.png?ex=65dbd4a7&is=65c95fa7&hm=06799355aeafcb5d59614e9d810975adec64d6538410b869ac036007d10ac46a&")
+                    .thumbnail("https://cdn.discordapp.com/attachments/1260223476766343188/1262210407167168603/pokeballs.png?ex=6695c48b&is=6694730b&hm=cd6c20793501c3a6bf2dc1ffcafd79606a2b3381920a5ffa89efb125d595ceb7&")
                     .footer(serenity::CreateEmbedFooter::new(
                         "@~ powered by UwUntu & RustyBamboo",
                     )),
@@ -1124,7 +1124,7 @@ pub async fn team(ctx: Context<'_>) -> Result<(), Error> {
                 .title(format!("{}'s Team", ctx.author().name))
                 .description(desc)
                 .color(embed_color)
-                .thumbnail("https://cdn.discordapp.com/attachments/1196582162057662484/1206389369880059954/pokeballs.png?ex=65dbd4a7&is=65c95fa7&hm=06799355aeafcb5d59614e9d810975adec64d6538410b869ac036007d10ac46a&")
+                .thumbnail("https://cdn.discordapp.com/attachments/1260223476766343188/1262210407167168603/pokeballs.png?ex=6695c48b&is=6694730b&hm=cd6c20793501c3a6bf2dc1ffcafd79606a2b3381920a5ffa89efb125d595ceb7&")
                 .footer(serenity::CreateEmbedFooter::new(
                     "@~ powered by UwUntu & RustyBamboo",
                 )),
@@ -1176,7 +1176,8 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
                 .title("Wild Pokemon")
                 .description(format!("A wild **{}** appeared!", &wild_pokemon.get_name()))
                 .color(Color::new(wild_pokemon_color))
-                .thumbnail("https://cdn.discordapp.com/attachments/1196582162057662484/1206129126470193162/Untitled-1.png?ex=65dae248&is=65c86d48&hm=f5f74d83901446f6e548943cd227b723d6dd27c380dcad929ac804e63414fbd7&")
+                // TODO update this link with cool wild pokemon encounter gif idk
+                .thumbnail("https://cdn.discordapp.com/attachments/1260223476766343188/1262229534716072026/Untitled-1.png?ex=6695d65c&is=669484dc&hm=9737a4d44e5184c8dbe99e2b23e6dccf98fb4c48abd48a1a017801f8852ffb8e&")
                 .image(&wild_pokemon.get_wallpaper())
                 .footer(serenity::CreateEmbedFooter::new(
                     "@~ powered by UwUntu & RustyBamboo",
@@ -1624,7 +1625,7 @@ pub async fn wild_encounter(ctx: Context<'_>) -> Result<(), Error> {
                             serenity::CreateEmbed::default()
                                 .title(title_text)
                                 .description(desc)
-                                .thumbnail("https://cdn.discordapp.com/attachments/1196582162057662484/1206389369880059954/pokeballs.png?ex=65dbd4a7&is=65c95fa7&hm=06799355aeafcb5d59614e9d810975adec64d6538410b869ac036007d10ac46a&")
+                                .thumbnail("https://cdn.discordapp.com/attachments/1260223476766343188/1262210407167168603/pokeballs.png?ex=6695c48b&is=6694730b&hm=cd6c20793501c3a6bf2dc1ffcafd79606a2b3381920a5ffa89efb125d595ceb7&")
                                 .colour(data::EMBED_DEFAULT)
                                 .footer(serenity::CreateEmbedFooter::new(
                                     "@~ powered by UwUntu & RustyBamboo",
@@ -2652,7 +2653,7 @@ pub async fn trainer_battle(ctx: Context<'_>, level: u32) -> Result<(), Error> {
                 .description(msg_txt)
                 .color(data::EMBED_TRAINER)
                 .image(trainer_img)
-                .thumbnail("https://cdn.discordapp.com/attachments/1196582162057662484/1206057037247811594/674633.png?ex=65da9f25&is=65c82a25&hm=fca46c5743cea5a20ddbfe7d4d98d2087ac28ade2d6220b88452e2ad3633df88&")
+                .thumbnail("https://cdn.discordapp.com/attachments/1260223476766343188/1262229974534983731/674633.png?ex=6695d6c5&is=66948545&hm=3149f5b144d45452af48159b54aa81f38c7a2d39b9d0ab60c03701cf323aa821&")
                 .footer(serenity::CreateEmbedFooter::new(
                     "@~ powered by UwUntu & RustyBamboo",
                 )),
@@ -3163,33 +3164,3 @@ fn get_type_color(types: &str) -> u32 {
         _ => 2039583,
     }
 }
-
-// fn get_type_emoji(typing: &str) -> String {
-//     let dual_type: Vec<&str> = typing.split('/').collect();
-//     let mut emojis: String = "".to_string();
-//     for element in dual_type {
-//         emojis += match element.to_lowercase().as_str() {
-//             "normal" => ":white_circle:",
-//             "fire" => ":fire:",
-//             "water" => ":droplet:",
-//             "electric" => ":zap:",
-//             "grass" => ":leaves:",
-//             "ice" => ":snowflake:",
-//             "fighting" => ":punch:",
-//             "poison" => ":skull:",
-//             "ground" => ":mountain:",
-//             "flying" => ":wing:",
-//             "psychic" => ":fish_cake:",
-//             "bug" => ":lady_beetle:",
-//             "rock" => ":ring:",
-//             "ghost" => ":ghost:",
-//             "dark" => ":waxing_crescent_moon:",
-//             "steel" => "nut_and_bolt:",
-//             "fairy" => ":fairy:",
-//             "dragon" => ":dragon:",
-//             _ => "",
-//         }
-//     }
-
-//     emojis
-// }

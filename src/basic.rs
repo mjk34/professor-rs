@@ -153,7 +153,7 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
     // generate daily orb/animeme
     let random_meme = thread_rng().gen_range(0..100);
     let ponder_image = if random_meme < 50 {
-        "https://cdn.discordapp.com/attachments/1260223476766343188/1260224780192452618/pondering-my-orb-header-art.png?ex=668e8b49&is=668d39c9&hm=fafc1ed2bebf240f904bdd1caba463fd15de8b846d6b0e79e38421afe606f292&"
+        "https://cdn.discordapp.com/attachments/1260223476766343188/1262189235558027274/pondering-my-orb-header-art.png?ex=6695b0d4&is=66945f54&hm=e704148f7bda31c186f2b9385ec81c0c5ab6c631cea0166d9a0bb677b84274a4&"
     } else if (50..75).contains(&random_meme) {
         ctx.data().ponder.choose(&mut thread_rng()).unwrap()
     } else {
@@ -271,7 +271,7 @@ pub async fn claim_bonus(ctx: Context<'_>) -> Result<(), Error> {
                         .description(&desc)
                         .thumbnail(base_ref.unwrap().to_string())
                         .color(data::EMBED_DEFAULT)
-                        .image("https://cdn.discordapp.com/attachments/1196582162057662484/1197008145868918854/de6b5df29abaf7124387b9c86ca46a29.gif?ex=65b9b3b5&is=65a73eb5&hm=b36eb6f0e235b2ca8d37339cd541e55ea397cdf4be5cc080da4bd37cd99c6c3d&")
+                        .image("https://cdn.discordapp.com/attachments/1260223476766343188/1262193927386038302/giphy.gif?ex=6695b532&is=669463b2&hm=62e2fb0cc811b9e5b198a44c4351ca8f5d28bcc728c10334c55ba6b2f00ad658&")
                         .footer(serenity::CreateEmbedFooter::new(
                             "@~ powered by UwUntu & RustyBamboo",
                         )),
@@ -301,7 +301,7 @@ pub async fn claim_bonus(ctx: Context<'_>) -> Result<(), Error> {
                         .description(&desc)
                         .thumbnail(roll_ref.unwrap().to_string())
                         .color(data::EMBED_GOLD)
-                        .image("https://cdn.discordapp.com/attachments/1196582162057662484/1197008145868918854/de6b5df29abaf7124387b9c86ca46a29.gif?ex=65b9b3b5&is=65a73eb5&hm=b36eb6f0e235b2ca8d37339cd541e55ea397cdf4be5cc080da4bd37cd99c6c3d&")
+                        .image("https://cdn.discordapp.com/attachments/1260223476766343188/1262191655323308053/19c237178769d1c1fe6cd44b3399afb61d2840b9_hq.gif?ex=6695b315&is=66946195&hm=43de96a5e0aac7f571a537420608f6a3b893831b5ccbc5bcdd3b74c9378bcaa8&")
                         .footer(serenity::CreateEmbedFooter::new(
                             "@~ powered by UwUntu & RustyBamboo",
                         )),
@@ -333,7 +333,7 @@ pub async fn claim_bonus(ctx: Context<'_>) -> Result<(), Error> {
                     .footer(serenity::CreateEmbedFooter::new(
                         "@~ powered by UwUntu & RustyBamboo",
                     ))
-                    .thumbnail("https://cdn.discordapp.com/attachments/1196582162057662484/1197004718631833650/tenor.gif?ex=65b9b084&is=65a73b84&hm=0368979e5bdf0c258f6b344ec2b79826459b3ec4c937374e05ec77f131adf37f&"),
+                    .thumbnail("https://cdn.discordapp.com/attachments/1260223476766343188/1262191656124284999/f7WPkmj.jpeg?ex=6695b315&is=66946195&hm=552171d50e562072461dc76c8222e9791cd9931f2ee7252975f25ab0dc63b0e5&"),
             ),
         )
         .await?;
@@ -395,6 +395,7 @@ pub async fn wallet(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
+//TODO create buttons for various sorts, creds/pokedex/tickets
 /// show the top wealthiest users in the server
 #[poise::command(slash_command)]
 pub async fn leaderboard(
@@ -484,6 +485,7 @@ pub async fn leaderboard(
         }
         leaderboard_text
     }
+
     let buttons = vec![
         serenity::CreateButton::new("open_modal")
             .label("<")
@@ -515,73 +517,82 @@ pub async fn leaderboard(
             "@~ powered by UwUntu & RustyBamboo",
         ));
 
-    let reply = ctx
-        .send(
+    if total_pages > 1 {
+        let reply = ctx
+            .send(
+                poise::CreateReply::default()
+                    .embed(embed)
+                    .components(components),
+            )
+            .await?;
+
+        let msg_og = Arc::new(RwLock::new(reply.into_message().await?));
+
+        let msg = Arc::clone(&msg_og);
+
+        let mut reactions = msg
+            .read()
+            .await
+            .await_component_interactions(ctx)
+            .timeout(Duration::new(60, 0))
+            .stream();
+
+        let ctx = ctx.serenity_context().clone();
+
+        let info = info.clone();
+        let display = display.clone();
+        let fortune = fortune.clone();
+        let level = level.clone();
+        tokio::spawn(async move {
+            let mut current_page: usize = 0;
+            while let Some(reaction) = reactions.next().await {
+                let label = reaction.data.custom_id.as_str();
+                match label {
+                    "back" => {
+                        if current_page > 0 {
+                            current_page -= 10;
+                        }
+                    }
+                    "next" => {
+                        if current_page < total_pages - 1 {
+                            current_page += 10;
+                        }
+                    }
+                    _ => (),
+                };
+
+                let leaderboard_text =
+                    get_learderboard(&info, &display, &fortune, &level, current_page);
+
+                reaction
+                    .create_response(&ctx, serenity::CreateInteractionResponse::Acknowledge)
+                    .await
+                    .unwrap();
+
+                let embed = serenity::CreateEmbed::new()
+                    .title("Leaderboard")
+                    .color(data::EMBED_CYAN)
+                    .thumbnail(first_thumbnail.clone())
+                    .description("Here lists the most accomplished in UwUversity!")
+                    .field("Rankings", leaderboard_text, false)
+                    .footer(serenity::CreateEmbedFooter::new(
+                        "@~ powered by UwUntu & RustyBamboo",
+                    ));
+                msg.write()
+                    .await
+                    .edit(&ctx, EditMessage::default().embed(embed))
+                    .await
+                    .unwrap();
+            }
+        });
+    } else {
+        ctx.send(
             poise::CreateReply::default()
                 .embed(embed)
                 .components(components),
         )
         .await?;
-
-    let msg_og = Arc::new(RwLock::new(reply.into_message().await?));
-
-    let msg = Arc::clone(&msg_og);
-
-    let mut reactions = msg
-        .read()
-        .await
-        .await_component_interactions(ctx)
-        .timeout(Duration::new(60, 0))
-        .stream();
-
-    let ctx = ctx.serenity_context().clone();
-
-    let info = info.clone();
-    let display = display.clone();
-    let fortune = fortune.clone();
-    let level = level.clone();
-    tokio::spawn(async move {
-        let mut current_page: usize = 0;
-        while let Some(reaction) = reactions.next().await {
-            let label = reaction.data.custom_id.as_str();
-            match label {
-                "back" => {
-                    if current_page > 0 {
-                        current_page -= 10;
-                    }
-                }
-                "next" => {
-                    if current_page < total_pages - 1 {
-                        current_page += 10;
-                    }
-                }
-                _ => (),
-            };
-
-            let leaderboard_text =
-                get_learderboard(&info, &display, &fortune, &level, current_page);
-
-            reaction
-                .create_response(&ctx, serenity::CreateInteractionResponse::Acknowledge)
-                .await
-                .unwrap();
-
-            let embed = serenity::CreateEmbed::new()
-                .title("Leaderboard")
-                .color(data::EMBED_CYAN)
-                .thumbnail(first_thumbnail.clone())
-                .description("Here lists the most accomplished in UwUversity!")
-                .field("Rankings", leaderboard_text, false)
-                .footer(serenity::CreateEmbedFooter::new(
-                    "@~ powered by UwUntu & RustyBamboo",
-                ));
-            msg.write()
-                .await
-                .edit(&ctx, EditMessage::default().embed(embed))
-                .await
-                .unwrap();
-        }
-    });
+    }
 
     Ok(())
 }
@@ -743,6 +754,7 @@ pub async fn buy_tickets(ctx: Context<'_>) -> Result<(), Error> {
                                         serenity::CreateEmbed::default()
                                             .title("Buy Tickets".to_string())
                                             .description(&desc)
+                                            .thumbnail("https://cdn.discordapp.com/attachments/1260223476766343188/1262203993245876244/tumblr_inline_pamkf7AfPf1s2a9fg_500.gif?ex=6695be92&is=66946d12&hm=49948cee0fd647192a40c9e88ad890cbbcb63724c460ee61964c99594c9c3a53&")
                                             .colour(data::EMBED_ERROR)
                                             .footer(serenity::CreateEmbedFooter::new(
                                                 "@~ powered by UwUntu & RustyBamboo",
@@ -768,7 +780,7 @@ pub async fn buy_tickets(ctx: Context<'_>) -> Result<(), Error> {
                                         "You purchased **{}** ticket(s)! Ganbatte!! (-{} creds)",
                                         bought_tickets, purchase_cost
                                     ))
-                                    .image("https://cdn.discordapp.com/attachments/1196582162057662484/1205356602572668958/tenor_6.gif?ex=65d812d0&is=65c59dd0&hm=32cbd3224127f18634b13cf7f878754e69ba5bcd7e19872385406c7ccb7d2218&")
+                                    .image("https://cdn.discordapp.com/attachments/1260223476766343188/1262202607980777662/tumblr_n8dtwljTrx1tt5tk6o1_500.gif?ex=6695bd48&is=66946bc8&hm=da981bf028647549f958bb60e30c9c2f5d4635b6b597c50fb58f50b1618f7619&")
                                     .color(data::EMBED_CYAN)
                                     .footer(serenity::CreateEmbedFooter::new(
                                         "@~ powered by UwUntu & RustyBamboo",

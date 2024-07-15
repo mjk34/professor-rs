@@ -540,9 +540,9 @@ impl Data {
             .embed(
                 serenity::CreateEmbed::new()
                     .title("Account Created!")
-                    .description(format!("Welcome <@{}>! You are now registered with ProfessorBot, feel free to checkout Professors Commands in https://discord.com/channels/1194668798830194850/1194700756306108437", ctx.author().id))
+                    .description(format!("Welcome <@{}>! You are now registered with ProfessorBot, feel free to checkout Professors Commands in https://discord.com/channels/1236349546003566642/1236351799536123946", ctx.author().id))
                     .image(
-                        "https://gifdb.com/images/high/anime-girl-okay-sign-b5zlye5h8mnjhdg2.gif",
+                        "https://cdn.discordapp.com/attachments/1260223476766343188/1262191655763578881/anime-girl-okay-sign-b5zlye5h8mnjhdg2.gif?ex=6695b315&is=66946195&hm=215e00c0ee066c4a36a8c837f7b24570d2736dae19713e220702114330667f6c&",
                     )
                     .color(EMBED_DEFAULT),
             ),
@@ -609,7 +609,7 @@ impl Data {
             bsprite: "".to_string(),
             sprite: "https://archives.bulbagarden.net/media/upload/9/98/Missingno_RB.png"
                 .to_string(),
-            wallpaper: "https://cdn.discordapp.com/attachments/1196582162057662484/1205737290186629150/000.png?ex=65d9755b&is=65c7005b&hm=5b4c8a00352fc53e6be6930f5b960090ca955a02bfcc838299ba59a6be7ed888&".to_string(),
+            wallpaper: "https://cdn.discordapp.com/attachments/1260223476766343188/1262188839049625640/000.png?ex=6695b075&is=66945ef5&hm=2050fd6220766c821bdf1325567eca69f85e2236ca8861495efcb89cea201577&".to_string(),
             nickname: None,
             current_hp: None,
             health: None,
