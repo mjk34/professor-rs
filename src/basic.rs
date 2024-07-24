@@ -16,10 +16,12 @@
 use crate::data::{self, VoiceUser};
 use crate::{serenity, Context, Error};
 use chrono::prelude::Utc;
-use openai_api_rs::v1::api::Client;
+use openai_api_rs::v1::api::OpenAIClient;
 use openai_api_rs::v1::chat_completion::{self, ChatCompletionRequest};
-use openai_api_rs::v1::common::GPT3_5_TURBO_16K;
+use openai_api_rs::v1::common::DALL_E_3;
+use openai_api_rs::v1::common::GPT4_1106_PREVIEW;
 use openai_api_rs::v1::error::APIError;
+use openai_api_rs::v1::image::ImageGenerationRequest;
 use poise::serenity_prelude::futures::StreamExt;
 use poise::serenity_prelude::{EditMessage, ReactionType, UserId};
 use rand::seq::SliceRandom;
@@ -59,18 +61,20 @@ pub async fn ping(ctx: Context<'_>) -> Result<(), Error> {
 
 /// use gpt-3.5-turbo to generate fun responses to user prompts
 pub async fn gpt_string(api_key: String, prompt: String) -> Result<String, APIError> {
-    let client = Client::new(api_key.to_string());
+    let client = OpenAIClient::new(api_key.to_string());
 
     let req = ChatCompletionRequest::new(
-        GPT3_5_TURBO_16K.to_string(),
+        GPT4_1106_PREVIEW.to_string(),
         vec![chat_completion::ChatCompletionMessage {
             role: chat_completion::MessageRole::user,
             content: chat_completion::Content::Text(prompt),
             name: None,
+            tool_calls: None,
+            tool_call_id: None,
         }],
     );
 
-    let result = client.chat_completion(req)?;
+    let result = client.chat_completion(req).await?;
     let desc = format!(
         "{:?}",
         result.choices[0]
@@ -82,6 +86,17 @@ pub async fn gpt_string(api_key: String, prompt: String) -> Result<String, APIEr
     );
 
     Ok(desc.replace(['\"', '\\'], ""))
+}
+
+pub async fn gpt_doodle(api_key: String, prompt: String) -> Result<String, APIError> {
+    let client = OpenAIClient::new(api_key.to_string());
+
+    let req = ImageGenerationRequest::new(prompt).model(DALL_E_3.to_string());
+    let result = client.image_generation(req).await?;
+
+    println!("{:?}", result.data.first().unwrap().url);
+
+    Ok(result.data.first().unwrap().url.to_string())
 }
 
 /// claim your daily, 500xp, and 2 wishes (Once a day)

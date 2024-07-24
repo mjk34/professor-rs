@@ -1,13 +1,13 @@
 Hex Maniac=Ghost/Psychic=
 Black Belt=Fighting=
-Aroma Lady=Grass/Poison=https://cdn.discordapp.com/attachments/1260223476766343188/1262230496901861428/159.jpg?ex=6695d741&is=669485c1&hm=1326bb3920198b852cb7508450fa46cd02b0e7ca22e6199beb8c4294c88a9981&
+Aroma Lady=Grass/Poison=
 Psychic=Psychic=
 Dancer=Normal/Fairy=
 Safari Ranger=Bug/Water=
 Bird Keeper=Flying=
 Team Rocket Goon=https://cdn.discordapp.com/attachments/1260223476766343188/1262230497656967239/251f7920cb0d457ee9cd0d7b8781d624.jpg?ex=6695d741&is=669485c1&hm=ea487bba2de0e1bfe9582fa4bbe0a0083da72ac164735df94dd063c9c170a884&
 Bug Catcher=Bug=
-Lady=Fairy/Grass=
+Lady=Fairy/Grass=https://cdn.discordapp.com/attachments/1260223476766343188/1262230496901861428/159.jpg?ex=6695d741&is=669485c1&hm=1326bb3920198b852cb7508450fa46cd02b0e7ca22e6199beb8c4294c88a9981&
 Ace Trainers=Electric/Fire/Water/Grass/Ghost/Dragon=
 Candela=Fire=
 Spark=Electric=

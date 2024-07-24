@@ -134,23 +134,56 @@ async fn event_handler(
             let mut referenced_message = &new_message.referenced_message;
             while let Some(msg) = referenced_message {
                 messages.push(msg.content.clone());
+
                 if msg.mentions_me(&ctx.http).await.unwrap_or(false) {
                     do_gpt = true;
                     break;
                 }
                 referenced_message = &msg.referenced_message;
             }
-            if do_gpt {
+
+            println!("{:?}", messages);
+            let doodle = messages[0].to_lowercase().contains("draw this");
+
+            if do_gpt && doodle {
+                messages.reverse();
+                let full_message_history = messages.join("\n");
+                let prompt = full_message_history
+                    + "(in a very simple small silly cute ink doodle, no shading, minimal details)";
+
+                let mut tries = 0;
+                let doodle_url;
+                loop {
+                    match basic::gpt_doodle(data.gpt_key.clone(), prompt.clone()).await {
+                        Ok(result) => {
+                            doodle_url = result;
+                            break;
+                        }
+                        Err(e) => {
+                            println!("An error occurred: {:?}, retrying...", e);
+                            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                            if tries > 5 {
+                                return Err(Box::new(e));
+                            }
+                        }
+                    }
+                    tries += 1;
+                }
+
+                new_message.reply(&ctx.http, doodle_url).await?;
+            }
+
+            if do_gpt && !doodle {
                 messages.reverse();
                 let full_message_history = messages.join("\n");
                 let prompt = if thread_rng().gen::<f64>() < 0.8 {
-                    full_message_history + "(make it simple and answer in a cute tone with uwu emojis like a tsundere)"
+                    full_message_history + "(make it simple and answer in a cute tone with minimal uwu emojis like a tsundere, dont write big paragraphs, keep it short)"
                 } else {
-                    full_message_history + "(make it simple and answer in a cute tone with murderous emojis like a yandere)"
+                    full_message_history + "(make it simple and answer in a cute tone with murderous emojis like a yandere, dont write big paragraphs, keep it short)"
                 };
 
                 let mut tries = 0;
-                let reading;
+                let mut reading;
                 loop {
                     match basic::gpt_string(data.gpt_key.clone(), prompt.clone()).await {
                         Ok(result) => {
@@ -167,6 +200,8 @@ async fn event_handler(
                     }
                     tries += 1;
                 }
+
+                reading = reading.replace("nn", "\n");
 
                 new_message.reply(&ctx.http, reading).await?;
             }
