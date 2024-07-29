@@ -142,33 +142,30 @@ async fn event_handler(
                 referenced_message = &msg.referenced_message;
             }
 
+            let no_style = "<@1236429937871949955> draw this";
+
             println!("{:?}", messages);
             let doodle = messages[0].to_lowercase().contains("draw this");
+            let randomstyle = messages[0].to_lowercase() == no_style;
 
             if do_gpt && doodle {
                 messages.reverse();
                 let full_message_history = messages.join("\n");
-                let prompt = full_message_history
-                    + "(in a very simple small silly cute ink doodle, no shading, minimal details)";
+                let style = thread_rng().gen_range(0.0..=1.0);
 
-                let mut tries = 0;
-                let doodle_url;
-                loop {
-                    match basic::gpt_doodle(data.gpt_key.clone(), prompt.clone()).await {
-                        Ok(result) => {
-                            doodle_url = result;
-                            break;
-                        }
-                        Err(e) => {
-                            println!("An error occurred: {:?}, retrying...", e);
-                            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                            if tries > 5 {
-                                return Err(Box::new(e));
-                            }
-                        }
+                println!("randomstyle?: {:?}", randomstyle);
+
+                let prompt = if randomstyle {
+                    if style < 0.50 {
+                        "simple small doodle of a ".to_owned() + &full_message_history
+                    } else {
+                        "cute pixelated art of a ".to_owned() + &full_message_history
                     }
-                    tries += 1;
-                }
+                } else {
+                    full_message_history
+                };
+
+                let doodle_url = basic::gpt_doodle(data.gpt_key.clone(), prompt.clone()).await?;
 
                 new_message.reply(&ctx.http, doodle_url).await?;
             }
@@ -193,7 +190,7 @@ async fn event_handler(
                         Err(e) => {
                             println!("An error occurred: {:?}, retrying...", e);
                             tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                            if tries > 5 {
+                            if tries > 3 {
                                 return Err(Box::new(e));
                             }
                         }

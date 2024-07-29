@@ -456,10 +456,10 @@ pub async fn leaderboard(
     let total_pages = (&info.len()) / 10 + 1;
 
     fn get_learderboard(
-        info: &Vec<(UserId, i32, String, String)>,
+        info: &[(UserId, i32, String, String)],
         display: &Option<String>,
-        fortune: &Vec<Option<String>>,
-        level: &Vec<Option<String>>,
+        fortune: &[Option<String>],
+        level: &[Option<String>],
         start: usize,
     ) -> String {
         let mut leaderboard_text = String::new();
