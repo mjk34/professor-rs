@@ -108,19 +108,19 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
     let mut user_data = u.write().await;
 
     // check if daily is available
-    // if !user_data.check_daily() {
-    //     ctx.send(
-    //         poise::CreateReply::default().embed(
-    //             serenity::CreateEmbed::new()
-    //                 .title("Daily")
-    //                 .description("Your next **/uwu** is tomorrow")
-    //                 .color(EMBED_ERROR)
-    //                 .thumbnail(user.avatar_url().unwrap_or_default()),
-    //         ),
-    //     )
-    //     .await?;
-    //     return Ok(());
-    // }
+    if !user_data.check_daily() {
+        ctx.send(
+            poise::CreateReply::default().embed(
+                serenity::CreateEmbed::new()
+                    .title("Daily")
+                    .description("Your next **/uwu** is tomorrow")
+                    .color(data::EMBED_ERROR)
+                    .thumbnail(user.avatar_url().unwrap_or_default()),
+            ),
+        )
+        .await?;
+        return Ok(());
+    }
 
     let d20 = thread_rng().gen_range(1..21);
     let check = thread_rng().gen_range(6..15);
