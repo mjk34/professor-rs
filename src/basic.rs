@@ -94,7 +94,7 @@ pub async fn gpt_doodle(api_key: String, prompt: String) -> Result<String, APIEr
     let req = ImageGenerationRequest::new(prompt).model(DALL_E_3.to_string());
     let result = client.image_generation(req).await?;
 
-    println!("{:?}", result.data.first().unwrap().url);
+    // println!("{:?}", result.data.first().unwrap().url);
 
     Ok(result.data.first().unwrap().url.to_string())
 }

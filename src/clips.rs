@@ -17,6 +17,7 @@ use poise::serenity_prelude::{EditMessage, ReactionType};
 use rand::seq::IteratorRandom;
 use rand::thread_rng;
 use regex::Regex;
+use std::env;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -48,6 +49,12 @@ pub async fn submit_clip(
     #[description = "the name of your clip"] title: String,
     #[description = "the youtube or medal link of your clip"] link: String,
 ) -> Result<(), Error> {
+    let sub_chat = env::var("SUBMIT").expect("missing SUBMIT id");
+
+    if ctx.channel_id().get().to_string() != sub_chat {
+        return Ok(());
+    }
+
     if !is_youtube_or_medal_url(&link) {
         ctx.send(
             poise::CreateReply::default().embed(

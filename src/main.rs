@@ -98,7 +98,7 @@ async fn main() {
         .activity(serenity::ActivityData {
             name: "Coding Rust".to_string(),
             kind: serenity::ActivityType::Custom,
-            state: Some("Test - Ping".to_string()),
+            state: Some("Phase1 - Testing".to_string()),
             url: None,
         })
         .status(serenity::OnlineStatus::Online)
@@ -114,6 +114,11 @@ async fn event_handler(
     _framework: poise::FrameworkContext<'_, data::Data, Error>,
     data: &data::Data,
 ) -> Result<(), Error> {
+    let gen_chat = env::var("GENERAL").expect("missing GENERAL id");
+    let bot_chat = env::var("BOT_CMD").expect("missing BOT_CMD id");
+    let sub_chat = env::var("SUBMIT").expect("missing SUBMIT id");
+    let prof_id = env::var("PROFESSOR").expect("missing PROFESSOR id");
+
     match event {
         serenity::FullEvent::Ready { data_about_bot, .. } => {
             println!("Logged in as {}\n\n", data_about_bot.user.name);
@@ -124,14 +129,21 @@ async fn event_handler(
         // Send prompt to GPT
         // Print
         serenity::FullEvent::Message { new_message } => {
-            if new_message.is_own(ctx) {
+            if new_message.author.id.to_string() == prof_id {
+                // println!("Message from Professor: {:?}\n", new_message);
                 return Ok(());
             }
+
+            let channel_id = new_message.channel_id.get().to_string();
+            if channel_id != gen_chat && channel_id != bot_chat && channel_id != sub_chat {
+                // println!("Message not in gen-chat, bot-cmd, or submit-clips\n");
+                return Ok(());
+            }
+
             let mut do_gpt = new_message.mentions_me(&ctx.http).await.unwrap_or(false);
-
             let mut messages = vec![new_message.content.clone()];
-
             let mut referenced_message = &new_message.referenced_message;
+
             while let Some(msg) = referenced_message {
                 messages.push(msg.content.clone());
 
@@ -142,9 +154,9 @@ async fn event_handler(
                 referenced_message = &msg.referenced_message;
             }
 
-            let no_style = "<@1236429937871949955> draw this";
+            let no_style = "<@".to_owned() + &prof_id + "> draw this";
 
-            println!("{:?}", messages);
+            // println!("{:?}", messages);
             let doodle = messages[0].to_lowercase().contains("draw this");
             let randomstyle = messages[0].to_lowercase() == no_style;
 
