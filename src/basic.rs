@@ -14,20 +14,16 @@
 //!---------------------------------------------------------------------!
 
 use crate::data::{self, VoiceUser};
+use crate::gpt::gpt_string;
 use crate::{serenity, Context, Error};
 use chrono::prelude::Utc;
-use openai_api_rs::v1::api::OpenAIClient;
-use openai_api_rs::v1::chat_completion::{self, ChatCompletionRequest};
-use openai_api_rs::v1::common::DALL_E_3;
-use openai_api_rs::v1::common::GPT4_1106_PREVIEW;
-use openai_api_rs::v1::error::APIError;
-use openai_api_rs::v1::image::ImageGenerationRequest;
 use poise::serenity_prelude::futures::StreamExt;
 use poise::serenity_prelude::{EditMessage, ReactionType, UserId};
 use rand::seq::SliceRandom;
 use rand::{thread_rng, Rng};
 use serenity::Color;
 use std::collections::HashMap;
+use std::env;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
@@ -57,46 +53,6 @@ pub async fn ping(ctx: Context<'_>) -> Result<(), Error> {
     )
     .await?;
     Ok(())
-}
-
-/// use gpt-3.5-turbo to generate fun responses to user prompts
-pub async fn gpt_string(api_key: String, prompt: String) -> Result<String, APIError> {
-    let client = OpenAIClient::new(api_key.to_string());
-
-    let req = ChatCompletionRequest::new(
-        GPT4_1106_PREVIEW.to_string(),
-        vec![chat_completion::ChatCompletionMessage {
-            role: chat_completion::MessageRole::user,
-            content: chat_completion::Content::Text(prompt),
-            name: None,
-            tool_calls: None,
-            tool_call_id: None,
-        }],
-    );
-
-    let result = client.chat_completion(req).await?;
-    let desc = format!(
-        "{:?}",
-        result.choices[0]
-            .message
-            .content
-            .as_ref()
-            .unwrap()
-            .to_string()
-    );
-
-    Ok(desc.replace(['\"', '\\'], ""))
-}
-
-pub async fn gpt_doodle(api_key: String, prompt: String) -> Result<String, APIError> {
-    let client = OpenAIClient::new(api_key.to_string());
-
-    let req = ImageGenerationRequest::new(prompt).model(DALL_E_3.to_string());
-    let result = client.image_generation(req).await?;
-
-    println!("{:?}", result.data.first().unwrap().url);
-
-    Ok(result.data.first().unwrap().url.to_string())
 }
 
 /// claim your daily, 500xp, and 2 wishes (Once a day)
@@ -203,8 +159,9 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
 
     let mut tries = 0;
     let reading;
+    let gpt_key: String = env::var("API_KEY").expect("missing GPT API_KEY");
     loop {
-        match gpt_string(ctx.data().gpt_key.clone(), prompt.to_string()).await {
+        match gpt_string(gpt_key.clone(), prompt.to_string()).await {
             Ok(result) => {
                 reading = result;
                 break;

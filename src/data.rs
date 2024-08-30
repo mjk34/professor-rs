@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::{env, fs};
 use tokio::sync::RwLock;
 
+// Constants
 pub const NUMBER_EMOJS: [&str; 10] = [
     "\u{0030}\u{FE0F}\u{20E3}",
     "\u{0031}\u{FE0F}\u{20E3}",
@@ -513,7 +514,6 @@ pub struct Data {
     pub ponder: Vec<String>,
     pub pong: Vec<String>,
     pub d20f: Vec<String>,
-    pub gpt_key: String,
     pub mod_id: RoleId,
     pub pokedex: Vec<PokeData>,
     pub type_matrix: Vec<Vec<f32>>,
@@ -588,8 +588,6 @@ impl Data {
         let ponder = read_lines("reference/ponder.txt");
         let pong = read_lines("reference/pong.txt");
         let d20f = read_lines("reference/d20.txt");
-
-        let gpt_key = env::var("API_KEY").expect("missing GPT API_KEY");
 
         let mod_id = RoleId::new(
             env::var("MOD_ID")
@@ -805,7 +803,6 @@ impl Data {
             ponder,
             pong,
             d20f,
-            gpt_key,
             mod_id,
             pokedex,
             type_matrix,
@@ -822,6 +819,6 @@ fn read_lines(filename: &str) -> Vec<String> {
         .map(String::from)
         .collect();
 
-    println!("{}: loaded {} lines", filename, lines.len());
+    // println!("{}: loaded {} lines", filename, lines.len());
     lines
 }

@@ -5,19 +5,16 @@ edition = "2021"
 
 [dependencies]
 poise = {version = "0.6.1", features=["cache", "collector"]}
-#poise = { path = "../poise-0.6.1" }
-#poise = {git = "https://github.com/kangalioo/poise", features=["collector"]}
-
-tokio = { version ="1.4.0", features = ["rt-multi-thread", "macros"] }
+tokio = { version ="1.39.3", features = ["rt-multi-thread", "macros"] }
 
 tracing = "0.1.37"
 dotenv = "0.15.0"
 chrono = "0.4.31"
 serde = { version = "*", features = ["rc"] }
-serde_json = "1.0"
+serde_json = "1.0.127"
 rand = "*"
 
-openai-api-rs = "5.0.3"
-regex = "1"
+openai-api-rs = "5.0.6"
+regex = "1.10.6"
 
 dashmap = { version = "6.0.1", features = ["serde"] }
