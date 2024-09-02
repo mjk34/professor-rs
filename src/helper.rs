@@ -39,9 +39,103 @@ pub fn get_current_year() -> String {
 
 pub fn get_leaderboard(
     info: &[(UserId, i32, String, String)],
-    display: &Option<String>,
-    fortune: &[Option<String>],
-    level: &[Option<String>],
+    sort: String,
     start: usize,
 ) -> String {
+    let mut leaderboard_text = String::new();
+    leaderboard_text.push_str("﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n");
+
+    let creds: String = "Creds".to_string();
+    let fortune: String = "Fortune".to_string();
+    let level: String = "Level".to_string();
+
+    if sort == creds {
+        for (index, (_id, creds, _, user_name)) in info.iter().enumerate().skip(start).take(10) {
+            let content = if index == 0 {
+                format!(
+                    "\u{3000}** #{} ** \u{3000}\u{3000} **{}** \u{3000}\u{3000}{}\n",
+                    index + 1,
+                    user_name,
+                    creds
+                )
+            } else if index > 9 {
+                format!(
+                    "\u{3000}** #{} ** \u{3000}\u{2000} {} \u{3000}\u{3000}{}\n",
+                    index + 1,
+                    user_name,
+                    creds
+                )
+            } else {
+                format!(
+                    "\u{3000}** #{} ** \u{3000}\u{3000} {} \u{3000}\u{3000}{}\n",
+                    index + 1,
+                    user_name,
+                    creds
+                )
+            };
+
+            leaderboard_text.push_str(&content);
+        }
+    }
+
+    if sort == fortune {
+        for (index, (_id, _, luck, user_name)) in info.iter().enumerate().skip(start).take(10) {
+            println!("test luck {}", luck);
+            let content = if index == 0 {
+                format!(
+                    "\u{3000}** #{} ** \u{3000}\u{3000} **{}** \u{3000}\u{3000}{}\n",
+                    index + 1,
+                    user_name,
+                    luck
+                )
+            } else if index > 9 {
+                format!(
+                    "\u{3000}** #{} ** \u{3000}\u{2000} {} \u{3000}\u{3000}{}\n",
+                    index + 1,
+                    user_name,
+                    luck
+                )
+            } else {
+                format!(
+                    "\u{3000}** #{} ** \u{3000}\u{3000} {} \u{3000}\u{3000}{}\n",
+                    index + 1,
+                    user_name,
+                    luck
+                )
+            };
+
+            leaderboard_text.push_str(&content);
+        }
+    }
+
+    if sort == level {
+        for (index, (_id, _, level, user_name)) in info.iter().enumerate().skip(start).take(10) {
+            let content = if index == 0 {
+                format!(
+                    "\u{3000}** #{} ** \u{3000}\u{3000} **{}** \u{3000}\u{3000}{}\n",
+                    index + 1,
+                    user_name,
+                    level
+                )
+            } else if index > 9 {
+                format!(
+                    "\u{3000}** #{} ** \u{3000}\u{2000} {} \u{3000}\u{3000}{}\n",
+                    index + 1,
+                    user_name,
+                    level
+                )
+            } else {
+                format!(
+                    "\u{3000}** #{} ** \u{3000}\u{3000} {} \u{3000}\u{3000}{}\n",
+                    index + 1,
+                    user_name,
+                    level
+                )
+            };
+
+            leaderboard_text.push_str(&content);
+        }
+    }
+
+    leaderboard_text
 }

@@ -351,7 +351,7 @@ impl UserData {
     }
 
     pub fn get_luck_score(&self) -> i32 {
-        self.rolls / self.daily_count
+        self.rolls / (self.daily_count + 1)
     }
 
     pub fn get_bonus(&self) -> i32 {

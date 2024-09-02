@@ -15,6 +15,7 @@
 
 use crate::data::{self, VoiceUser};
 use crate::gpt::gpt_string;
+use crate::helper::get_leaderboard;
 use crate::reminder;
 use crate::{serenity, Context, Error};
 use chrono::prelude::Utc;
@@ -378,39 +379,62 @@ pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
 
     let mut all_creds = Vec::new();
     let mut all_fortune = Vec::new();
-    let mut all_level = vec::new();
+    let mut all_level = Vec::new();
 
     for x in data.iter() {
         let (id, u) = x.pair();
         let u = u.read().await;
 
         let user_name = id.to_user(ctx).await?.name;
-        info.push((*id, u.get_creds(), String::new(), user_name));
+        all_creds.push((*id, u.get_creds(), String::new(), user_name.clone()));
+        all_fortune.push((*id, u.get_luck_score(), u.get_luck(), user_name.clone()));
+
+        let total_xp = u.get_level() * 80 + u.get_xp();
+        all_level.push((
+            *id,
+            total_xp,
+            format!("Level {}", u.get_level()),
+            user_name.clone(),
+        ));
     }
 
-    info.sort_by(|a, b| b.1.cmp(&a.1));
-    let total_pages = (&info.len()) / 10 + 1;
+    all_creds.sort_by(|a, b| b.1.cmp(&a.1));
+    all_fortune.sort_by(|a, b| b.1.cmp(&a.1));
+    all_level.sort_by(|a, b| b.1.cmp(&a.1));
 
+    let total_pages = (&all_creds.len()) / 10 + 1;
     let buttons = vec![
         serenity::CreateButton::new("open_modal")
             .label("<")
             .custom_id("back".to_string())
             .style(poise::serenity_prelude::ButtonStyle::Secondary),
         serenity::CreateButton::new("open_modal")
+            .label("UwUCreds")
+            .custom_id("Creds".to_string())
+            .style(poise::serenity_prelude::ButtonStyle::Primary),
+        serenity::CreateButton::new("open_modal")
+            .label("Avg. Luck")
+            .custom_id("Fortune".to_string())
+            .style(poise::serenity_prelude::ButtonStyle::Primary),
+        serenity::CreateButton::new("open_modal")
+            .label("Level")
+            .custom_id("Level".to_string())
+            .style(poise::serenity_prelude::ButtonStyle::Primary),
+        serenity::CreateButton::new("open_modal")
             .label(">")
             .custom_id("next".to_string())
             .style(poise::serenity_prelude::ButtonStyle::Secondary),
     ];
-    let components = vec![serenity::CreateActionRow::Buttons(buttons)];
 
-    let first_thumbnail = info[0]
+    let components = vec![serenity::CreateActionRow::Buttons(buttons)];
+    let first_thumbnail = all_creds[0]
         .0
         .to_user(ctx)
         .await?
         .avatar_url()
         .unwrap_or_default();
 
-    let leaderboard_text = get_learderboard(&info, &display, &fortune, &level, 0);
+    let leaderboard_text = get_leaderboard(&all_creds, "Creds".to_string(), 0);
 
     let embed = serenity::CreateEmbed::new()
         .title("Leaderboard")
@@ -422,82 +446,87 @@ pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
             "@~ powered by UwUntu & RustyBamboo",
         ));
 
-    if total_pages > 1 {
-        let reply = ctx
-            .send(
-                poise::CreateReply::default()
-                    .embed(embed)
-                    .components(components),
-            )
-            .await?;
-
-        let msg_og = Arc::new(RwLock::new(reply.into_message().await?));
-
-        let msg = Arc::clone(&msg_og);
-
-        let mut reactions = msg
-            .read()
-            .await
-            .await_component_interactions(ctx)
-            .timeout(Duration::new(60, 0))
-            .stream();
-
-        let ctx = ctx.serenity_context().clone();
-
-        let info = info.clone();
-        let display = display.clone();
-        let fortune = fortune.clone();
-        let level = level.clone();
-        tokio::spawn(async move {
-            let mut current_page: usize = 0;
-            while let Some(reaction) = reactions.next().await {
-                let label = reaction.data.custom_id.as_str();
-                match label {
-                    "back" => {
-                        if current_page > 0 {
-                            current_page -= 10;
-                        }
-                    }
-                    "next" => {
-                        if current_page < total_pages - 1 {
-                            current_page += 10;
-                        }
-                    }
-                    _ => (),
-                };
-
-                let leaderboard_text =
-                    get_learderboard(&info, &display, &fortune, &level, current_page);
-
-                reaction
-                    .create_response(&ctx, serenity::CreateInteractionResponse::Acknowledge)
-                    .await
-                    .unwrap();
-
-                let embed = serenity::CreateEmbed::new()
-                    .title("Leaderboard")
-                    .color(data::EMBED_CYAN)
-                    .thumbnail(first_thumbnail.clone())
-                    .description("Here lists the most accomplished in UwUversity!")
-                    .field("Rankings", leaderboard_text, false)
-                    .footer(serenity::CreateEmbedFooter::new(
-                        "@~ powered by UwUntu & RustyBamboo",
-                    ));
-                msg.write()
-                    .await
-                    .edit(&ctx, EditMessage::default().embed(embed))
-                    .await
-                    .unwrap();
-            }
-        });
-    } else {
-        ctx.send(
+    let reply = ctx
+        .send(
             poise::CreateReply::default()
                 .embed(embed)
                 .components(components),
         )
         .await?;
-    }
+
+    let msg_og = Arc::new(RwLock::new(reply.into_message().await?));
+    let msg = Arc::clone(&msg_og);
+    let mut reactions = msg
+        .read()
+        .await
+        .await_component_interactions(ctx)
+        .timeout(Duration::new(60, 0))
+        .stream();
+
+    let ctx = ctx.serenity_context().clone();
+    let mut info = all_creds.clone();
+    let mut sort = "Creds".to_string();
+
+    tokio::spawn(async move {
+        let mut current_page: usize = 0;
+        while let Some(reaction) = reactions.next().await {
+            let label = reaction.data.custom_id.as_str();
+            match label {
+                "back" => {
+                    if current_page > 0 {
+                        current_page -= 10;
+                    }
+                }
+
+                "Creds" => {
+                    sort = "Creds".to_string();
+                    info = all_creds.clone();
+                    current_page = 0;
+                }
+
+                "Fortune" => {
+                    sort = "Fortune".to_string();
+                    info = all_fortune.clone();
+                    current_page = 0;
+                }
+
+                "Level" => {
+                    sort = "Level".to_string();
+                    info = all_level.clone();
+                    current_page = 0;
+                }
+
+                "next" => {
+                    if current_page < total_pages - 1 {
+                        current_page += 10;
+                    }
+                }
+                _ => (),
+            };
+
+            let leaderboard_text = get_leaderboard(&info, sort.clone(), current_page);
+
+            reaction
+                .create_response(&ctx, serenity::CreateInteractionResponse::Acknowledge)
+                .await
+                .unwrap();
+
+            let embed = serenity::CreateEmbed::new()
+                .title("Leaderboard")
+                .color(data::EMBED_CYAN)
+                .thumbnail(first_thumbnail.clone())
+                .description("Here lists the most accomplished in UwUversity!")
+                .field("Rankings", leaderboard_text, false)
+                .footer(serenity::CreateEmbedFooter::new(
+                    "@~ powered by UwUntu & RustyBamboo",
+                ));
+            msg.write()
+                .await
+                .edit(&ctx, EditMessage::default().embed(embed))
+                .await
+                .unwrap();
+        }
+    });
 
     Ok(())
 }
