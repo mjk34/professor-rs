@@ -373,93 +373,23 @@ pub async fn wallet(ctx: Context<'_>) -> Result<(), Error> {
 //TODO create buttons for various sorts, creds/pokedex/tickets
 /// show the top wealthiest users in the server
 #[poise::command(slash_command)]
-pub async fn leaderboard(
-    ctx: Context<'_>,
-    #[description = "F - sort by fortune | L - sort by level"] display: Option<String>,
-) -> Result<(), Error> {
+pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
     let data = &ctx.data().users;
-    let mut info = Vec::new();
 
-    let fortune: Vec<Option<String>> = vec![
-        Some("Fortune".to_string()),
-        Some("FORTUNE".to_string()),
-        Some("fortune".to_string()),
-        Some("F".to_string()),
-        Some("f".to_string()),
-    ];
-
-    let level: Vec<Option<String>> = vec![
-        Some("Level".to_string()),
-        Some("LEVEL".to_string()),
-        Some("level".to_string()),
-        Some("L".to_string()),
-        Some("l".to_string()),
-    ];
+    let mut all_creds = Vec::new();
+    let mut all_fortune = Vec::new();
+    let mut all_level = vec::new();
 
     for x in data.iter() {
         let (id, u) = x.pair();
         let u = u.read().await;
 
         let user_name = id.to_user(ctx).await?.name;
-
-        if fortune.contains(&display) {
-            info.push((*id, u.get_luck_score(), u.get_luck(), user_name));
-        } else if level.contains(&display) {
-            let total_xp = u.get_level() * 80 + u.get_xp();
-            info.push((*id, total_xp, format!("Level {}", u.get_level()), user_name));
-        } else {
-            info.push((*id, u.get_creds(), String::new(), user_name));
-        }
+        info.push((*id, u.get_creds(), String::new(), user_name));
     }
+
     info.sort_by(|a, b| b.1.cmp(&a.1));
-
     let total_pages = (&info.len()) / 10 + 1;
-
-    fn get_learderboard(
-        info: &[(UserId, i32, String, String)],
-        display: &Option<String>,
-        fortune: &[Option<String>],
-        level: &[Option<String>],
-        start: usize,
-    ) -> String {
-        let mut leaderboard_text = String::new();
-        leaderboard_text.push_str("﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n");
-
-        for (index, (_id, u, s, user_name)) in info.iter().enumerate().skip(start).take(10) {
-            let rank = if index == 0 {
-                if fortune.contains(display) || level.contains(display) {
-                    format!(
-                        "\u{3000}** #{} ** \u{3000}\u{3000} **{}** \u{3000}\u{3000}~({})\n",
-                        index + 1,
-                        user_name,
-                        s
-                    )
-                } else {
-                    format!(
-                        "\u{3000}** #{} ** \u{3000}\u{3000} **{}** \u{3000}\u{3000}~({})\n",
-                        index + 1,
-                        user_name,
-                        u
-                    )
-                }
-            } else if index > 9 {
-                format!(
-                    "\u{3000}** #{} ** \u{3000}\u{2000} *{}*\n",
-                    index + 1,
-                    user_name,
-                )
-            } else {
-                format!(
-                    "\u{3000}** #{} ** \u{3000}\u{3000} *{}*\n",
-                    index + 1,
-                    user_name,
-                )
-            };
-
-            leaderboard_text.push_str(&rank);
-        }
-        leaderboard_text
-    }
 
     let buttons = vec![
         serenity::CreateButton::new("open_modal")
