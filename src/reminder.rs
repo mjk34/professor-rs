@@ -123,18 +123,4 @@ pub async fn check_birthday(ctx: Context<'_>) {
     }
 
     export_to_file(EVENT_FILE, database);
-
-    ctx.send(
-        poise::CreateReply::default().embed(
-            serenity::CreateEmbed::default()
-                .title("Reminder")
-                .description("Command - success")
-                .color(data::EMBED_CYAN)
-                .footer(serenity::CreateEmbedFooter::new(
-                    "@~ powered by UwUntu & RustyBamboo",
-                )),
-        ),
-    )
-    .await
-    .unwrap();
 }
