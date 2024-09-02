@@ -1,14 +1,10 @@
 //!---------------------------------------------------------------------!
-//! This file contains a collection of EVENT related commands, the      !
-//! current event is POKEMON themed!                                    !
+//! This file contains a collection of commands related to pokemon      !
+//! battles, trainer and wild encounters                                !
 //!                                                                     !
 //! Commands:                                                           !
-//!     [x] - get_pokedata                                              !
-//!     [x] - search_pokemon                                            !
-//!     [x] - test_matchup                                              !
-//!     [-] - pokedex                                                   !
-//!     [ ] - wild_encounter                                            !
-//!     [ ] - trainer_battle                                            !
+//!     [-] - wild_encounter      // add bags and items                 !
+//!     [-] - trainer_battle                                            !
 //!---------------------------------------------------------------------!
 
 use crate::data::{self, PokeData};

@@ -12,7 +12,7 @@ use crate::serenity;
 use crate::{Context, Error};
 
 #[poise::command(slash_command)]
-async fn wish(ctx: Context<'_>) -> Result<(), Error> {
+pub async fn wish(ctx: Context<'_>) -> Result<(), Error> {
     let user = ctx.author();
     let data = &ctx.data().users;
     let u = data.get(&user.id).unwrap();

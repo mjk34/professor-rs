@@ -3,6 +3,7 @@
 //! to start, check pokemon and bags                                    !
 //!                                                                     !
 //! Commands:                                                           !
+//!     [ ] - pokedex                                                   !
 //!     [x] - search_pokemon                                            !
 //!     [x] - choose_starter                                            !
 //!     [x] - buddy                                                     !
