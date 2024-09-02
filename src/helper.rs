@@ -50,91 +50,48 @@ pub fn get_leaderboard(
     let level: String = "Level".to_string();
 
     if sort == creds {
-        for (index, (_id, creds, _, user_name)) in info.iter().enumerate().skip(start).take(10) {
-            let content = if index == 0 {
-                format!(
-                    "\u{3000}** #{} ** \u{3000}\u{3000} **{}** \u{3000}\u{3000}{}\n",
-                    index + 1,
-                    user_name,
-                    creds
-                )
-            } else if index > 9 {
-                format!(
-                    "\u{3000}** #{} ** \u{3000}\u{2000} {} \u{3000}\u{3000}{}\n",
-                    index + 1,
-                    user_name,
-                    creds
-                )
-            } else {
-                format!(
-                    "\u{3000}** #{} ** \u{3000}\u{3000} {} \u{3000}\u{3000}{}\n",
-                    index + 1,
-                    user_name,
-                    creds
-                )
-            };
+        leaderboard_text.push_str("```\n"); // Start code block for monospaced font
 
+        for (index, (_id, creds, _, user_name)) in info.iter().enumerate().skip(start).take(10) {
+            let content = format!(
+                "{:<3} | {:^20} | {:>15}\n",
+                format!("#{}", index + 1), // Left-align index
+                user_name,                 // Left-align user name
+                creds                      // Left-align creds
+            );
             leaderboard_text.push_str(&content);
         }
+        leaderboard_text.push_str("```\n"); // End code block
     }
 
     if sort == fortune {
-        for (index, (_id, _, luck, user_name)) in info.iter().enumerate().skip(start).take(10) {
-            println!("test luck {}", luck);
-            let content = if index == 0 {
-                format!(
-                    "\u{3000}** #{} ** \u{3000}\u{3000} **{}** \u{3000}\u{3000}{}\n",
-                    index + 1,
-                    user_name,
-                    luck
-                )
-            } else if index > 9 {
-                format!(
-                    "\u{3000}** #{} ** \u{3000}\u{2000} {} \u{3000}\u{3000}{}\n",
-                    index + 1,
-                    user_name,
-                    luck
-                )
-            } else {
-                format!(
-                    "\u{3000}** #{} ** \u{3000}\u{3000} {} \u{3000}\u{3000}{}\n",
-                    index + 1,
-                    user_name,
-                    luck
-                )
-            };
+        leaderboard_text.push_str("```\n"); // Start code block for monospaced font
 
+        for (index, (_id, _, luck, user_name)) in info.iter().enumerate().skip(start).take(10) {
+            let content = format!(
+                "{:<3} | {:^20} | {:>15}\n",
+                format!("#{}", index + 1), // Left-align index
+                user_name,                 // Left-align user name
+                luck                       // Left-align creds
+            );
             leaderboard_text.push_str(&content);
         }
+        leaderboard_text.push_str("```\n"); // End code block
     }
 
     if sort == level {
-        for (index, (_id, _, level, user_name)) in info.iter().enumerate().skip(start).take(10) {
-            let content = if index == 0 {
-                format!(
-                    "\u{3000}** #{} ** \u{3000}\u{3000} **{}** \u{3000}\u{3000}{}\n",
-                    index + 1,
-                    user_name,
-                    level
-                )
-            } else if index > 9 {
-                format!(
-                    "\u{3000}** #{} ** \u{3000}\u{2000} {} \u{3000}\u{3000}{}\n",
-                    index + 1,
-                    user_name,
-                    level
-                )
-            } else {
-                format!(
-                    "\u{3000}** #{} ** \u{3000}\u{3000} {} \u{3000}\u{3000}{}\n",
-                    index + 1,
-                    user_name,
-                    level
-                )
-            };
+        leaderboard_text.push_str("```\n"); // Start code block for monospaced font
 
+        for (index, (_id, _, level, user_name)) in info.iter().enumerate().skip(start).take(10) {
+            let content = format!(
+                "{:<3} | {:^20} | {:>15}\n",
+                format!("#{}", index + 1), // Left-align index
+                user_name,                 // Left-align user name
+                level                      // Left-align creds
+            );
             leaderboard_text.push_str(&content);
         }
+        leaderboard_text.push_str("```\n"); // End code block
     }
 
     leaderboard_text

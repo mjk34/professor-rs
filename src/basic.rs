@@ -409,15 +409,15 @@ pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
             .custom_id("back".to_string())
             .style(poise::serenity_prelude::ButtonStyle::Secondary),
         serenity::CreateButton::new("open_modal")
-            .label("UwUCreds")
+            .label("Sort by Creds")
             .custom_id("Creds".to_string())
             .style(poise::serenity_prelude::ButtonStyle::Primary),
         serenity::CreateButton::new("open_modal")
-            .label("Avg. Luck")
+            .label("Sort by Luck")
             .custom_id("Fortune".to_string())
             .style(poise::serenity_prelude::ButtonStyle::Primary),
         serenity::CreateButton::new("open_modal")
-            .label("Level")
+            .label("Sort by Level")
             .custom_id("Level".to_string())
             .style(poise::serenity_prelude::ButtonStyle::Primary),
         serenity::CreateButton::new("open_modal")
@@ -506,6 +506,14 @@ pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
 
             let leaderboard_text = get_leaderboard(&info, sort.clone(), current_page);
 
+            let first_thumbnail = info[0]
+                .0
+                .to_user(&ctx)
+                .await
+                .unwrap()
+                .avatar_url()
+                .unwrap_or_default();
+
             reaction
                 .create_response(&ctx, serenity::CreateInteractionResponse::Acknowledge)
                 .await
@@ -563,6 +571,12 @@ pub async fn buy_tickets(ctx: Context<'_>) -> Result<(), Error> {
         creds
     );
 
+    desc.push_str("```yaml\n");
+
+    fn table_helper_print(first: String, second: i32) -> String {
+        format!("{:<20} {:>10}\n", first, second)
+    }
+
     let mut buttons = Vec::new();
     for i in 0..5 {
         if i == 0 {
@@ -579,8 +593,9 @@ pub async fn buy_tickets(ctx: Context<'_>) -> Result<(), Error> {
                     .style(poise::serenity_prelude::ButtonStyle::Danger);
 
                 buttons.push(button_max);
-                desc +=
-                    format!("\nBuy **MAX** ({} Tickets) . . . {}\n", tkcount, tkcostmax).as_str();
+                let content =
+                    table_helper_print(format!("Buy MAX ({} tickets) ", tkcount), tkcostmax);
+                desc.push_str(&content);
             }
         } else if i == 1 && tkcost1 <= creds
             || i == 2 && tkcost2 <= creds
@@ -596,25 +611,23 @@ pub async fn buy_tickets(ctx: Context<'_>) -> Result<(), Error> {
             buttons.push(button);
 
             if i == 1 {
-                desc += format!("Buy **{}** Ticket.............. . . . {}\n", i, tkcost1).as_str();
+                desc += table_helper_print(format!("Buy {} ticket", i), tkcost1).as_str();
             } else if i == 2 {
-                desc += format!("Buy **{}** Ticket.............. . . . {}\n", i, tkcost2).as_str();
+                desc += table_helper_print(format!("Buy {} ticket", i), tkcost2).as_str();
             } else if i == 3 {
-                desc += format!("Buy **{}** Ticket.............. . . . {}\n", i, tkcost3).as_str();
+                desc += table_helper_print(format!("Buy {} ticket", i), tkcost3).as_str();
             }
         } else {
             if i == 1 {
-                desc +=
-                    format!("~~Buy **{}** Ticket~~.............. . . . {}\n", i, tkcost1).as_str();
+                desc += table_helper_print(format!("# Buy {} ticket", i), tkcost1).as_str();
             } else if i == 2 {
-                desc +=
-                    format!("~~Buy **{}** Ticket~~.............. . . . {}\n", i, tkcost2).as_str();
+                desc += table_helper_print(format!("# Buy {} ticket", i), tkcost2).as_str();
             } else if i == 3 {
-                desc +=
-                    format!("~~Buy **{}** Ticket~~.............. . . . {}\n", i, tkcost3).as_str();
+                desc += table_helper_print(format!("# Buy {} ticket", i), tkcost3).as_str();
             }
         }
     }
+    desc.push_str("```\n");
 
     let components = vec![serenity::CreateActionRow::Buttons(buttons)];
     let reply = ctx
