@@ -30,3 +30,8 @@ pub fn get_reminder_date(date_str: &str) -> String {
         reminder.day()
     )
 }
+
+pub fn get_current_year() -> String {
+    let today = Utc::now() - TimeDelta::hours(4);
+    format!("{}", today.year())
+}

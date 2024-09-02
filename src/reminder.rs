@@ -1,5 +1,5 @@
 use crate::data;
-use crate::helper::{get_current_date, get_reminder_date};
+use crate::helper::{get_current_date, get_current_year, get_reminder_date};
 use crate::{serenity, Context};
 use poise::serenity_prelude::{ChannelId, CreateMessage};
 use std::env;
@@ -44,18 +44,17 @@ pub async fn check_birthday(ctx: Context<'_>) {
     let mut database: Vec<Vec<String>> = import_from_file(EVENT_FILE);
     let length = database.len();
     let today: String = get_current_date();
+    let year: String = get_current_year();
 
     //TODO: finish this shit
     for i in 0..length {
-        let date: String = format!("2024-{}", database[i][0]);
+        let date: String = format!("{}-{}", year, database[i][0]);
         let name: String = database[i][1].clone();
         let user_id: String = database[i][2].clone();
         let reminded: bool = matches!(database[i][3].as_str(), "1");
         let pinged: bool = matches!(database[i][4].as_str(), "1");
 
         let reminder: String = get_reminder_date(&date);
-
-        let mut desc = String::new();
 
         if today == reminder && !reminded {
             let mod_chat: u64 = env::var("MOD_CHAT")
@@ -68,7 +67,7 @@ pub async fn check_birthday(ctx: Context<'_>) {
                 .parse()
                 .unwrap();
 
-            desc = format!(
+            let desc = format!(
                 "Hey <@&{}>, {}'s Birthday is coming up in 2 weeks! ({})",
                 mod_id, name, date
             );
@@ -92,8 +91,12 @@ pub async fn check_birthday(ctx: Context<'_>) {
                 .unwrap();
         }
 
+        if today != reminder {
+            database[i][3] = "0".to_string();
+        }
+
         if today == date && !pinged {
-            desc = format!(
+            let desc = format!(
                 "Heyyyyyyy, its someone's special day!! It's {}'s (<@{}>) Birthday!!!",
                 name, user_id
             );
@@ -122,7 +125,9 @@ pub async fn check_birthday(ctx: Context<'_>) {
                 .unwrap();
         }
 
-        if desc == String::new() {}
+        if today != date {
+            database[i][3] = "0".to_string();
+        }
     }
 
     export_to_file(EVENT_FILE, database);
