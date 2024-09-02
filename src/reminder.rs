@@ -91,10 +91,6 @@ pub async fn check_birthday(ctx: Context<'_>) {
                 .unwrap();
         }
 
-        if today != reminder {
-            database[i][3] = "0".to_string();
-        }
-
         if today == date && !pinged {
             let desc = format!(
                 "Heyyyyyyy, its someone's special day!! It's {}'s (<@{}>) Birthday!!!",
@@ -123,10 +119,6 @@ pub async fn check_birthday(ctx: Context<'_>) {
                 )
                 .await
                 .unwrap();
-        }
-
-        if today != date {
-            database[i][3] = "0".to_string();
         }
     }
 
