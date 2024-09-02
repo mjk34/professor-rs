@@ -1,10 +1,13 @@
 mod basic;
 mod clips;
 mod data;
-mod event;
 mod gpt;
 mod helper;
 mod mods;
+mod poke_battle;
+mod poke_helper;
+mod poke_wishing;
+mod pokemon;
 mod reminder;
 
 use dashmap::DashMap;
@@ -64,14 +67,16 @@ async fn main() {
                 clips::server_clips(),
                 clips::my_clips(),
                 clips::next_clip(),
-                event::search_pokemon(),
-                event::buddy(),
-                event::team(),
-                event::switch_buddy(),
-                event::choose_starter(),
-                event::wild_encounter(),
-                event::trainer_battle(),
-                event::pre_populate(),
+                pokemon::search_pokemon(),
+                pokemon::buddy(),
+                pokemon::pre_populate(), //remove after testing
+                pokemon::team(),
+                pokemon::test_bag(),
+                pokemon::switch_buddy(),
+                pokemon::choose_starter(),
+                poke_battle::wild_encounter(),
+                poke_battle::trainer_battle(),
+                poke_wishing::wish(),
                 mods::give_creds(),
                 mods::take_creds(),
             ],
