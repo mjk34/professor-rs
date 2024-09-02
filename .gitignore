@@ -1,5 +1,6 @@
 /target
 .shuttle-storage
 .env
-data.json
+.eventdb
 .vscode/
+data.json

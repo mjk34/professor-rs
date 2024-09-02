@@ -15,6 +15,7 @@
 
 use crate::data::{self, VoiceUser};
 use crate::gpt::gpt_string;
+use crate::reminder;
 use crate::{serenity, Context, Error};
 use chrono::prelude::Utc;
 use poise::serenity_prelude::futures::StreamExt;
@@ -210,6 +211,8 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
     user_data.add_rolls(d20);
     user_data.add_bonus();
     user_data.update_daily();
+
+    reminder::check_birthday(ctx).await;
 
     Ok(())
 }

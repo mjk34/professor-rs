@@ -5,6 +5,7 @@ mod event;
 mod gpt;
 mod helper;
 mod mods;
+mod reminder;
 
 use dashmap::DashMap;
 use data::{UserData, VoiceUser};
@@ -136,6 +137,8 @@ async fn event_handler(
             let mut do_gpt = new_message.mentions_me(&ctx.http).await.unwrap_or(false);
             let mut messages = vec![new_message.content.clone()];
             let mut referenced_message = &new_message.referenced_message;
+
+            // println!("{:?}", messages);
 
             while let Some(msg) = referenced_message {
                 messages.push(msg.content.clone());
