@@ -530,7 +530,7 @@ pub async fn buy_tickets(ctx: Context<'_>) -> Result<(), Error> {
     println!("{}", tkcount);
 
     let mut desc = format!(
-        "Welcome to the Shop, buy tickets here to participate in the Server's Battle Pass Raffle! (Total: {})\n\n", 
+        "Welcome to the Shop, buy tickets here to participate in the Server's Battle Pass Raffle! (Total: {})\n\n",
         creds
     );
 
@@ -817,8 +817,8 @@ pub async fn info(ctx: Context<'_>) -> Result<(), Error> {
         .collect::<Vec<String>>()
         .join(" ");
 
-    let mut desc = format!(
-        "Welcome to **{}**!\n\n**Member Count:** {}\n**Created On:** {}\n**Roles:** {}\n**Channels:** {}\n**Verification Level:** {}\n**Boost Level:** {}\n**Number of Boosts:** {}\n\n**Emojis:**\n{}",
+    let desc = format!(
+        "Welcome to **{}**!\n\n**Member Count:** {}\n**Created On:** {}\n**Roles:** {}\n**Channels:** {}\n**Verification Level:** {}\n**Boost Level:** {}\n**Number of Boosts:** {}\n\n**Emojis ({}):**\n{}",
         guild_name,
         member_count,
         creation_date,
@@ -827,24 +827,104 @@ pub async fn info(ctx: Context<'_>) -> Result<(), Error> {
         verification_level,
         boost_level,
         num_boosts,
+        guild.emojis.values().len(),
         emojis
     );
-    desc.truncate(4096);
 
-    ctx.send(
-        poise::CreateReply::default().embed(
-            serenity::CreateEmbed::default()
+    let subs = desc.into_bytes();
+
+    let subs = subs
+        .chunks(4096)
+        .map(|chunk| String::from_utf8(chunk.to_vec()).unwrap())
+        .collect::<Vec<String>>();
+
+    let buttons = vec![
+        serenity::CreateButton::new("open_modal")
+            .label("<")
+            .custom_id("back".to_string())
+            .style(poise::serenity_prelude::ButtonStyle::Secondary),
+        serenity::CreateButton::new("open_modal")
+            .label(">")
+            .custom_id("next".to_string())
+            .style(poise::serenity_prelude::ButtonStyle::Secondary),
+    ];
+    let components = if subs.len() > 1 {
+        vec![serenity::CreateActionRow::Buttons(buttons)]
+    } else {
+        Vec::new()
+    };
+
+    let embed = serenity::CreateEmbed::default()
+        .title(&guild.name)
+        .thumbnail(&icon_url)
+        .image(&banner_url)
+        .description(subs[0].clone())
+        .colour(data::EMBED_DEFAULT)
+        .footer(serenity::CreateEmbedFooter::new(
+            "@~ powered by UwUntu & RustyBamboo",
+        ));
+
+    let reply = ctx
+        .send(
+            poise::CreateReply::default()
+                .embed(embed)
+                .components(components),
+        )
+        .await?;
+
+    let msg_og = Arc::new(RwLock::new(reply.into_message().await?));
+
+    let msg = Arc::clone(&msg_og);
+
+    let mut reactions = msg
+        .read()
+        .await
+        .await_component_interactions(ctx)
+        .timeout(Duration::new(60, 0))
+        .stream();
+
+    let ctx = ctx.serenity_context().clone();
+
+    tokio::spawn(async move {
+        let mut current_page: usize = 0;
+        while let Some(reaction) = reactions.next().await {
+            let label = reaction.data.custom_id.as_str();
+            match label {
+                "back" => {
+                    if current_page > 0 {
+                        current_page -= 1;
+                    }
+                }
+                "next" => {
+                    if current_page < subs.len() - 1 {
+                        current_page += 1;
+                    }
+                }
+                _ => (),
+            };
+
+            reaction
+                .create_response(&ctx, serenity::CreateInteractionResponse::Acknowledge)
+                .await
+                .unwrap();
+
+            let embed = serenity::CreateEmbed::default()
                 .title(&guild.name)
                 .thumbnail(&icon_url)
                 .image(&banner_url)
-                .description(desc)
+                .description(subs[current_page].clone())
                 .colour(data::EMBED_DEFAULT)
                 .footer(serenity::CreateEmbedFooter::new(
                     "@~ powered by UwUntu & RustyBamboo",
-                )),
-        ),
-    )
-    .await?;
+                ));
+
+            msg.write()
+                .await
+                .edit(&ctx, EditMessage::default().embed(embed))
+                .await
+                .unwrap();
+        }
+    });
 
     Ok(())
 }
