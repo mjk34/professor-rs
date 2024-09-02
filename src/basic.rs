@@ -797,6 +797,7 @@ pub async fn buy_tickets(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
+/// get the status of voice channels
 #[poise::command(slash_command)]
 pub async fn voice_status(ctx: Context<'_>) -> Result<(), Error> {
     let data = &ctx.data().voice_users;
@@ -855,6 +856,7 @@ pub async fn voice_status(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
+/// get info about the server
 #[poise::command(slash_command)]
 pub async fn info(ctx: Context<'_>) -> Result<(), Error> {
     let guild = match ctx.guild() {
@@ -885,24 +887,27 @@ pub async fn info(ctx: Context<'_>) -> Result<(), Error> {
         .collect::<Vec<String>>()
         .join(" ");
 
+    let mut desc = format!(
+        "Welcome to **{}**!\n\n**Member Count:** {}\n**Created On:** {}\n**Roles:** {}\n**Channels:** {}\n**Verification Level:** {}\n**Boost Level:** {}\n**Number of Boosts:** {}\n\n**Emojis:**\n{}",
+        guild_name,
+        member_count,
+        creation_date,
+        num_roles,
+        num_channels,
+        verification_level,
+        boost_level,
+        num_boosts,
+        emojis
+    );
+    desc.truncate(4096);
+
     ctx.send(
         poise::CreateReply::default().embed(
             serenity::CreateEmbed::default()
                 .title(&guild.name)
                 .thumbnail(&icon_url)
                 .image(&banner_url)
-                .description(format!(
-                    "Welcome to **{}**!\n\n**Member Count:** {}\n**Created On:** {}\n**Roles:** {}\n**Channels:** {}\n**Verification Level:** {}\n**Boost Level:** {}\n**Number of Boosts:** {}\n\n**Emojis:**\n{}",
-                    guild_name,
-                    member_count,
-                    creation_date,
-                    num_roles,
-                    num_channels,
-                    verification_level,
-                    boost_level,
-                    num_boosts,
-                    emojis
-                ))
+                .description(desc)
                 .colour(data::EMBED_DEFAULT)
                 .footer(serenity::CreateEmbedFooter::new(
                     "@~ powered by UwUntu & RustyBamboo",
