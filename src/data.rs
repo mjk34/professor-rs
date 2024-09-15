@@ -56,6 +56,7 @@ pub struct WishData {
     small_pity: i32,
     big_pity: i32,
     wishes: i32,
+    guarentee: bool,
 }
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
