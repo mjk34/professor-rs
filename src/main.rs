@@ -4,10 +4,6 @@ mod data;
 mod gpt;
 mod helper;
 mod mods;
-mod poke_battle;
-mod poke_helper;
-mod poke_wishing;
-mod pokemon;
 mod reminder;
 
 use dashmap::DashMap;
@@ -67,16 +63,6 @@ async fn main() {
                 clips::server_clips(),
                 clips::my_clips(),
                 clips::next_clip(),
-                pokemon::search_pokemon(),
-                pokemon::buddy(),
-                pokemon::pre_populate(), //remove after testing
-                pokemon::team(),
-                pokemon::test_bag(),
-                pokemon::switch_buddy(),
-                pokemon::choose_starter(),
-                poke_battle::wild_encounter(),
-                poke_battle::trainer_battle(),
-                poke_wishing::wish(),
                 mods::give_creds(),
                 mods::take_creds(),
             ],
@@ -155,9 +141,9 @@ async fn event_handler(
                 referenced_message = &msg.referenced_message;
             }
 
-            let no_style = "<@".to_string() + &prof_bid + "> doodle this";
-            let doodle = messages[0].to_lowercase().contains("doodle");
-            let randomstyle = messages[0].to_lowercase() == no_style;
+            let doodle = messages[0].to_lowercase().contains("draw")
+                || messages[0].to_lowercase().contains("doodle");
+            let randomstyle = messages[0].to_lowercase().contains("style");
 
             if do_gpt && doodle {
                 let doodle_url: String = gpt::generate_doodle(&mut messages, randomstyle).await;

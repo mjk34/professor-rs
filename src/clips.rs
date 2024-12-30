@@ -37,7 +37,7 @@ pub async fn check_mod(ctx: Context<'_>) -> Result<bool, Error> {
 fn is_youtube_or_medal_url(url: &str) -> bool {
     let youtube_regex =
         Regex::new(r"(https?://)?(www\.)?(youtube\.com/watch\?v=|youtu\.be/).+").unwrap();
-    let medal_regex = Regex::new(r"https?://medal\.tv/clips/.+").unwrap();
+    let medal_regex = Regex::new(r"https?://medal\.tv/.+").unwrap();
 
     youtube_regex.is_match(url) || medal_regex.is_match(url)
 }

@@ -29,7 +29,6 @@ pub const EMBED_FAIL: Color = Color::RED; // red - absolute fails
 pub const EMBED_SUCCESS: Color = Color::new(65280); // green - major success
 pub const EMBED_ERROR: Color = Color::new(6053215); // grey - soft fails
 pub const EMBED_MOD: Color = Color::new(16749300); // pink - moderator commands
-pub const EMBED_TRAINER: Color = Color::new(3756519); // blue - trainer battles
 
 // General Structures
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
@@ -51,163 +50,6 @@ impl ClipData {
     }
 }
 
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
-pub struct WishData {
-    small_pity: i32,
-    big_pity: i32,
-    wishes: i32,
-    guarentee: bool,
-}
-
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
-pub struct ItemData {
-    name: String,
-    desc: String,
-    effect: i32,
-    cost: i32,
-}
-
-// Event Structures
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
-pub struct PokeData {
-    name: String,
-    index: usize,
-    desc: String,
-    nickname: Option<String>,
-    sprite: String,
-    bsprite: String,
-    wallpaper: String,
-    current_hp: Option<i32>,
-    health: Option<i32>,
-    types: String,
-}
-
-impl PokeData {
-    pub fn set_current_health(&mut self, health: i32) {
-        self.current_hp = Some(health);
-    }
-
-    pub fn set_health(&mut self, health: i32) {
-        self.health = Some(health);
-        self.current_hp = Some(health);
-    }
-
-    pub fn get_name(&self) -> String {
-        self.name.clone()
-    }
-
-    pub fn get_index(&self) -> usize {
-        self.index
-    }
-
-    pub fn get_desc(&self) -> String {
-        self.desc.clone()
-    }
-
-    // pub fn get_nickname(&self) -> Option<String> {
-    //     return self.nickname.clone();
-    // }
-
-    pub fn get_sprite(&self) -> String {
-        self.sprite.clone()
-    }
-
-    pub fn get_bsprite(&self) -> String {
-        self.bsprite.clone()
-    }
-
-    pub fn get_wallpaper(&self) -> String {
-        self.wallpaper.clone()
-    }
-
-    pub fn get_health(&self) -> i32 {
-        if self.health.is_none() {
-            return 0;
-        }
-
-        self.health.unwrap()
-    }
-
-    pub fn get_current_health(&self) -> i32 {
-        if self.current_hp.is_none() {
-            return 0;
-        }
-
-        self.current_hp.unwrap()
-    }
-
-    pub fn get_types(&self) -> String {
-        self.types.clone()
-    }
-}
-
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
-pub struct TrainerData {
-    name: String,
-    types: String,
-    tier: String,
-    team: Vec<PokeData>,
-    wallpaper: String,
-}
-
-impl TrainerData {
-    pub fn give_pokemon(&mut self, pokemon: PokeData) {
-        self.team.push(pokemon);
-    }
-
-    pub fn get_name(&self) -> String {
-        self.name.clone()
-    }
-    pub fn get_types(&self) -> String {
-        self.types.clone()
-    }
-    pub fn get_tier(&self) -> String {
-        self.tier.clone()
-    }
-    pub fn get_wallpaper(&self) -> String {
-        self.wallpaper.clone()
-    }
-    pub fn get_team(&self) -> Vec<PokeData> {
-        self.team.clone()
-    }
-}
-
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
-pub struct EventData {
-    name: String,
-    buddy: usize,
-    team: Vec<PokeData>,
-    // add a personal pokedex that shows what you've caught
-    store: Vec<ItemData>,
-}
-
-impl EventData {
-    pub fn set_buddy(&mut self, buddy: usize) {
-        self.buddy = buddy
-    }
-
-    pub fn add_pokemon(&mut self, pokemon: PokeData) {
-        self.team.push(pokemon)
-    }
-
-    pub fn take_damage(&mut self, current: usize, damage: i32) {
-        let health = self.team[current].get_current_health();
-        self.team[current].set_current_health(health - damage);
-    }
-
-    pub fn faint_pokemon(&mut self, current: usize) {
-        self.team[current].set_current_health(0);
-    }
-
-    pub fn get_buddy(&self) -> usize {
-        self.buddy
-    }
-
-    pub fn get_team(&self) -> Vec<PokeData> {
-        self.team.clone()
-    }
-}
-
 // User profile
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct UserData {
@@ -222,10 +64,6 @@ pub struct UserData {
 
     pub submits: Vec<Option<ClipData>>,
     tickets: i32,
-    wish: WishData,
-
-    pub event: EventData,
-    bag: Vec<ItemData>,
 }
 
 impl UserData {
@@ -244,7 +82,6 @@ impl UserData {
         if self.xp >= xp_cap {
             self.xp -= xp_cap;
             self.update_level();
-            self.add_wishes(3);
 
             return true;
         }
@@ -309,15 +146,6 @@ impl UserData {
         }
 
         self.tickets += tickets;
-        true
-    }
-
-    pub fn add_wishes(&mut self, wishes: i32) -> bool {
-        if wishes < 1 {
-            return false;
-        }
-
-        self.wish.wishes = wishes;
         true
     }
 
@@ -432,30 +260,6 @@ impl UserData {
         }
         submissions
     }
-
-    // pub fn update_small_pity(&mut self, small_pity: i32) -> bool {
-    //     if small_pity < 0 {
-    //         return false;
-    //     }
-    //     self.wish.small_pity = small_pity;
-    //     return true;
-    // }
-
-    // pub fn update_big_pity(&mut self, big_pity: i32) -> bool {
-    //     if big_pity < 0 {
-    //         return false;
-    //     }
-    //     self.wish.big_pity = big_pity;
-    //     return true;
-    // }
-
-    // pub fn update_wishes(&mut self, wish_count: i32) -> bool {
-    //     if wish_count < 0 {
-    //         return false;
-    //     }
-    //     self.wish.wishes = wish_count;
-    //     return true;
-    // }
 }
 
 #[derive(Debug, Clone)]
@@ -516,10 +320,6 @@ pub struct Data {
     pub pong: Vec<String>,
     pub d20f: Vec<String>,
     pub mod_id: RoleId,
-    pub pokedex: Vec<PokeData>,
-    pub type_matrix: Vec<Vec<f32>>,
-    pub type_name: Vec<String>,
-    pub trainers: Vec<TrainerData>,
 }
 
 impl Data {
@@ -597,206 +397,6 @@ impl Data {
                 .unwrap(),
         );
 
-        // EVENT DATA ////////////////////////////////////////////////////////////////////////////////////////
-        let poke_string = read_lines("event/pokemon.txt");
-        let mut pokedex = Vec::new();
-        let missing_no = PokeData {
-            name: "MissingNo.".to_string(),
-            index: 0,
-            desc: "????????????".to_string(),
-            types: "Normal".to_string(),
-            bsprite: "".to_string(),
-            sprite: "https://archives.bulbagarden.net/media/upload/9/98/Missingno_RB.png"
-                .to_string(),
-            wallpaper: "https://cdn.discordapp.com/attachments/1260223476766343188/1262188839049625640/000.png?ex=6695b075&is=66945ef5&hm=2050fd6220766c821bdf1325567eca69f85e2236ca8861495efcb89cea201577&".to_string(),
-            nickname: None,
-            current_hp: None,
-            health: None,
-        };
-        pokedex.push(missing_no);
-
-        let mut poke_counter = 1;
-        for poke_line in poke_string {
-            let line_split: Vec<&str> = poke_line.split('*').collect();
-
-            let poke_name: String = line_split
-                .first()
-                .unwrap_or_else(|| panic!("Failed to load Name for No. {}", poke_counter))
-                .to_string();
-            let poke_desc: String = line_split
-                .get(1)
-                .unwrap_or_else(|| panic!("Failed to load Description for No. {}", poke_counter))
-                .to_string();
-            let poke_types: String = line_split
-                .get(2)
-                .unwrap_or_else(|| panic!("Failed to load typing for No. {}", poke_counter))
-                .to_string();
-            let poke_sprite: String = line_split
-                .get(3)
-                .unwrap_or_else(|| panic!("Failed to load Sprite for No. {}", poke_counter))
-                .to_string();
-            let poke_wallpaper: String = line_split
-                .get(4)
-                .unwrap_or_else(|| panic!("Failed to load Wallpaper for No. {}", poke_counter))
-                .to_string();
-            let poke_back: String = line_split
-                .get(5)
-                .unwrap_or_else(|| panic!("Failed to load back sprite for No. {}", poke_counter))
-                .to_string();
-
-            let pokemon_info = PokeData {
-                name: poke_name,
-                index: poke_counter,
-                desc: poke_desc,
-                types: poke_types,
-                sprite: poke_sprite,
-                bsprite: poke_back,
-                wallpaper: poke_wallpaper,
-                nickname: None,
-                current_hp: None,
-                health: None,
-            };
-
-            pokedex.push(pokemon_info);
-            poke_counter += 1;
-        }
-
-        let type_matrix = vec![
-            vec![
-                1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.5, 0.0, 1.0, 1.0,
-                0.5, 1.0,
-            ],
-            vec![
-                1.0, 0.5, 0.5, 1.0, 2.0, 2.0, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 0.5, 1.0, 0.5, 1.0,
-                2.0, 1.0,
-            ],
-            vec![
-                1.0, 2.0, 0.5, 1.0, 0.5, 1.0, 1.0, 1.0, 2.0, 1.0, 1.0, 1.0, 2.0, 1.0, 0.5, 1.0,
-                1.0, 1.0,
-            ],
-            vec![
-                1.0, 1.0, 2.0, 0.5, 0.5, 1.0, 1.0, 1.0, 0.0, 2.0, 1.0, 1.0, 1.0, 1.0, 0.5, 1.0,
-                1.0, 1.0,
-            ],
-            vec![
-                1.0, 0.5, 2.0, 1.0, 0.5, 1.0, 1.0, 0.5, 2.0, 0.5, 1.0, 0.5, 2.0, 1.0, 0.5, 1.0,
-                0.5, 1.0,
-            ],
-            vec![
-                1.0, 0.5, 0.5, 1.0, 2.0, 0.5, 1.0, 1.0, 2.0, 2.0, 1.0, 1.0, 1.0, 1.0, 2.0, 1.0,
-                0.5, 1.0,
-            ],
-            vec![
-                2.0, 1.0, 1.0, 1.0, 1.0, 2.0, 1.0, 0.5, 1.0, 0.5, 0.5, 0.5, 2.0, 0.0, 1.0, 2.0,
-                2.0, 0.5,
-            ],
-            vec![
-                1.0, 1.0, 1.0, 1.0, 2.0, 1.0, 1.0, 0.5, 0.5, 1.0, 1.0, 1.0, 0.5, 0.5, 1.0, 1.0,
-                0.0, 2.0,
-            ],
-            vec![
-                1.0, 2.0, 1.0, 2.0, 0.5, 1.0, 1.0, 2.0, 1.0, 1.0, 1.0, 0.5, 2.0, 1.0, 1.0, 1.0,
-                2.0, 1.0,
-            ],
-            vec![
-                1.0, 1.0, 1.0, 0.5, 2.0, 1.0, 2.0, 1.0, 1.0, 1.0, 1.0, 2.0, 0.5, 1.0, 1.0, 1.0,
-                0.5, 1.0,
-            ],
-            vec![
-                1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 2.0, 1.0, 1.0, 0.5, 1.0, 1.0, 1.0, 1.0, 0.0,
-                0.5, 1.0,
-            ],
-            vec![
-                1.0, 0.5, 1.0, 1.0, 2.0, 1.0, 0.5, 0.5, 1.0, 0.5, 2.0, 1.0, 1.0, 0.5, 1.0, 2.0,
-                0.5, 0.5,
-            ],
-            vec![
-                1.0, 2.0, 1.0, 1.0, 1.0, 2.0, 0.5, 1.0, 0.5, 2.0, 1.0, 2.0, 1.0, 1.0, 1.0, 1.0,
-                0.5, 1.0,
-            ],
-            vec![
-                0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 1.0, 1.0, 2.0, 1.0, 0.5,
-                1.0, 1.0,
-            ],
-            vec![
-                1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 1.0,
-                0.5, 0.0,
-            ],
-            vec![
-                1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.5, 1.0, 1.0, 1.0, 2.0, 1.0, 1.0, 2.0, 1.0, 0.5,
-                1.0, 0.5,
-            ],
-            vec![
-                1.0, 0.5, 0.5, 0.5, 1.0, 2.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 1.0, 1.0, 1.0,
-                0.5, 2.0,
-            ],
-            vec![
-                1.0, 0.5, 1.0, 1.0, 1.0, 1.0, 2.0, 0.5, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 2.0,
-                0.5, 1.0,
-            ],
-        ];
-
-        let type_name: Vec<String> = vec![
-            "Normal".to_string(),
-            "Fire".to_string(),
-            "Water".to_string(),
-            "Electric".to_string(),
-            "Grass".to_string(),
-            "Ice".to_string(),
-            "Fighting".to_string(),
-            "Poison".to_string(),
-            "Ground".to_string(),
-            "Flying".to_string(),
-            "Psychic".to_string(),
-            "Bug".to_string(),
-            "Rock".to_string(),
-            "Ghost".to_string(),
-            "Dragon".to_string(),
-            "Dark".to_string(),
-            "Steel".to_string(),
-            "Fairy".to_string(),
-        ];
-
-        let trainer_string = read_lines("event/trainer.txt");
-        let mut trainers = Vec::new();
-
-        for (trainer_index, trainer_line) in trainer_string.into_iter().enumerate() {
-            let line_split: Vec<&str> = trainer_line.split('=').collect();
-
-            let trainer_name: String = line_split
-                .first()
-                .unwrap_or_else(|| panic!("Failed to load Name for No. {}", poke_counter))
-                .to_string();
-            let trainer_types: String = line_split
-                .get(1)
-                .unwrap_or_else(|| panic!("Failed to load Description for No. {}", poke_counter))
-                .to_string();
-            let trainer_wallpaper: String = line_split
-                .get(2)
-                .unwrap_or_else(|| panic!("Failed to load typing for No. {}", poke_counter))
-                .to_string();
-
-            let trainer_tier = if trainer_index < 15 {
-                "Common".to_string()
-            } else if (15..26).contains(&trainer_index) {
-                "Mythic".to_string()
-            } else {
-                "Legendary".to_string()
-            };
-
-            let trainer_info = TrainerData {
-                name: trainer_name,
-                types: trainer_types,
-                tier: trainer_tier,
-                team: vec![],
-                wallpaper: trainer_wallpaper,
-            };
-
-            trainers.push(trainer_info);
-        }
-
-        // EVENT DATA ////////////////////////////////////////////////////////////////////////////////////////
-
         Data {
             users,
             voice_users: Arc::new(DashMap::new()),
@@ -805,10 +405,6 @@ impl Data {
             pong,
             d20f,
             mod_id,
-            pokedex,
-            type_matrix,
-            type_name,
-            trainers,
         }
     }
 }
