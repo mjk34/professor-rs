@@ -342,7 +342,7 @@ impl Data {
             .embed(
                 serenity::CreateEmbed::new()
                     .title("Account Created!")
-                    .description(format!("Welcome <@{}>! You are now registered with ProfessorBot, feel free to checkout Professors Commands in https://discord.com/channels/1236349546003566642/1236351799536123946", ctx.author().id))
+                    .description(format!("Welcome <@{}>! You are now registered with ProfessorBot, feel free to checkout Professors Commands in https://discord.com/channels/859993171156140061/860013281165967380", ctx.author().id))
                     .image(
                         "https://cdn.discordapp.com/attachments/1260223476766343188/1262191655763578881/anime-girl-okay-sign-b5zlye5h8mnjhdg2.gif?ex=6695b315&is=66946195&hm=215e00c0ee066c4a36a8c837f7b24570d2736dae19713e220702114330667f6c&",
                     )
