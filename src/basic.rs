@@ -431,7 +431,7 @@ pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
         let (id, u) = x.pair();
         let u = u.read().await;
 
-        let user_name = id.to_user(ctx).await?.name;
+        let user_name = id.to_user(ctx).await?.name.replace('_', "");
         all_creds.push((*id, u.get_creds(), String::new(), user_name.clone()));
         all_fortune.push((*id, u.get_luck_score(), u.get_luck(), user_name.clone()));
 

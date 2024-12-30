@@ -143,7 +143,6 @@ pub async fn server_clips(ctx: Context<'_>) -> Result<(), Error> {
     };
 
     let icon_url = guild.icon_url().unwrap_or_default();
-    let banner_url = guild.banner_url().unwrap_or_default();
     let data = &ctx.data().users;
 
     let mut all_clips = Vec::new();
@@ -158,17 +157,19 @@ pub async fn server_clips(ctx: Context<'_>) -> Result<(), Error> {
             }
         }
         let author = id.to_user(ctx).await.unwrap();
-        let clips = u.get_submissions(true);
+        let clips = u.get_submissions(true, false);
 
         if !clips.is_empty() {
             desc += &format!(
                 "\n**{}:**\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n",
-                author.name
+                author.name.replace('_', "")
             );
             desc += &clips.join("\n ");
             desc += "\n";
         }
     }
+
+    println!("{:}", &desc);
 
     if all_clips.is_empty() {
         ctx.send(
@@ -202,24 +203,37 @@ pub async fn server_clips(ctx: Context<'_>) -> Result<(), Error> {
     });
 
     let top_ten = rated_clips.iter().take(10);
+    let top_len = &top_ten.len();
     let mut top_ten_desc = String::new();
+    top_ten_desc += &format!(
+        "\n**{}:** \n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n",
+        "Top Rated Clips"
+    );
+
     for (id, c) in top_ten {
         let author = id.to_user(ctx).await.unwrap();
         let rating = c.rating.unwrap();
 
         top_ten_desc += &format!(
-            "**{}** - [{}/5]\n [{}]({})\n",
-            author.name, rating, c.title, c.link
+            "[{}/5] **[{}]({})** - {}\n",
+            rating,
+            c.title,
+            c.link,
+            author.name.replace('_', "")
         );
     }
 
-    let desc = top_ten_desc + &desc;
+    if *top_len > 0 {
+        desc = top_ten_desc + "-\n" + &desc;
+    }
+
+    println!("{:}", &desc);
+
     ctx.send(
         poise::CreateReply::default().embed(
             serenity::CreateEmbed::default()
                 .title("Server Clips")
                 .thumbnail(&icon_url)
-                .image(&banner_url)
                 .description(desc)
                 .color(data::EMBED_MOD)
                 .footer(serenity::CreateEmbedFooter::new(
@@ -243,7 +257,7 @@ pub async fn my_clips(ctx: Context<'_>) -> Result<(), Error> {
     let u = data.get(&id).unwrap();
     let clips = u.read().await;
 
-    let desc = clips.get_submissions(false).join("\n");
+    let desc = clips.get_submissions(false, true).join("\n");
 
     if clips.submits.is_empty() {
         ctx.send(
