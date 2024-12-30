@@ -63,7 +63,7 @@ pub async fn check_birthday(ctx: Context<'_>) {
                 .unwrap();
 
             let mod_id: u64 = env::var("MOD_ID")
-                .expect("Failed to load MODERATOR chat id")
+                .expect("Failed to load MODERATOR ping id")
                 .parse()
                 .unwrap();
 

@@ -216,20 +216,6 @@ impl UserData {
         false
     }
 
-    // pub fn get_submit_index(&self, clip_id: usize) -> Option<usize> {
-    //     // cycles through self.submits, get the index
-    //     // associated with the clip id
-    //     if self.submits.len() <= 0 {
-    //         return None;
-    //     }
-    //     for i in 0..self.submits.len() {
-    //         if self.submits[i].id == clip_id {
-    //             return Some(i);
-    //         }
-    //     }
-    //     return None;
-    // }
-
     pub fn remove_submit(&mut self, submit_index: usize) -> bool {
         let res = self.submits.remove(submit_index);
         res.is_some()
