@@ -26,6 +26,7 @@ pub const EMBED_DEFAULT: Color = Color::new(16119285); // white - transition col
 pub const EMBED_CYAN: Color = Color::new(6943230); // cyan  - good finish color
 pub const EMBED_GOLD: Color = Color::GOLD; // gold - cred related color
 pub const EMBED_FAIL: Color = Color::RED; // red - absolute fails
+pub const EMBED_LEVEL: Color = Color::ORANGE; // orange - level/xp related color
 pub const EMBED_SUCCESS: Color = Color::new(65280); // green - major success
 pub const EMBED_ERROR: Color = Color::new(6053215); // grey - soft fails
 pub const EMBED_MOD: Color = Color::new(16749300); // pink - moderator commands

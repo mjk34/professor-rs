@@ -208,10 +208,33 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
         user_data.add_creds(total);
     }
 
-    user_data.update_xp(500);
     user_data.add_rolls(d20);
     user_data.add_bonus();
     user_data.update_daily();
+
+    let levelup = user_data.update_xp(450);
+
+    if levelup {
+        let lvl_desc = format!(
+            "Wowzers, you powered up! <@{}> reached **Level {}**",
+            user.id,
+            user_data.get_level()
+        );
+
+        ctx.send(
+            poise::CreateReply::default().embed(
+                serenity::CreateEmbed::new()
+                    .title("Level Up")
+                    .description(&lvl_desc)
+                    .thumbnail(user.avatar_url().unwrap_or_default().to_string())
+                    .color(data::EMBED_LEVEL)
+                    .footer(serenity::CreateEmbedFooter::new(
+                        "@~ powered by UwUntu & RustyBamboo",
+                    )),
+            ),
+        )
+        .await?;
+    }
 
     reminder::check_birthday(ctx).await;
 
@@ -287,6 +310,29 @@ pub async fn claim_bonus(ctx: Context<'_>) -> Result<(), Error> {
 
         user_data.add_creds(fortune);
         user_data.reset_bonus();
+
+        let levelup = user_data.update_xp(150);
+        if levelup {
+            let lvl_desc = format!(
+                "Wowzers, you powered up! <@{} reached **Level {}**",
+                user.id,
+                user_data.get_level()
+            );
+
+            ctx.send(
+                poise::CreateReply::default().embed(
+                    serenity::CreateEmbed::new()
+                        .title("Level Up")
+                        .description(&lvl_desc)
+                        .thumbnail(user.avatar_url().unwrap_or_default().to_string())
+                        .color(data::EMBED_LEVEL)
+                        .footer(serenity::CreateEmbedFooter::new(
+                            "@~ powered by UwUntu & RustyBamboo",
+                        )),
+                ),
+            )
+            .await?;
+        }
     } else {
         let desc: String = match bonus {
             2 => {
