@@ -5,6 +5,13 @@ This is the code behind Uwuversity's Professor bot.
 
 Professor bot is a developing agent that is used to incentivise members with rewarding and interactive feature to improve participation. Members are currently able to accumulate creds daily, sumbit game clips for Clip Night, and buy tickets to participate in the ongoing raffles.
 
+## Build
+
+Static bin:
+
+```
+cargo build --release --target x86_64-unknown-linux-musl --features vendored
+```
 
 ## Install
 

@@ -4,3 +4,4 @@
 .eventdb
 .vscode/
 data.json
+Cargo.lock
