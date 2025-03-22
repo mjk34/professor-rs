@@ -435,7 +435,15 @@ pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
         all_creds.push((*id, u.get_creds(), String::new(), user_name.clone()));
         all_fortune.push((*id, u.get_luck_score(), u.get_luck(), user_name.clone()));
 
-        let total_xp = u.get_level() * 80 + u.get_xp();
+        let mut total_xp = u.get_xp();
+        fn xp_by_level(n: i32) -> i32 {
+            (1..n).map(|i| 500 + (i - 1) * 80).sum()
+        }
+
+        if u.get_level() > 0{
+            total_xp += xp_by_level(u.get_level())
+        }
+
         all_level.push((
             *id,
             total_xp,
@@ -547,7 +555,8 @@ pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
                         current_page += 10;
                     }
                 }
-                _ => (),
+
+                _ => ()
             };
 
             let leaderboard_text = get_leaderboard(&info, sort.clone(), current_page);
@@ -574,12 +583,20 @@ pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
                 .footer(serenity::CreateEmbedFooter::new(
                     "@~ powered by UwUntu & RustyBamboo",
                 ));
+
             msg.write()
                 .await
                 .edit(&ctx, EditMessage::default().embed(embed))
                 .await
                 .unwrap();
+            
         }
+
+        msg.write()
+        .await
+        .edit(&ctx, EditMessage::default().components(vec![]))
+        .await
+        .unwrap();
     });
 
     Ok(())

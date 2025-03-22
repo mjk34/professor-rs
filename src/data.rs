@@ -105,7 +105,7 @@ impl UserData {
 
     pub fn check_daily(&self) -> bool {
         let diff = Utc::now() - self.last_daily;
-        diff.num_hours() >= 24
+        diff.num_hours() >= 21
     }
 
     pub fn add_bonus(&mut self) {
