@@ -16,6 +16,7 @@ use openai_api_rs::v1::image::ImageGenerationRequest;
 use rand::{thread_rng, Rng};
 use std::env;
 
+/// These APIs no longer have the adaquate number of tokens per day to do fortunes...
 /// use gpt-3.5-turbo to generate fun responses to user prompts
 pub async fn gpt_string(api_key: String, prompt: String) -> Result<String, APIError> {
     let client = OpenAIClient::new(api_key.to_string());

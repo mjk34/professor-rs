@@ -125,35 +125,36 @@ async fn event_handler(
                 return Ok(());
             }
 
-            let mut do_gpt = new_message.mentions_me(&ctx.http).await.unwrap_or(false);
-            let mut messages = vec![new_message.content.clone()];
-            let mut referenced_message = &new_message.referenced_message;
+            // Professor GPT reply and Dalle draw 
+            // let mut do_gpt = new_message.mentions_me(&ctx.http).await.unwrap_or(false);
+            // let mut messages = vec![new_message.content.clone()];
+            // let mut referenced_message = &new_message.referenced_message;
 
-            // println!("{:?}", messages);
+            // // println!("{:?}", messages);
 
-            while let Some(msg) = referenced_message {
-                messages.push(msg.content.clone());
+            // while let Some(msg) = referenced_message {
+            //     messages.push(msg.content.clone());
 
-                if msg.mentions_me(&ctx.http).await.unwrap_or(false) {
-                    do_gpt = true;
-                    break;
-                }
-                referenced_message = &msg.referenced_message;
-            }
+            //     if msg.mentions_me(&ctx.http).await.unwrap_or(false) {
+            //         do_gpt = true;
+            //         break;
+            //     }
+            //     referenced_message = &msg.referenced_message;
+            // }
 
-            let doodle = messages[0].to_lowercase().contains("draw")
-                || messages[0].to_lowercase().contains("doodle");
-            let randomstyle = messages[0].to_lowercase().contains("style");
+            // let doodle = messages[0].to_lowercase().contains("draw")
+            //     || messages[0].to_lowercase().contains("doodle");
+            // let randomstyle = messages[0].to_lowercase().contains("style");
 
-            if do_gpt && doodle {
-                let doodle_url: String = gpt::generate_doodle(&mut messages, randomstyle).await;
-                new_message.reply(&ctx.http, doodle_url).await?;
-            }
+            // if do_gpt && doodle {
+            //     let doodle_url: String = gpt::generate_doodle(&mut messages, randomstyle).await;
+            //     new_message.reply(&ctx.http, doodle_url).await?;
+            // }
 
-            if do_gpt && !doodle {
-                let reading: String = gpt::generate_text(&mut messages).await;
-                new_message.reply(&ctx.http, reading).await?;
-            }
+            // if do_gpt && !doodle {
+            //     let reading: String = gpt::generate_text(&mut messages).await;
+            //     new_message.reply(&ctx.http, reading).await?;
+            // }
         }
 
         serenity::FullEvent::VoiceStateUpdate { old: _, new } => {

@@ -377,6 +377,10 @@ impl Data {
         let pong = read_lines("reference/pong.txt");
         let d20f = read_lines("reference/d20.txt");
 
+        // Lame static fortunes until we get local LLM up to make funny ones
+        let good_fortune = read_lines("reference/good_fortunes.txt");
+        let bad_fortune = read_lines("reference/bad_fortunes.txt");
+
         let mod_id = RoleId::new(
             env::var("MOD_ID")
                 .expect("Missing moderator ID")
