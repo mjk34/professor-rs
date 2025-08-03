@@ -307,6 +307,8 @@ pub struct Data {
     pub pong: Vec<String>,
     pub d20f: Vec<String>,
     pub mod_id: RoleId,
+    pub good_fortune: Vec<String>,
+    pub bad_fortune: Vec<String>,
 }
 
 impl Data {
@@ -396,6 +398,8 @@ impl Data {
             pong,
             d20f,
             mod_id,
+            good_fortune,
+            bad_fortune,
         }
     }
 }

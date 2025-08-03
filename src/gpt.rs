@@ -7,7 +7,7 @@
 //!     [x] - gpt_doodle                                                !
 //!---------------------------------------------------------------------!
 
-use openai_api_rs::v1::api::OpenAIClient;
+use openai_api_rs::v1::api::{OpenAIClient, OpenAIClientBuilder};
 use openai_api_rs::v1::chat_completion::{self, ChatCompletionRequest};
 use openai_api_rs::v1::common::DALL_E_3;
 use openai_api_rs::v1::common::GPT4_1106_PREVIEW;
@@ -19,7 +19,10 @@ use std::env;
 /// These APIs no longer have the adaquate number of tokens per day to do fortunes...
 /// use gpt-3.5-turbo to generate fun responses to user prompts
 pub async fn gpt_string(api_key: String, prompt: String) -> Result<String, APIError> {
-    let client = OpenAIClient::new(api_key.to_string());
+    let client = OpenAIClientBuilder::new()
+        .with_api_key(api_key.to_string())
+        .build()
+        .unwrap();
 
     let req = ChatCompletionRequest::new(
         GPT4_1106_PREVIEW.to_string(),
@@ -48,7 +51,10 @@ pub async fn gpt_string(api_key: String, prompt: String) -> Result<String, APIEr
 
 // use dalli-e-3 to generate fun doodles in various styles
 pub async fn gpt_doodle(api_key: String, prompt: String) -> Result<String, APIError> {
-    let client = OpenAIClient::new(api_key.to_string());
+    let client = OpenAIClientBuilder::new()
+        .with_api_key(api_key.to_string())
+        .build()
+        .unwrap();
 
     let req = ImageGenerationRequest::new(prompt).model(DALL_E_3.to_string());
     let result = client.image_generation(req).await?;

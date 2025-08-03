@@ -125,7 +125,7 @@ async fn event_handler(
                 return Ok(());
             }
 
-            // Professor GPT reply and Dalle draw 
+            // Professor GPT reply and Dalle draw
             // let mut do_gpt = new_message.mentions_me(&ctx.http).await.unwrap_or(false);
             // let mut messages = vec![new_message.content.clone()];
             // let mut referenced_message = &new_message.referenced_message;

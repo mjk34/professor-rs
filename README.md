@@ -9,8 +9,19 @@ Professor bot is a developing agent that is used to incentivise members with rew
 
 Static bin:
 
+One of the easier ways is to install `zig` and `cargo zigbuild`
+
 ```
-cargo build --release --target x86_64-unknown-linux-musl --features vendored
+pacman -S zig
+```
+
+```
+cargo install --locked cargo-zigbuild
+```
+
+
+```
+cargo zigbuild build --release --target x86_64-unknown-linux-musl --features vendored
 ```
 
 ## Install

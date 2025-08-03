@@ -14,7 +14,6 @@
 //!---------------------------------------------------------------------!
 
 use crate::data::{self, VoiceUser};
-use crate::gpt::gpt_string;
 use crate::helper::get_leaderboard;
 use crate::reminder;
 use crate::{serenity, Context, Error};
@@ -153,33 +152,13 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
 
     // generate fortune readings with gpt3.5
     tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-    let prompt = if d20 == 1 {
+    let reading = if d20 == 1 {
         // "give me a bad fortune that's funny, only the fortune, no quotes, like a fortune cookie, less than 20 words"
         ctx.data().bad_fortune.choose(&mut thread_rng()).unwrap()
     } else {
         // "give me a good fortune that's funny, only the fortune, no quotes, like a fortune cookie, less than 20 words"
         ctx.data().good_fortune.choose(&mut thread_rng()).unwrap()
     };
-
-    let mut tries = 0;
-    let reading;
-    let gpt_key: String = env::var("API_KEY").expect("missing GPT API_KEY");
-    loop {
-        match gpt_string(gpt_key.clone(), prompt.to_string()).await {
-            Ok(result) => {
-                reading = result;
-                break;
-            }
-            Err(e) => {
-                println!("An error occurred: {:?}, retrying...", e);
-                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                if tries > 5 {
-                    return Err(Box::new(e));
-                }
-            }
-        }
-        tries += 1;
-    }
 
     // final message with updated dice roll, creds earned and fortune reading
     let desc = format!(
@@ -442,7 +421,7 @@ pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
             (1..n).map(|i| 500 + (i - 1) * 80).sum()
         }
 
-        if u.get_level() > 0{
+        if u.get_level() > 0 {
             total_xp += xp_by_level(u.get_level())
         }
 
@@ -558,7 +537,7 @@ pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
                     }
                 }
 
-                _ => ()
+                _ => (),
             };
 
             let leaderboard_text = get_leaderboard(&info, sort.clone(), current_page);
@@ -591,14 +570,13 @@ pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
                 .edit(&ctx, EditMessage::default().embed(embed))
                 .await
                 .unwrap();
-            
         }
 
         msg.write()
-        .await
-        .edit(&ctx, EditMessage::default().components(vec![]))
-        .await
-        .unwrap();
+            .await
+            .edit(&ctx, EditMessage::default().components(vec![]))
+            .await
+            .unwrap();
     });
 
     Ok(())
