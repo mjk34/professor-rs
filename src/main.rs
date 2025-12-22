@@ -75,11 +75,13 @@ async fn main() {
             },
             ..Default::default()
         })
-        .setup(|_ctx, _ready, _framework| {
+        .setup(|ctx, _ready, _framework| {
+            let http = ctx.http.clone();
             Box::pin(async move {
                 let users = data.users.clone();
                 let voice_users = data.voice_users.clone();
-                background_task(users, voice_users);
+                background_task(users.clone(), voice_users);
+                maintenance_task(users, http);
                 Ok(data)
             })
         })
@@ -225,6 +227,19 @@ fn background_task(
             }
             // Sleep for a while before the next iteration
             tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+        }
+    });
+}
+
+fn maintenance_task(
+    users: Arc<DashMap<serenity::UserId, Arc<RwLock<UserData>>>>,
+    http: Arc<serenity::Http>,
+) {
+    tokio::spawn(async move {
+        loop {
+            reminder::check_birthday(&http).await;
+            data::save_users(&users).await;
+            tokio::time::sleep(std::time::Duration::from_secs(60 * 60 * 12)).await;
         }
     });
 }

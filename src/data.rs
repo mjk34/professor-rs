@@ -344,19 +344,7 @@ impl Data {
 
     /// Attempts to save the data to a file
     pub async fn save(&self) {
-        let users = Arc::clone(&self.users);
-        let users_save = DashMap::new();
-
-        for x in users.iter() {
-            let (id, u) = x.pair();
-            let u = u.read().await;
-            users_save.insert(*id, u.clone());
-        }
-
-        let users_save = SaveData { users: users_save };
-
-        let encoded = serde_json::to_string(&users_save).unwrap();
-        fs::write("data.json", encoded).expect("Failed to write binary save file");
+        save_users(&self.users).await;
     }
 
     /// Attempts to load the Data from a file, otherwise return a default
@@ -402,6 +390,23 @@ impl Data {
             bad_fortune,
         }
     }
+}
+
+pub async fn save_users(
+    users: &Arc<DashMap<serenity::UserId, Arc<RwLock<UserData>>>>,
+) {
+    let users_save = DashMap::new();
+
+    for x in users.iter() {
+        let (id, u) = x.pair();
+        let u = u.read().await;
+        users_save.insert(*id, u.clone());
+    }
+
+    let users_save = SaveData { users: users_save };
+
+    let encoded = serde_json::to_string(&users_save).unwrap();
+    fs::write("data.json", encoded).expect("Failed to write binary save file");
 }
 
 fn read_lines(filename: &str) -> Vec<String> {

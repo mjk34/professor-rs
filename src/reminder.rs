@@ -1,6 +1,6 @@
 use crate::data;
-use crate::helper::{get_current_date, get_current_year, get_reminder_date};
-use crate::{serenity, Context};
+use crate::serenity;
+use chrono::{Datelike, NaiveDate, TimeDelta, Utc};
 use poise::serenity_prelude::{ChannelId, CreateMessage};
 use std::env;
 use std::fs::{write, File};
@@ -40,23 +40,52 @@ fn export_to_file(filename: &str, database: Vec<Vec<String>>) {
     let _ = write(filename, contents);
 }
 
-pub async fn check_birthday(ctx: Context<'_>) {
+pub async fn check_birthday(http: &serenity::Http) {
     let mut database: Vec<Vec<String>> = import_from_file(EVENT_FILE);
     let length = database.len();
-    let today: String = get_current_date();
-    let year: String = get_current_year();
+    let now = Utc::now() - TimeDelta::hours(4);
+    let today = now.date_naive();
+    let year = today.year();
 
     //TODO: finish this shit
     for i in 0..length {
-        let date: String = format!("{}-{}", year, database[i][0]);
+        let mut date_parts = database[i][0].split('-');
+        let month = match date_parts.next().and_then(|part| part.parse::<u32>().ok()) {
+            Some(month) => month,
+            None => continue,
+        };
+        let day = match date_parts.next().and_then(|part| part.parse::<u32>().ok()) {
+            Some(day) => day,
+            None => continue,
+        };
+        let date_this_year = match NaiveDate::from_ymd_opt(year, month, day) {
+            Some(date) => date,
+            None => continue,
+        };
+        let date_next_year = NaiveDate::from_ymd_opt(year + 1, month, day);
         let name: String = database[i][1].clone();
         let user_id: String = database[i][2].clone();
-        let reminded: bool = matches!(database[i][3].as_str(), "1");
-        let pinged: bool = matches!(database[i][4].as_str(), "1");
+        let mut reminded: bool = matches!(database[i][3].as_str(), "1");
+        let mut pinged: bool = matches!(database[i][4].as_str(), "1");
 
-        let reminder: String = get_reminder_date(&date);
+        if today > date_this_year && (reminded || pinged) {
+            database[i][3] = "0".to_string();
+            database[i][4] = "0".to_string();
+            reminded = false;
+            pinged = false;
+        }
 
-        if today == reminder && !reminded {
+        let next_occurrence = if today <= date_this_year {
+            date_this_year
+        } else if let Some(date) = date_next_year {
+            date
+        } else {
+            continue;
+        };
+
+        let days_until = (next_occurrence - today).num_days();
+
+        if (0..=14).contains(&days_until) && !reminded {
             let mod_chat: u64 = env::var("MOD_CHAT")
                 .expect("Failed to load MODERATOR chat id")
                 .parse()
@@ -69,14 +98,14 @@ pub async fn check_birthday(ctx: Context<'_>) {
 
             let desc = format!(
                 "Hey <@&{}>, {}'s Birthday is coming up in 2 weeks! ({})",
-                mod_id, name, date
+                mod_id, name, next_occurrence
             );
 
             database[i][3] = "1".to_string();
 
             ChannelId::new(mod_chat)
                 .send_message(
-                    ctx.http(),
+                    http,
                     CreateMessage::default().embed(
                         serenity::CreateEmbed::default()
                             .title("Reminder")
@@ -91,7 +120,7 @@ pub async fn check_birthday(ctx: Context<'_>) {
                 .unwrap();
         }
 
-        if today == date && !pinged {
+        if today == date_this_year && !pinged {
             let desc = format!(
                 "Heyyyyyyy, its someone's special day!! It's {}'s (<@{}>) Birthday!!!",
                 name, user_id
@@ -106,7 +135,7 @@ pub async fn check_birthday(ctx: Context<'_>) {
 
             ChannelId::new(gen_chat)
                 .send_message(
-                    ctx.http(),
+                    http,
                     CreateMessage::default().embed(
                         serenity::CreateEmbed::default()
                             .title("Reminder")
@@ -120,6 +149,7 @@ pub async fn check_birthday(ctx: Context<'_>) {
                 .await
                 .unwrap();
         }
+
     }
 
     export_to_file(EVENT_FILE, database);

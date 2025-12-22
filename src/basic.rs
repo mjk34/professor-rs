@@ -217,7 +217,7 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
         .await?;
     }
 
-    reminder::check_birthday(ctx).await;
+    reminder::check_birthday(ctx.http()).await;
 
     Ok(())
 }
