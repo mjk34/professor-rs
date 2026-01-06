@@ -91,7 +91,7 @@ async fn main() {
         .activity(serenity::ActivityData {
             name: "Coding Rust".to_string(),
             kind: serenity::ActivityType::Custom,
-            state: Some("Phase2 - Development".to_string()),
+            state: Some("2026 Edit ONG".to_string()),
             url: None,
         })
         .status(serenity::OnlineStatus::Online)
