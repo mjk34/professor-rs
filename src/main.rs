@@ -1,7 +1,7 @@
 mod basic;
 mod clips;
 mod data;
-mod gpt;
+//mod gpt;
 mod helper;
 mod mods;
 mod reminder;
@@ -102,7 +102,7 @@ async fn main() {
 }
 
 async fn event_handler(
-    ctx: &serenity::Context,
+    _ctx: &serenity::Context,
     event: &serenity::FullEvent,
     _framework: poise::FrameworkContext<'_, data::Data, Error>,
     data: &data::Data,

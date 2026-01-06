@@ -8,7 +8,7 @@ use std::io::{BufRead, BufReader};
 
 const EVENT_FILE: &str = ".eventdb";
 
-fn import_from_file(filename: &str) -> Vec<Vec<String>> {
+async fn import_from_file(filename: &str) -> Vec<Vec<String>> {
     let mut file_descriptor = BufReader::new(File::open(filename).unwrap());
     let mut buffer = String::new();
 
@@ -24,7 +24,7 @@ fn import_from_file(filename: &str) -> Vec<Vec<String>> {
         .collect()
 }
 
-fn export_to_file(filename: &str, database: Vec<Vec<String>>) {
+async fn export_to_file(filename: &str, database: Vec<Vec<String>>) {
     let mut contents = String::new();
     contents += "-\n";
     for line in database {
@@ -41,7 +41,7 @@ fn export_to_file(filename: &str, database: Vec<Vec<String>>) {
 }
 
 pub async fn check_birthday(http: &serenity::Http) {
-    let mut database: Vec<Vec<String>> = import_from_file(EVENT_FILE);
+    let mut database: Vec<Vec<String>> = import_from_file(EVENT_FILE).await;
     let length = database.len();
     let now = Utc::now() - TimeDelta::hours(4);
     let today = now.date_naive();
@@ -152,5 +152,5 @@ pub async fn check_birthday(http: &serenity::Http) {
 
     }
 
-    export_to_file(EVENT_FILE, database);
+    export_to_file(EVENT_FILE, database).await;
 }
