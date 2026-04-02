@@ -229,10 +229,30 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
         user_data.add_creds(total);
     }
 
-    user_data.update_xp(500);
+    let levelup = user_data.update_xp(500);
     user_data.add_rolls(d20);
     user_data.add_bonus();
     user_data.update_daily();
+
+    if levelup {
+        ctx.send(
+            poise::CreateReply::default().embed(
+                serenity::CreateEmbed::new()
+                    .title("Level Up")
+                    .description(format!(
+                        "Wowzers, you powered up! <@{}> reached **Level {}**",
+                        user.id,
+                        user_data.get_level()
+                    ))
+                    .thumbnail(user.avatar_url().unwrap_or_default())
+                    .color(data::EMBED_LEVEL)
+                    .footer(serenity::CreateEmbedFooter::new(
+                        "@~ powered by UwUntu & RustyBamboo",
+                    )),
+            ),
+        )
+        .await?;
+    }
 
     Ok(())
 }
@@ -306,6 +326,27 @@ pub async fn claim_bonus(ctx: Context<'_>) -> Result<(), Error> {
 
         user_data.add_creds(fortune);
         user_data.reset_bonus();
+
+        let levelup = user_data.update_xp(150);
+        if levelup {
+            ctx.send(
+                poise::CreateReply::default().embed(
+                    serenity::CreateEmbed::new()
+                        .title("Level Up")
+                        .description(format!(
+                            "Wowzers, you powered up! <@{}> reached **Level {}**",
+                            user.id,
+                            user_data.get_level()
+                        ))
+                        .thumbnail(user.avatar_url().unwrap_or_default())
+                        .color(data::EMBED_LEVEL)
+                        .footer(serenity::CreateEmbedFooter::new(
+                            "@~ powered by UwUntu & RustyBamboo",
+                        )),
+                ),
+            )
+            .await?;
+        }
     } else {
         let desc: String = match bonus {
             2 => {
@@ -390,6 +431,7 @@ pub async fn wallet(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
+/*
 /// show the top wealthiest users in the server
 #[poise::command(slash_command)]
 pub async fn leaderboard(
@@ -590,6 +632,7 @@ pub async fn leaderboard(
 
     Ok(())
 }
+*/
 
 /// buy tickets for the battle pass raffle
 #[poise::command(slash_command)]

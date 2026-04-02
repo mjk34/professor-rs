@@ -57,7 +57,6 @@ async fn main() {
                 basic::claim_bonus(),
                 basic::voice_status(),
                 basic::info(),
-                basic::leaderboard(),
                 basic::buy_tickets(),
                 clips::submit_clip(),
                 clips::server_clips(),
@@ -107,10 +106,10 @@ async fn event_handler(
     _framework: poise::FrameworkContext<'_, data::Data, Error>,
     data: &data::Data,
 ) -> Result<(), Error> {
-    let gen_chat = env::var("GENERAL").expect("missing GENERAL id");
-    let bot_chat = env::var("BOT_CMD").expect("missing BOT_CMD id");
-    let sub_chat = env::var("SUBMIT").expect("missing SUBMIT id");
-    let prof_id = env::var("PROFESSOR").expect("missing PROFESSOR id");
+    let gen_chat = &data.gen_chat;
+    let bot_chat = &data.bot_chat;
+    let sub_chat = &data.sub_chat;
+    let prof_id = &data.prof_id;
 
     match event {
         serenity::FullEvent::Ready { data_about_bot, .. } => {
@@ -118,12 +117,12 @@ async fn event_handler(
         }
 
         serenity::FullEvent::Message { new_message } => {
-            if new_message.author.id.to_string() == prof_id {
+            if new_message.author.id.to_string() == *prof_id {
                 return Ok(());
             }
 
             let channel_id = new_message.channel_id.get().to_string();
-            if channel_id != gen_chat && channel_id != bot_chat && channel_id != sub_chat {
+            if channel_id != *gen_chat && channel_id != *bot_chat && channel_id != *sub_chat {
                 return Ok(());
             }
 
