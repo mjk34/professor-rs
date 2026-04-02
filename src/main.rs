@@ -107,10 +107,10 @@ async fn event_handler(
     _framework: poise::FrameworkContext<'_, data::Data, Error>,
     data: &data::Data,
 ) -> Result<(), Error> {
-    let gen_chat = &data.gen_chat;
-    let bot_chat = &data.bot_chat;
-    let sub_chat = &data.sub_chat;
-    let prof_id = &data.prof_id;
+    let gen_chat = env::var("GENERAL").expect("missing GENERAL id");
+    let bot_chat = env::var("BOT_CMD").expect("missing BOT_CMD id");
+    let sub_chat = env::var("SUBMIT").expect("missing SUBMIT id");
+    let prof_id = env::var("PROFESSOR").expect("missing PROFESSOR id");
 
     match event {
         serenity::FullEvent::Ready { data_about_bot, .. } => {
@@ -118,91 +118,16 @@ async fn event_handler(
         }
 
         serenity::FullEvent::Message { new_message } => {
-            if new_message.author.id.to_string() == prof_id.to_string() {
-                // println!("Message from Professor: {:?}\n", new_message);
+            if new_message.author.id.to_string() == prof_id {
                 return Ok(());
             }
-
-            let channel_id = new_message.channel_id.get().to_string();
-            if channel_id != gen_chat.to_string() && channel_id != bot_chat.to_string() && channel_id != sub_chat.to_string() {
-                // println!("Message not in gen-chat, bot-cmd, or submit-clips\n");
-                return Ok(());
-            }
-
-            let mut do_gpt = new_message.mentions_me(&ctx.http).await.unwrap_or(false);
-            let mut messages = vec![new_message.content.clone()];
-            let mut referenced_message = &new_message.referenced_message;
-
-            while let Some(msg) = referenced_message {
-                messages.push(msg.content.clone());
 
             let channel_id = new_message.channel_id.get().to_string();
             if channel_id != gen_chat && channel_id != bot_chat && channel_id != sub_chat {
                 return Ok(());
             }
 
-            let no_style = "<@".to_owned() + &prof_id + "> draw this";
-
-            // println!("{:?}", messages);
-            let doodle = messages[0].to_lowercase().contains("draw this");
-            let randomstyle = messages[0].to_lowercase() == no_style;
-
-            // while let Some(msg) = referenced_message {
-            //     messages.push(msg.content.clone());
-
-
-                let prompt = if randomstyle {
-                    if style < 0.50 {
-                        "simple small doodle of a ".to_owned() + &full_message_history
-                    } else {
-                        "cute pixelated art of a ".to_owned() + &full_message_history
-                    }
-                } else {
-                    full_message_history
-                };
-
-                let doodle_url = basic::gpt_doodle(data.gpt_key.clone(), prompt.clone()).await?;
-
-                new_message.reply(&ctx.http, doodle_url).await?;
-            }
-
-            if do_gpt && !doodle {
-                messages.reverse();
-                let full_message_history = messages.join("\n");
-                let prompt = if thread_rng().gen::<f64>() < 0.8 {
-                    full_message_history + "(make it simple and answer in a cute tone with minimal uwu emojis like a tsundere, dont write big paragraphs, keep it short)"
-                } else {
-                    full_message_history + "(make it simple and answer in a cute tone with murderous emojis like a yandere, dont write big paragraphs, keep it short)"
-                };
-
-                let mut tries = 0;
-                let mut reading;
-                loop {
-                    match basic::gpt_string(data.gpt_key.clone(), prompt.clone()).await {
-                        Ok(result) => {
-                            reading = result;
-                            break;
-                        }
-                        Err(e) => {
-                            tracing::warn!("An error occurred: {:?}, retrying...", e);
-                            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                            if tries > 3 {
-                                return Err(Box::new(e));
-                            }
-                        }
-                    }
-                    tries += 1;
-                }
-
-            // if do_gpt && doodle {
-            //     let doodle_url: String = gpt::generate_doodle(&mut messages, randomstyle).await;
-            //     new_message.reply(&ctx.http, doodle_url).await?;
-            // }
-
-            // if do_gpt && !doodle {
-            //     let reading: String = gpt::generate_text(&mut messages).await;
-            //     new_message.reply(&ctx.http, reading).await?;
-            // }
+            // GPT reply and doodle disabled until local LLM is ready
         }
 
         serenity::FullEvent::VoiceStateUpdate { old: _, new } => {

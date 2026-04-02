@@ -307,6 +307,8 @@ pub struct Data {
     pub bot_chat: String,
     pub sub_chat: String,
     pub prof_id: String,
+    pub bad_fortune: Vec<String>,
+    pub good_fortune: Vec<String>
 }
 
 impl Data {
@@ -393,6 +395,8 @@ impl Data {
             bot_chat,
             sub_chat,
             prof_id,
+            bad_fortune,
+            good_fortune
         }
     }
 }
