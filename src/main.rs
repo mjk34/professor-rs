@@ -23,6 +23,7 @@ async fn register(ctx: Context<'_>) -> Result<(), Error> {
 
 #[tokio::main]
 async fn main() {
+    tracing_subscriber::fmt::init();
     dotenv::dotenv().expect("Failed to read .env file");
     let token = env::var("DISCORD_TOKEN").expect("missing DISCORD_TOKEN");
     let data = data::Data::load();
@@ -248,7 +249,7 @@ fn background_task(
 
                     let user_data = users.get_mut(id);
                     if user_data.is_none() {
-                        return;
+                        continue;
                     }
                     let user_data = user_data.unwrap();
 
