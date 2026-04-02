@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::{env, fs};
 use tokio::sync::RwLock;
 
+// Constants
 pub const NUMBER_EMOJS: [&str; 10] = [
     "\u{0030}\u{FE0F}\u{20E3}",
     "\u{0031}\u{FE0F}\u{20E3}",
@@ -25,6 +26,7 @@ pub const EMBED_DEFAULT: Color = Color::new(16119285); // white - transition col
 pub const EMBED_CYAN: Color = Color::new(6943230); // cyan  - good finish color
 pub const EMBED_GOLD: Color = Color::GOLD; // gold - cred related color
 pub const EMBED_FAIL: Color = Color::RED; // red - absolute fails
+pub const EMBED_LEVEL: Color = Color::ORANGE; // orange - level/xp related color
 pub const EMBED_SUCCESS: Color = Color::new(65280); // green - major success
 pub const EMBED_ERROR: Color = Color::new(6053215); // grey - soft fails
 pub const EMBED_MOD: Color = Color::new(16749300); // pink - moderator commands
@@ -103,7 +105,7 @@ impl UserData {
 
     pub fn check_daily(&self) -> bool {
         let diff = Utc::now() - self.last_daily;
-        diff.num_hours() >= 24
+        diff.num_hours() >= 21
     }
 
     pub fn add_bonus(&mut self) {
@@ -175,7 +177,7 @@ impl UserData {
     }
 
     pub fn get_luck_score(&self) -> i32 {
-        self.rolls / self.daily_count
+        self.rolls / (self.daily_count + 1)
     }
 
     pub fn get_bonus(&self) -> i32 {
@@ -210,45 +212,31 @@ impl UserData {
         false
     }
 
-    // pub fn get_submit_index(&self, clip_id: usize) -> Option<usize> {
-    //     // cycles through self.submits, get the index
-    //     // associated with the clip id
-    //     if self.submits.len() <= 0 {
-    //         return None;
-    //     }
-    //     for i in 0..self.submits.len() {
-    //         if self.submits[i].id == clip_id {
-    //             return Some(i);
-    //         }
-    //     }
-    //     return None;
-    // }
-
     pub fn remove_submit(&mut self, submit_index: usize) -> bool {
         let res = self.submits.remove(submit_index);
         res.is_some()
     }
 
-    pub fn get_submissions(&self, show_score: bool) -> Vec<String> {
+    pub fn get_submissions(&self, show_score: bool, show_icon: bool) -> Vec<String> {
         let mut submissions: Vec<String> = vec![];
         for (id, clip) in self.submits.iter().enumerate() {
             if let Some(clip) = clip {
                 let score = if let Some(s) = clip.rating {
                     format!("[{}/5]", s)
                 } else {
-                    "".to_string()
+                    "[-/5]".to_string()
                 };
                 let clip_string = format!(
-                    "{}{}- {} [{}]({})",
-                    NUMBER_EMOJS[id],
+                    "{} {} **[{}]({})** ({})",
+                    if show_icon { NUMBER_EMOJS[id] } else { "" },
                     if show_score {
                         format!(" {} ", score)
                     } else {
                         "".to_string()
                     },
-                    clip.date.date_naive(),
                     clip.title,
-                    clip.link
+                    clip.link,
+                    clip.date.format("%m/%d")
                 );
                 submissions.push(clip_string);
             }
@@ -314,7 +302,6 @@ pub struct Data {
     pub ponder: Vec<String>,
     pub pong: Vec<String>,
     pub d20f: Vec<String>,
-    pub gpt_key: String,
     pub mod_id: RoleId,
     pub gen_chat: String,
     pub bot_chat: String,
@@ -341,7 +328,7 @@ impl Data {
             .embed(
                 serenity::CreateEmbed::new()
                     .title("Account Created!")
-                    .description(format!("Welcome <@{}>! You are now registered with ProfessorBot, feel free to checkout Professors Commands in https://discord.com/channels/1236349546003566642/1236351799536123946", ctx.author().id))
+                    .description(format!("Welcome <@{}>! You are now registered with ProfessorBot, feel free to checkout Professors Commands in https://discord.com/channels/859993171156140061/860013281165967380", ctx.author().id))
                     .image(
                         "https://cdn.discordapp.com/attachments/1260223476766343188/1262191655763578881/anime-girl-okay-sign-b5zlye5h8mnjhdg2.gif?ex=6695b315&is=66946195&hm=215e00c0ee066c4a36a8c837f7b24570d2736dae19713e220702114330667f6c&",
                     )
@@ -355,19 +342,7 @@ impl Data {
 
     /// Attempts to save the data to a file
     pub async fn save(&self) {
-        let users = Arc::clone(&self.users);
-        let users_save = DashMap::new();
-
-        for x in users.iter() {
-            let (id, u) = x.pair();
-            let u = u.read().await;
-            users_save.insert(*id, u.clone());
-        }
-
-        let users_save = SaveData { users: users_save };
-
-        let encoded = serde_json::to_string(&users_save).unwrap();
-        fs::write("data.json", encoded).expect("Failed to write binary save file");
+        save_users(&self.users).await;
     }
 
     /// Attempts to load the Data from a file, otherwise return a default
@@ -390,7 +365,9 @@ impl Data {
         let pong = read_lines("reference/pong.txt");
         let d20f = read_lines("reference/d20.txt");
 
-        let gpt_key = env::var("API_KEY").expect("missing GPT API_KEY");
+        // Lame static fortunes until we get local LLM up to make funny ones
+        let good_fortune = read_lines("reference/good_fortunes.txt");
+        let bad_fortune = read_lines("reference/bad_fortunes.txt");
 
         let mod_id = RoleId::new(
             env::var("MOD_ID")
@@ -411,7 +388,6 @@ impl Data {
             ponder,
             pong,
             d20f,
-            gpt_key,
             mod_id,
             gen_chat,
             bot_chat,
@@ -419,6 +395,23 @@ impl Data {
             prof_id,
         }
     }
+}
+
+pub async fn save_users(
+    users: &Arc<DashMap<serenity::UserId, Arc<RwLock<UserData>>>>,
+) {
+    let users_save = DashMap::new();
+
+    for x in users.iter() {
+        let (id, u) = x.pair();
+        let u = u.read().await;
+        users_save.insert(*id, u.clone());
+    }
+
+    let users_save = SaveData { users: users_save };
+
+    let encoded = serde_json::to_string(&users_save).unwrap();
+    fs::write("data.json", encoded).expect("Failed to write binary save file");
 }
 
 fn read_lines(filename: &str) -> Vec<String> {

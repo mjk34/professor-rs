@@ -4,21 +4,25 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-poise = {version = "0.6.1", features=["cache", "collector"]}
-#poise = { path = "../poise-0.6.1" }
-#poise = {git = "https://github.com/kangalioo/poise", features=["collector"]}
-
-tokio = { version ="1.4.0", features = ["rt-multi-thread", "macros"] }
+poise = { version = "0.6.1", features = ["cache", "collector"] }
+tokio = { version = "1.39.3", features = ["rt-multi-thread", "macros"] }
 
 tracing = "0.1.37"
 tracing-subscriber = "0.3"
 dotenv = "0.15.0"
 chrono = { version = "0.4.31", features = ["serde"] }
 serde = { version = "*", features = ["rc"] }
-serde_json = "1.0"
-rand = "*"
+serde_json = "1.0.127"
+rand = "0.8"
 
-openai-api-rs = "5.0.3"
-regex = "1"
+openai-api-rs = "5.0.6"
+regex = "1.10.6"
 
 dashmap = { version = "6.0.1", features = ["serde"] }
+
+openssl-sys = "*"
+
+[features]
+# Force openssl-sys to staticly link in the openssl library. Necessary when
+# cross compiling to x86_64-unknown-linux-musl.
+vendored = ["openssl-sys/vendored"]

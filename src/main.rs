@@ -3,10 +3,10 @@ mod clips;
 mod data;
 mod helper;
 mod mods;
+mod reminder;
 
 use dashmap::DashMap;
 use data::{UserData, VoiceUser};
-use rand::{thread_rng, Rng};
 use std::{env, sync::Arc};
 use tokio::sync::RwLock;
 
@@ -75,12 +75,13 @@ async fn main() {
             },
             ..Default::default()
         })
-        .setup(|_ctx, _ready, _framework| {
+        .setup(|ctx, _ready, _framework| {
+            let http = ctx.http.clone();
             Box::pin(async move {
                 let users = data.users.clone();
                 let voice_users = data.voice_users.clone();
-                background_task(users, voice_users);
-                // poise::builtins::register_globally(ctx, &framework.options().commands).await?;
+                background_task(users.clone(), voice_users);
+                maintenance_task(users, http);
                 Ok(data)
             })
         })
@@ -101,7 +102,7 @@ async fn main() {
 }
 
 async fn event_handler(
-    ctx: &serenity::Context,
+    _ctx: &serenity::Context,
     event: &serenity::FullEvent,
     _framework: poise::FrameworkContext<'_, data::Data, Error>,
     data: &data::Data,
@@ -115,11 +116,7 @@ async fn event_handler(
         serenity::FullEvent::Ready { data_about_bot, .. } => {
             tracing::info!("Logged in as {}", data_about_bot.user.name);
         }
-        // Check if bot
-        // Recursively check for replied message (this does not work... only works with depth=2.. API issue?)
-        // Check if pinging @bot
-        // Send prompt to GPT
-        // Print
+
         serenity::FullEvent::Message { new_message } => {
             if new_message.author.id.to_string() == prof_id.to_string() {
                 // println!("Message from Professor: {:?}\n", new_message);
@@ -139,11 +136,9 @@ async fn event_handler(
             while let Some(msg) = referenced_message {
                 messages.push(msg.content.clone());
 
-                if msg.mentions_me(&ctx.http).await.unwrap_or(false) {
-                    do_gpt = true;
-                    break;
-                }
-                referenced_message = &msg.referenced_message;
+            let channel_id = new_message.channel_id.get().to_string();
+            if channel_id != gen_chat && channel_id != bot_chat && channel_id != sub_chat {
+                return Ok(());
             }
 
             let no_style = "<@".to_owned() + &prof_id + "> draw this";
@@ -152,10 +147,8 @@ async fn event_handler(
             let doodle = messages[0].to_lowercase().contains("draw this");
             let randomstyle = messages[0].to_lowercase() == no_style;
 
-            if do_gpt && doodle {
-                messages.reverse();
-                let full_message_history = messages.join("\n");
-                let style = thread_rng().gen_range(0.0..=1.0);
+            // while let Some(msg) = referenced_message {
+            //     messages.push(msg.content.clone());
 
 
                 let prompt = if randomstyle {
@@ -201,11 +194,17 @@ async fn event_handler(
                     tries += 1;
                 }
 
-                reading = reading.replace("nn", "\n");
+            // if do_gpt && doodle {
+            //     let doodle_url: String = gpt::generate_doodle(&mut messages, randomstyle).await;
+            //     new_message.reply(&ctx.http, doodle_url).await?;
+            // }
 
-                new_message.reply(&ctx.http, reading).await?;
-            }
+            // if do_gpt && !doodle {
+            //     let reading: String = gpt::generate_text(&mut messages).await;
+            //     new_message.reply(&ctx.http, reading).await?;
+            // }
         }
+
         serenity::FullEvent::VoiceStateUpdate { old: _, new } => {
             let voice_users = &data.voice_users;
 
@@ -274,6 +273,19 @@ fn background_task(
             }
             // Sleep for a while before the next iteration
             tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+        }
+    });
+}
+
+fn maintenance_task(
+    users: Arc<DashMap<serenity::UserId, Arc<RwLock<UserData>>>>,
+    http: Arc<serenity::Http>,
+) {
+    tokio::spawn(async move {
+        loop {
+            reminder::check_birthday(&http).await;
+            data::save_users(&users).await;
+            tokio::time::sleep(std::time::Duration::from_secs(60 * 60 * 12)).await;
         }
     });
 }

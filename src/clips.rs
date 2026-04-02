@@ -62,8 +62,8 @@ pub async fn submit_clip(
             poise::CreateReply::default().embed(
                 serenity::CreateEmbed::default()
                     .title("Submit Clip")
-                    .thumbnail("https://cdn.discordapp.com/attachments/1196582162057662484/1197004718631833650/tenor.gif?ex=65b9b084&is=65a73b84&hm=0368979e5bdf0c258f6b344ec2b79826459b3ec4c937374e05ec77f131adf37f&")
                     .description("Invalid link - Link must either be youtube or medal")
+                    .thumbnail("https://cdn.discordapp.com/attachments/1196582162057662484/1197004718631833650/tenor.gif?ex=65b9b084&is=65a73b84&hm=0368979e5bdf0c258f6b344ec2b79826459b3ec4c937374e05ec77f131adf37f&")
                     .color(data::EMBED_ERROR)
                     .footer(serenity::CreateEmbedFooter::new(
                         "@~ powered by UwUntu & RustyBamboo",
@@ -96,8 +96,8 @@ pub async fn submit_clip(
                 serenity::CreateEmbed::default()
                     .title("Submit Clip")
                     .thumbnail(&avatar)
-                    .image("https://cdn.discordapp.com/attachments/1196582162057662484/1205354794588307456/tenor_1.gif?ex=65d81121&is=65c59c21&hm=35114062e5a4516b69da081842189520df9b846bce5b8547f83ad39c91c2d1cd&")
                     .description("Max clips reached...")
+                    .image("https://cdn.discordapp.com/attachments/1196582162057662484/1205354794588307456/tenor_1.gif?ex=65d81121&is=65c59c21&hm=35114062e5a4516b69da081842189520df9b846bce5b8547f83ad39c91c2d1cd&")
                     .color(data::EMBED_FAIL)
                     .footer(serenity::CreateEmbedFooter::new(
                         "@~ powered by UwUntu & RustyBamboo",
@@ -133,7 +133,6 @@ pub async fn server_clips(ctx: Context<'_>) -> Result<(), Error> {
     };
 
     let icon_url = guild.icon_url().unwrap_or_default();
-    let banner_url = guild.banner_url().unwrap_or_default();
     let data = &ctx.data().users;
 
     let mut all_clips = Vec::new();
@@ -148,17 +147,19 @@ pub async fn server_clips(ctx: Context<'_>) -> Result<(), Error> {
             }
         }
         let author = id.to_user(ctx).await.unwrap();
-        let clips = u.get_submissions(true);
+        let clips = u.get_submissions(true, false);
 
         if !clips.is_empty() {
             desc += &format!(
                 "\n**{}:**\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n",
-                author.name
+                author.name.replace('_', "")
             );
             desc += &clips.join("\n ");
             desc += "\n";
         }
     }
+
+    println!("{:}", &desc);
 
     if all_clips.is_empty() {
         ctx.send(
@@ -192,24 +193,37 @@ pub async fn server_clips(ctx: Context<'_>) -> Result<(), Error> {
     });
 
     let top_ten = rated_clips.iter().take(10);
+    let top_len = &top_ten.len();
     let mut top_ten_desc = String::new();
+    top_ten_desc += &format!(
+        "\n**{}:** \n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n",
+        "Top Rated Clips"
+    );
+
     for (id, c) in top_ten {
         let author = id.to_user(ctx).await.unwrap();
         let rating = c.rating.unwrap();
 
         top_ten_desc += &format!(
-            "**{}** - [{}/5]\n [{}]({})\n",
-            author.name, rating, c.title, c.link
+            "[{}/5] **[{}]({})** - {}\n",
+            rating,
+            c.title,
+            c.link,
+            author.name.replace('_', "")
         );
     }
 
-    let desc = top_ten_desc + &desc;
+    if *top_len > 0 {
+        desc = top_ten_desc + "-\n" + &desc;
+    }
+
+    println!("{:}", &desc);
+
     ctx.send(
         poise::CreateReply::default().embed(
             serenity::CreateEmbed::default()
                 .title("Server Clips")
                 .thumbnail(&icon_url)
-                .image(&banner_url)
                 .description(desc)
                 .color(data::EMBED_MOD)
                 .footer(serenity::CreateEmbedFooter::new(
@@ -233,7 +247,7 @@ pub async fn my_clips(ctx: Context<'_>) -> Result<(), Error> {
     let u = data.get(&id).unwrap();
     let clips = u.read().await;
 
-    let desc = clips.get_submissions(false).join("\n");
+    let desc = clips.get_submissions(false, true).join("\n");
 
     if clips.submits.is_empty() {
         ctx.send(
@@ -394,8 +408,8 @@ pub async fn next_clip(ctx: Context<'_>) -> Result<(), Error> {
                 serenity::CreateEmbed::default()
                     .title("Next Clip")
                     .description("No more clips!")
-                    .thumbnail(&icon_url)
                     .image("https://cdn.discordapp.com/attachments/1196582162057662484/1205354793246138408/tenor_4.gif?ex=65d81121&is=65c59c21&hm=752fa8c3dbc4ef91ec632f3988261c0e7628fb6ca54170ffdd6439a5de9a3a9b&")
+                    .thumbnail(&icon_url)
                     .colour(data::EMBED_FAIL)
                     .footer(serenity::CreateEmbedFooter::new(
                         "@~ powered by UwUntu & RustyBamboo",
@@ -500,8 +514,8 @@ pub async fn next_clip(ctx: Context<'_>) -> Result<(), Error> {
                                         "Final Score: **{}**",
                                         score.load(Ordering::Relaxed)
                                     ))
-                                    .thumbnail(&icon_url)
                                     .image("https://cdn.discordapp.com/attachments/1196582162057662484/1205354792621309972/tenor_5.gif?ex=65d81120&is=65c59c20&hm=b7661397c96231060492b909d1d7f2025bcfa91c166618611f612e95551be35a&")
+                                    .thumbnail(&icon_url)
                                     .colour(data::EMBED_MOD)
                                     .footer(serenity::CreateEmbedFooter::new(
                                         "@~ powered by UwUntu & RustyBamboo",
