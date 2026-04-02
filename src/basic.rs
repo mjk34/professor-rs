@@ -60,6 +60,7 @@ pub async fn ping(ctx: Context<'_>) -> Result<(), Error> {
 }
 
 /// use gpt-3.5-turbo to generate fun responses to user prompts
+/// TODO fix this to extend to another llm currently not used
 pub async fn gpt_string(api_key: String, prompt: String) -> Result<String, APIError> {
     let client = OpenAIClient::new(api_key.to_string());
 
@@ -99,7 +100,7 @@ pub async fn gpt_doodle(api_key: String, prompt: String) -> Result<String, APIEr
     Ok(result.data.first().unwrap().url.to_string())
 }
 
-/// claim your daily, 500xp, and 2 wishes (Once a day)
+/// claim your daily, 500xp (Once a day)
 #[poise::command(slash_command)]
 pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
     let user = ctx.author();
@@ -210,7 +211,7 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
                 break;
             }
             Err(e) => {
-                println!("An error occurred: {:?}, retrying...", e);
+                tracing::warn!("An error occurred: {:?}, retrying...", e);
                 tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                 if tries > 5 {
                     return Err(Box::new(e));
@@ -222,7 +223,7 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
 
     // final message with updated dice roll, creds earned and fortune reading
     let desc = format!(
-        "{} **{}{}** creds.\nYou needed a **{}** to pass, you rolled a **{}**.\n\n{:?}",
+        "{} **{}{}** creds.\nYou needed a **{}** to pass, you rolled a **{}**.\n\n{}",
         roll_str, roll_context, total, check, d20, reading,
     );
 
@@ -356,7 +357,7 @@ pub async fn claim_bonus(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-/// check how many creds, wishes, or submits you have
+/// check your creds, tickets, and submits
 #[poise::command(slash_command)]
 pub async fn wallet(ctx: Context<'_>) -> Result<(), Error> {
     let user = ctx.author();
@@ -365,7 +366,7 @@ pub async fn wallet(ctx: Context<'_>) -> Result<(), Error> {
     let user_data = u.read().await;
 
     // get user info
-    let luck: String = if user_data.get_luck() == "" {
+    let luck: String = if user_data.get_luck().is_empty() {
         "N/A".to_string()
     } else {
         user_data.get_luck()
@@ -410,7 +411,6 @@ pub async fn wallet(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-//TODO create buttons for various sorts, creds/pokedex/tickets
 /// show the top wealthiest users in the server
 #[poise::command(slash_command)]
 pub async fn leaderboard(
@@ -455,7 +455,7 @@ pub async fn leaderboard(
 
     let total_pages = (&info.len()) / 10 + 1;
 
-    fn get_learderboard(
+    fn get_leaderboard(
         info: &[(UserId, i32, String, String)],
         display: &Option<String>,
         fortune: &[Option<String>],
@@ -520,7 +520,7 @@ pub async fn leaderboard(
         .avatar_url()
         .unwrap_or_default();
 
-    let leaderboard_text = get_learderboard(&info, &display, &fortune, &level, 0);
+    let leaderboard_text = get_leaderboard(&info, &display, &fortune, &level, 0);
 
     let embed = serenity::CreateEmbed::new()
         .title("Leaderboard")
@@ -577,7 +577,7 @@ pub async fn leaderboard(
                 };
 
                 let leaderboard_text =
-                    get_learderboard(&info, &display, &fortune, &level, current_page);
+                    get_leaderboard(&info, &display, &fortune, &level, current_page);
 
                 reaction
                     .create_response(&ctx, serenity::CreateInteractionResponse::Acknowledge)
@@ -637,7 +637,6 @@ pub async fn buy_tickets(ctx: Context<'_>) -> Result<(), Error> {
         tkcount += 1;
     }
 
-    println!("{}", tkcount);
 
     let mut desc = format!(
         "Welcome to the Shop, buy tickets here to participate in the Server's Battle Pass Raffle! (Total: {})\n\n", 

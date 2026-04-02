@@ -1,7 +1,6 @@
 mod basic;
 mod clips;
 mod data;
-mod event;
 mod helper;
 mod mods;
 
@@ -63,14 +62,6 @@ async fn main() {
                 clips::server_clips(),
                 clips::my_clips(),
                 clips::next_clip(),
-                // event::search_pokemon(),
-                // event::buddy(),
-                // event::team(),
-                // event::switch_buddy(),
-                // event::choose_starter(),
-                // event::wild_encounter(),
-                // event::trainer_battle(),
-                // event::pre_populate(),
                 mods::give_creds(),
                 mods::take_creds(),
             ],
@@ -114,14 +105,14 @@ async fn event_handler(
     _framework: poise::FrameworkContext<'_, data::Data, Error>,
     data: &data::Data,
 ) -> Result<(), Error> {
-    let gen_chat = env::var("GENERAL").expect("missing GENERAL id");
-    let bot_chat = env::var("BOT_CMD").expect("missing BOT_CMD id");
-    let sub_chat = env::var("SUBMIT").expect("missing SUBMIT id");
-    let prof_id = env::var("PROFESSOR").expect("missing PROFESSOR id");
+    let gen_chat = &data.gen_chat;
+    let bot_chat = &data.bot_chat;
+    let sub_chat = &data.sub_chat;
+    let prof_id = &data.prof_id;
 
     match event {
         serenity::FullEvent::Ready { data_about_bot, .. } => {
-            println!("Logged in as {}\n\n", data_about_bot.user.name);
+            tracing::info!("Logged in as {}", data_about_bot.user.name);
         }
         // Check if bot
         // Recursively check for replied message (this does not work... only works with depth=2.. API issue?)
@@ -129,13 +120,13 @@ async fn event_handler(
         // Send prompt to GPT
         // Print
         serenity::FullEvent::Message { new_message } => {
-            if new_message.author.id.to_string() == prof_id {
+            if new_message.author.id.to_string() == prof_id.to_string() {
                 // println!("Message from Professor: {:?}\n", new_message);
                 return Ok(());
             }
 
             let channel_id = new_message.channel_id.get().to_string();
-            if channel_id != gen_chat && channel_id != bot_chat && channel_id != sub_chat {
+            if channel_id != gen_chat.to_string() && channel_id != bot_chat.to_string() && channel_id != sub_chat.to_string() {
                 // println!("Message not in gen-chat, bot-cmd, or submit-clips\n");
                 return Ok(());
             }
@@ -165,7 +156,6 @@ async fn event_handler(
                 let full_message_history = messages.join("\n");
                 let style = thread_rng().gen_range(0.0..=1.0);
 
-                println!("randomstyle?: {:?}", randomstyle);
 
                 let prompt = if randomstyle {
                     if style < 0.50 {
@@ -200,7 +190,7 @@ async fn event_handler(
                             break;
                         }
                         Err(e) => {
-                            println!("An error occurred: {:?}, retrying...", e);
+                            tracing::warn!("An error occurred: {:?}, retrying...", e);
                             tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                             if tries > 3 {
                                 return Err(Box::new(e));
