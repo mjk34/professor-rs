@@ -8,8 +8,9 @@ poise = { version = "0.6.1", features = ["cache", "collector"] }
 tokio = { version = "1.39.3", features = ["rt-multi-thread", "macros"] }
 
 tracing = "0.1.37"
+tracing-subscriber = "0.3"
 dotenv = "0.15.0"
-chrono = "0.4.31"
+chrono = { version = "0.4.31", features = ["serde"] }
 serde = { version = "*", features = ["rc"] }
 serde_json = "1.0.127"
 rand = "0.8"

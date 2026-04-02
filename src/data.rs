@@ -109,11 +109,7 @@ impl UserData {
     }
 
     pub fn add_bonus(&mut self) {
-        if self.bonus_count == 3 {
-            self.bonus_count = 3;
-        } else {
-            self.bonus_count += 1;
-        }
+        self.bonus_count = (self.bonus_count + 1).min(3);
     }
 
     pub fn reset_bonus(&mut self) {
@@ -307,8 +303,10 @@ pub struct Data {
     pub pong: Vec<String>,
     pub d20f: Vec<String>,
     pub mod_id: RoleId,
-    pub good_fortune: Vec<String>,
-    pub bad_fortune: Vec<String>,
+    pub gen_chat: String,
+    pub bot_chat: String,
+    pub sub_chat: String,
+    pub prof_id: String,
 }
 
 impl Data {
@@ -378,6 +376,11 @@ impl Data {
                 .unwrap(),
         );
 
+        let gen_chat = env::var("GENERAL").expect("missing GENERAL id");
+        let bot_chat = env::var("BOT_CMD").expect("missing BOT_CMD id");
+        let sub_chat = env::var("SUBMIT").expect("missing SUBMIT id");
+        let prof_id = env::var("PROFESSOR").expect("missing PROFESSOR id");
+
         Data {
             users,
             voice_users: Arc::new(DashMap::new()),
@@ -386,8 +389,10 @@ impl Data {
             pong,
             d20f,
             mod_id,
-            good_fortune,
-            bad_fortune,
+            gen_chat,
+            bot_chat,
+            sub_chat,
+            prof_id,
         }
     }
 }
@@ -416,6 +421,6 @@ fn read_lines(filename: &str) -> Vec<String> {
         .map(String::from)
         .collect();
 
-    // println!("{}: loaded {} lines", filename, lines.len());
+    tracing::info!("{}: loaded {} lines", filename, lines.len());
     lines
 }

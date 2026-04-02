@@ -54,6 +54,47 @@ pub async fn ping(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
+/// use gpt-3.5-turbo to generate fun responses to user prompts
+/// TODO fix this to extend to another llm currently not used
+pub async fn gpt_string(api_key: String, prompt: String) -> Result<String, APIError> {
+    let client = OpenAIClient::new(api_key.to_string());
+
+    let req = ChatCompletionRequest::new(
+        GPT4_1106_PREVIEW.to_string(),
+        vec![chat_completion::ChatCompletionMessage {
+            role: chat_completion::MessageRole::user,
+            content: chat_completion::Content::Text(prompt),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        }],
+    );
+
+    let result = client.chat_completion(req).await?;
+    let desc = format!(
+        "{:?}",
+        result.choices[0]
+            .message
+            .content
+            .as_ref()
+            .unwrap()
+            .to_string()
+    );
+
+    Ok(desc.replace(['\"', '\\'], ""))
+}
+
+pub async fn gpt_doodle(api_key: String, prompt: String) -> Result<String, APIError> {
+    let client = OpenAIClient::new(api_key.to_string());
+
+    let req = ImageGenerationRequest::new(prompt).model(DALL_E_3.to_string());
+    let result = client.image_generation(req).await?;
+
+    // println!("{:?}", result.data.first().unwrap().url);
+
+    Ok(result.data.first().unwrap().url.to_string())
+}
+
 /// claim your daily, 500xp (Once a day)
 #[poise::command(slash_command)]
 pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
@@ -158,9 +199,28 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
         ctx.data().good_fortune.choose(&mut thread_rng()).unwrap()
     };
 
+    let mut tries = 0;
+    let reading;
+    loop {
+        match gpt_string(ctx.data().gpt_key.clone(), prompt.to_string()).await {
+            Ok(result) => {
+                reading = result;
+                break;
+            }
+            Err(e) => {
+                tracing::warn!("An error occurred: {:?}, retrying...", e);
+                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                if tries > 5 {
+                    return Err(Box::new(e));
+                }
+            }
+        }
+        tries += 1;
+    }
+
     // final message with updated dice roll, creds earned and fortune reading
     let desc = format!(
-        "{} **{}{}** creds.\nYou needed a **{}** to pass, you rolled a **{}**.\n\n{:?}",
+        "{} **{}{}** creds.\nYou needed a **{}** to pass, you rolled a **{}**.\n\n{}",
         roll_str, roll_context, total, check, d20, reading,
     );
 
@@ -342,7 +402,7 @@ pub async fn claim_bonus(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-/// check how many creds, wishes, or submits you have
+/// check your creds, tickets, and submits
 #[poise::command(slash_command)]
 pub async fn wallet(ctx: Context<'_>) -> Result<(), Error> {
     let user = ctx.author();
@@ -351,7 +411,7 @@ pub async fn wallet(ctx: Context<'_>) -> Result<(), Error> {
     let user_data = u.read().await;
 
     // get user info
-    let luck: String = if user_data.get_luck() == "" {
+    let luck: String = if user_data.get_luck().is_empty() {
         "N/A".to_string()
     } else {
         user_data.get_luck()
@@ -396,7 +456,6 @@ pub async fn wallet(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-//TODO create buttons for various sorts, creds/pokedex/tickets
 /// show the top wealthiest users in the server
 #[poise::command(slash_command)]
 pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
@@ -418,6 +477,51 @@ pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
         fn xp_by_level(n: i32) -> i32 {
             (1..n).map(|i| 500 + (i - 1) * 80).sum()
         }
+    }
+    info.sort_by(|a, b| b.1.cmp(&a.1));
+
+    let total_pages = (&info.len()) / 10 + 1;
+
+    fn get_leaderboard(
+        info: &[(UserId, i32, String, String)],
+        display: &Option<String>,
+        fortune: &[Option<String>],
+        level: &[Option<String>],
+        start: usize,
+    ) -> String {
+        let mut leaderboard_text = String::new();
+        leaderboard_text.push_str("﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n");
+
+        for (index, (_id, u, s, user_name)) in info.iter().enumerate().skip(start).take(10) {
+            let rank = if index == 0 {
+                if fortune.contains(display) || level.contains(display) {
+                    format!(
+                        "\u{3000}** #{} ** \u{3000}\u{3000} **{}** \u{3000}\u{3000}~({})\n",
+                        index + 1,
+                        user_name,
+                        s
+                    )
+                } else {
+                    format!(
+                        "\u{3000}** #{} ** \u{3000}\u{3000} **{}** \u{3000}\u{3000}~({})\n",
+                        index + 1,
+                        user_name,
+                        u
+                    )
+                }
+            } else if index > 9 {
+                format!(
+                    "\u{3000}** #{} ** \u{3000}\u{2000} *{}*\n",
+                    index + 1,
+                    user_name,
+                )
+            } else {
+                format!(
+                    "\u{3000}** #{} ** \u{3000}\u{3000} *{}*\n",
+                    index + 1,
+                    user_name,
+                )
+            };
 
         if u.get_level() > 0 {
             total_xp += xp_by_level(u.get_level())
@@ -467,7 +571,7 @@ pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
         .avatar_url()
         .unwrap_or_default();
 
-    let leaderboard_text = get_leaderboard(&all_creds, "Creds".to_string(), 0);
+    let leaderboard_text = get_leaderboard(&info, &display, &fortune, &level, 0);
 
     let embed = serenity::CreateEmbed::new()
         .title("Leaderboard")
@@ -535,8 +639,8 @@ pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
                     }
                 }
 
-                _ => (),
-            };
+                let leaderboard_text =
+                    get_leaderboard(&info, &display, &fortune, &level, current_page);
 
             let leaderboard_text = get_leaderboard(&info, sort.clone(), current_page);
 
@@ -605,7 +709,6 @@ pub async fn buy_tickets(ctx: Context<'_>) -> Result<(), Error> {
         tkcount += 1;
     }
 
-    println!("{}", tkcount);
 
     let mut desc = format!(
         "Welcome to the Shop, buy tickets here to participate in the Server's Battle Pass Raffle! (Total: {})\n\n",

@@ -1,7 +1,6 @@
 mod basic;
 mod clips;
 mod data;
-//mod gpt;
 mod helper;
 mod mods;
 mod reminder;
@@ -24,6 +23,7 @@ async fn register(ctx: Context<'_>) -> Result<(), Error> {
 
 #[tokio::main]
 async fn main() {
+    tracing_subscriber::fmt::init();
     dotenv::dotenv().expect("Failed to read .env file");
     let token = env::var("DISCORD_TOKEN").expect("missing DISCORD_TOKEN");
     let data = data::Data::load();
@@ -91,7 +91,7 @@ async fn main() {
         .activity(serenity::ActivityData {
             name: "Coding Rust".to_string(),
             kind: serenity::ActivityType::Custom,
-            state: Some("2026 Edit ONG".to_string()),
+            state: Some("Phase1 - Testing".to_string()),
             url: None,
         })
         .status(serenity::OnlineStatus::Online)
@@ -107,46 +107,92 @@ async fn event_handler(
     _framework: poise::FrameworkContext<'_, data::Data, Error>,
     data: &data::Data,
 ) -> Result<(), Error> {
-    let gen_chat = env::var("GENERAL").expect("Failed to load GENERAL channel id");
-    let bot_chat = env::var("BOT_CMD").expect("Failed to load BOT_CMD channel id");
-    let sub_chat = env::var("SUBMIT").expect("Failed to load SUBMIT channel id");
-    let prof_bid = env::var("PROFESSOR").expect("Failed to load PROFESSOR bot id");
+    let gen_chat = &data.gen_chat;
+    let bot_chat = &data.bot_chat;
+    let sub_chat = &data.sub_chat;
+    let prof_id = &data.prof_id;
 
     match event {
         serenity::FullEvent::Ready { data_about_bot, .. } => {
-            println!("Logged in as {}\n\n", data_about_bot.user.name);
+            tracing::info!("Logged in as {}", data_about_bot.user.name);
         }
 
         serenity::FullEvent::Message { new_message } => {
-            if new_message.author.id.to_string() == prof_bid {
+            if new_message.author.id.to_string() == prof_id.to_string() {
+                // println!("Message from Professor: {:?}\n", new_message);
                 return Ok(());
             }
+
+            let channel_id = new_message.channel_id.get().to_string();
+            if channel_id != gen_chat.to_string() && channel_id != bot_chat.to_string() && channel_id != sub_chat.to_string() {
+                // println!("Message not in gen-chat, bot-cmd, or submit-clips\n");
+                return Ok(());
+            }
+
+            let mut do_gpt = new_message.mentions_me(&ctx.http).await.unwrap_or(false);
+            let mut messages = vec![new_message.content.clone()];
+            let mut referenced_message = &new_message.referenced_message;
+
+            while let Some(msg) = referenced_message {
+                messages.push(msg.content.clone());
 
             let channel_id = new_message.channel_id.get().to_string();
             if channel_id != gen_chat && channel_id != bot_chat && channel_id != sub_chat {
                 return Ok(());
             }
 
-            // Professor GPT reply and Dalle draw
-            // let mut do_gpt = new_message.mentions_me(&ctx.http).await.unwrap_or(false);
-            // let mut messages = vec![new_message.content.clone()];
-            // let mut referenced_message = &new_message.referenced_message;
+            let no_style = "<@".to_owned() + &prof_id + "> draw this";
 
-            // // println!("{:?}", messages);
+            // println!("{:?}", messages);
+            let doodle = messages[0].to_lowercase().contains("draw this");
+            let randomstyle = messages[0].to_lowercase() == no_style;
 
             // while let Some(msg) = referenced_message {
             //     messages.push(msg.content.clone());
 
-            //     if msg.mentions_me(&ctx.http).await.unwrap_or(false) {
-            //         do_gpt = true;
-            //         break;
-            //     }
-            //     referenced_message = &msg.referenced_message;
-            // }
 
-            // let doodle = messages[0].to_lowercase().contains("draw")
-            //     || messages[0].to_lowercase().contains("doodle");
-            // let randomstyle = messages[0].to_lowercase().contains("style");
+                let prompt = if randomstyle {
+                    if style < 0.50 {
+                        "simple small doodle of a ".to_owned() + &full_message_history
+                    } else {
+                        "cute pixelated art of a ".to_owned() + &full_message_history
+                    }
+                } else {
+                    full_message_history
+                };
+
+                let doodle_url = basic::gpt_doodle(data.gpt_key.clone(), prompt.clone()).await?;
+
+                new_message.reply(&ctx.http, doodle_url).await?;
+            }
+
+            if do_gpt && !doodle {
+                messages.reverse();
+                let full_message_history = messages.join("\n");
+                let prompt = if thread_rng().gen::<f64>() < 0.8 {
+                    full_message_history + "(make it simple and answer in a cute tone with minimal uwu emojis like a tsundere, dont write big paragraphs, keep it short)"
+                } else {
+                    full_message_history + "(make it simple and answer in a cute tone with murderous emojis like a yandere, dont write big paragraphs, keep it short)"
+                };
+
+                let mut tries = 0;
+                let mut reading;
+                loop {
+                    match basic::gpt_string(data.gpt_key.clone(), prompt.clone()).await {
+                        Ok(result) => {
+                            reading = result;
+                            break;
+                        }
+                        Err(e) => {
+                            tracing::warn!("An error occurred: {:?}, retrying...", e);
+                            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                            if tries > 3 {
+                                return Err(Box::new(e));
+                            }
+                        }
+                    }
+                    tries += 1;
+                }
 
             // if do_gpt && doodle {
             //     let doodle_url: String = gpt::generate_doodle(&mut messages, randomstyle).await;
@@ -202,7 +248,7 @@ fn background_task(
 
                     let user_data = users.get_mut(id);
                     if user_data.is_none() {
-                        return;
+                        continue;
                     }
                     let user_data = user_data.unwrap();
 

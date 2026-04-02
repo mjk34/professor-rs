@@ -19,9 +19,15 @@ use rand::thread_rng;
 use regex::Regex;
 use std::env;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 use tokio::sync::RwLock;
+
+static YOUTUBE_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(https?://)?(www\.)?(youtube\.com/watch\?v=|youtu\.be/).+").unwrap()
+});
+static MEDAL_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"https?://medal\.tv/clips/.+").unwrap());
 
 pub async fn check_mod(ctx: Context<'_>) -> Result<bool, Error> {
     let mod_id = ctx.data().mod_id;
@@ -35,11 +41,7 @@ pub async fn check_mod(ctx: Context<'_>) -> Result<bool, Error> {
 }
 
 fn is_youtube_or_medal_url(url: &str) -> bool {
-    let youtube_regex =
-        Regex::new(r"(https?://)?(www\.)?(youtube\.com/watch\?v=|youtu\.be/).+").unwrap();
-    let medal_regex = Regex::new(r"https?://medal\.tv/.+").unwrap();
-
-    youtube_regex.is_match(url) || medal_regex.is_match(url)
+    YOUTUBE_REGEX.is_match(url) || MEDAL_REGEX.is_match(url)
 }
 
 /// submit a youtube or medal clip for clip night!
@@ -49,21 +51,9 @@ pub async fn submit_clip(
     #[description = "the name of your clip"] title: String,
     #[description = "the youtube or medal link of your clip"] link: String,
 ) -> Result<(), Error> {
-    let sub_chat = env::var("SUBMIT").expect("Failed to load SUBMIT channel id");
+    let sub_chat = env::var("SUBMIT").expect("missing SUBMIT id");
 
     if ctx.channel_id().get().to_string() != sub_chat {
-        ctx.send(
-            poise::CreateReply::default().embed(
-                serenity::CreateEmbed::default()
-                    .title("Submit Clip")
-                    .description("Wrong Channel - Please resolve clip activity here: ")
-                    .color(data::EMBED_ERROR)
-                    .footer(serenity::CreateEmbedFooter::new(
-                        "@~ powered by UwUntu & RustyBamboo",
-                    )),
-            ),
-        )
-        .await?;
         return Ok(());
     }
 
