@@ -9,17 +9,27 @@ use std::io::{BufRead, BufReader};
 const EVENT_FILE: &str = ".eventdb";
 
 async fn import_from_file(filename: &str) -> Vec<Vec<String>> {
-    let mut file_descriptor = BufReader::new(File::open(filename).unwrap());
+    let file = match File::open(filename) {
+        Ok(f) => f,
+        Err(_) => {
+            tracing::warn!("Event file '{}' not found, starting with empty database", filename);
+            return Vec::new();
+        }
+    };
+
+    let mut file_descriptor = BufReader::new(file);
     let mut buffer = String::new();
 
-    file_descriptor.read_line(&mut buffer).unwrap();
+    if file_descriptor.read_line(&mut buffer).is_err() {
+        return Vec::new();
+    }
+
     file_descriptor
         .lines()
-        .map(|line| {
-            line.unwrap()
-                .split(',')
-                .map(|cell| cell.parse().unwrap())
-                .collect()
+        .filter_map(|line| {
+            let line = line.ok()?;
+            let cells: Vec<String> = line.split(',').map(|cell| cell.to_string()).collect();
+            if cells.len() == 5 { Some(cells) } else { None }
         })
         .collect()
 }
@@ -43,13 +53,16 @@ async fn export_to_file(filename: &str, database: Vec<Vec<String>>) {
 pub async fn check_birthday(http: &serenity::Http) {
     let mut database: Vec<Vec<String>> = import_from_file(EVENT_FILE).await;
     let length = database.len();
-    let now = Utc::now() - TimeDelta::hours(4);
+    let tz_offset: i64 = env::var("TZ_OFFSET_HOURS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(-4);
+    let now = Utc::now() - TimeDelta::hours(tz_offset);
     let today = now.date_naive();
     let year = today.year();
 
-    //TODO: finish this shit
-    for i in 0..length {
-        let mut date_parts = database[i][0].split('-');
+    for row in database.iter_mut().take(length) {
+        let mut date_parts = row[0].split('-');
         let month = match date_parts.next().and_then(|part| part.parse::<u32>().ok()) {
             Some(month) => month,
             None => continue,
@@ -63,14 +76,14 @@ pub async fn check_birthday(http: &serenity::Http) {
             None => continue,
         };
         let date_next_year = NaiveDate::from_ymd_opt(year + 1, month, day);
-        let name: String = database[i][1].clone();
-        let user_id: String = database[i][2].clone();
-        let mut reminded: bool = matches!(database[i][3].as_str(), "1");
-        let mut pinged: bool = matches!(database[i][4].as_str(), "1");
+        let name: String = row[1].clone();
+        let user_id: String = row[2].clone();
+        let mut reminded: bool = matches!(row[3].as_str(), "1");
+        let mut pinged: bool = matches!(row[4].as_str(), "1");
 
         if today > date_this_year && (reminded || pinged) {
-            database[i][3] = "0".to_string();
-            database[i][4] = "0".to_string();
+            row[3] = "0".to_string();
+            row[4] = "0".to_string();
             reminded = false;
             pinged = false;
         }
@@ -101,7 +114,7 @@ pub async fn check_birthday(http: &serenity::Http) {
                 mod_id, name, next_occurrence
             );
 
-            database[i][3] = "1".to_string();
+            row[3] = "1".to_string();
 
             ChannelId::new(mod_chat)
                 .send_message(
@@ -131,7 +144,7 @@ pub async fn check_birthday(http: &serenity::Http) {
                 .parse()
                 .unwrap();
 
-            database[i][4] = "1".to_string();
+            row[4] = "1".to_string();
 
             ChannelId::new(gen_chat)
                 .send_message(

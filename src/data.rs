@@ -419,12 +419,15 @@ pub async fn save_users(
 }
 
 fn read_lines(filename: &str) -> Vec<String> {
-    let lines: Vec<String> = fs::read_to_string(filename)
-        .unwrap()
-        .lines()
-        .map(String::from)
-        .collect();
-
-    tracing::info!("{}: loaded {} lines", filename, lines.len());
-    lines
+    match fs::read_to_string(filename) {
+        Ok(contents) => {
+            let lines: Vec<String> = contents.lines().map(String::from).collect();
+            tracing::info!("{}: loaded {} lines", filename, lines.len());
+            lines
+        }
+        Err(e) => {
+            tracing::warn!("Could not read '{}': {} — using empty list", filename, e);
+            Vec::new()
+        }
+    }
 }

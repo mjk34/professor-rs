@@ -141,10 +141,8 @@ pub async fn server_clips(ctx: Context<'_>) -> Result<(), Error> {
     for x in data.iter() {
         let (id, u) = x.pair();
         let u = u.read().await;
-        for c in &u.submits {
-            if let Some(c) = c {
-                all_clips.push((*id, c.clone()));
-            }
+        for c in u.submits.iter().flatten() {
+            all_clips.push((*id, c.clone()));
         }
         let author = id.to_user(ctx).await.unwrap();
         let clips = u.get_submissions(true, false);

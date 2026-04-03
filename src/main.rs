@@ -24,7 +24,7 @@ async fn register(ctx: Context<'_>) -> Result<(), Error> {
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
-    dotenv::dotenv().expect("Failed to read .env file");
+    dotenvy::dotenv().expect("Failed to read .env file");
     let token = env::var("DISCORD_TOKEN").expect("missing DISCORD_TOKEN");
     let data = data::Data::load();
 
