@@ -941,11 +941,8 @@ pub async fn info(ctx: Context<'_>) -> Result<(), Error> {
             .join(" ");
         const MAX_EMOJI_LEN: usize = 3700;
         if raw.len() > MAX_EMOJI_LEN {
-            let mut end = MAX_EMOJI_LEN;
-            while !raw.is_char_boundary(end) {
-                end -= 1;
-            }
-            format!("{}...", &raw[..end])
+            let cut = raw[..MAX_EMOJI_LEN].rfind(' ').unwrap_or(MAX_EMOJI_LEN);
+            format!("{}...", &raw[..cut])
         } else {
             raw
         }

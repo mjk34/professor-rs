@@ -59,6 +59,16 @@ fn format_large_num(n: f64) -> String {
 // ── Yahoo Finance API structs ─────────────────────────────────────────────────
 
 #[derive(Deserialize)]
+struct YfSearchResponse {
+    quotes: Vec<YfSearchQuote>,
+}
+
+#[derive(Deserialize)]
+struct YfSearchQuote {
+    symbol: String,
+}
+
+#[derive(Deserialize)]
 struct YfChartResponse {
     chart: YfChartOuter,
 }
@@ -145,8 +155,48 @@ const QUOTE_CACHE_TTL: Duration = Duration::from_secs(60);
 static QUOTE_CACHE: LazyLock<DashMap<String, (YfQuote, Instant)>> =
     LazyLock::new(DashMap::new);
 
+fn logo_url(ticker: &str) -> Option<String> {
+    let key = std::env::var("LOGO_API_KEY").ok()?;
+    Some(format!("https://img.logo.dev/ticker/{}?token={}", ticker, key))
+}
+
+fn with_logo(embed: serenity::CreateEmbed, ticker: &str) -> serenity::CreateEmbed {
+    match logo_url(ticker) {
+        Some(url) => embed.thumbnail(url),
+        None => embed,
+    }
+}
+
+fn looks_like_ticker(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 10
+        && s.chars()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '-' || c == '.')
+}
+
 async fn resolve_ticker(query: &str) -> Option<YfQuote> {
-    fetch_quote_detail(query.trim().to_uppercase().as_str()).await
+    let upper = query.trim().to_uppercase();
+
+    let ticker = if looks_like_ticker(&upper) {
+        upper
+    } else {
+        async {
+            let resp = HTTP_CLIENT
+                .get("https://query1.finance.yahoo.com/v1/finance/search")
+                .query(&[("q", query.trim()), ("quotesCount", "1"), ("newsCount", "0")])
+                .send()
+                .await
+                .ok()?
+                .json::<YfSearchResponse>()
+                .await
+                .ok()?;
+            resp.quotes.into_iter().next().map(|q| q.symbol)
+        }
+        .await
+        .unwrap_or(upper)
+    };
+
+    fetch_quote_detail(&ticker).await
 }
 
 async fn fetch_price(ticker: &str) -> Option<f64> {
@@ -664,10 +714,10 @@ async fn portfolio_view(
     let daily_accrual = (annual_rate / 100.0 / 365.0) * portfolio.cash;
 
     let mut desc = format!(
-        "**Cash:** ${:.2} ({:.0} creds)\n**Daily interest:** ~{:.1} creds\n\n",
+        "**Cash:** ${:.2} ({:.0} creds)\n**Daily interest:** ~${:.2}\n\n",
         creds_to_price(portfolio.cash),
         portfolio.cash,
-        daily_accrual
+        creds_to_price(daily_accrual)
     );
 
     if portfolio.positions.is_empty() {
@@ -1181,18 +1231,17 @@ pub async fn search(
             desc += &format!("P/E ratio: **{:.2}**\n", pe);
         }
 
-        ctx.send(
-            poise::CreateReply::default().embed(
-                serenity::CreateEmbed::new()
-                    .title(format!("{} — {}", ticker, quote.display_name()))
-                    .description(desc)
-                    .color(color)
-                    .footer(serenity::CreateEmbedFooter::new(
-                        "@~ powered by UwUntu & RustyBamboo",
-                    )),
-            ),
-        )
-        .await?;
+        let embed = with_logo(
+            serenity::CreateEmbed::new()
+                .title(format!("{} — {}", ticker, quote.display_name()))
+                .description(desc)
+                .color(color)
+                .footer(serenity::CreateEmbedFooter::new(
+                    "@~ powered by UwUntu & RustyBamboo",
+                )),
+            &ticker,
+        );
+        ctx.send(poise::CreateReply::default().embed(embed)).await?;
     } else {
         // Compact multi-asset view (max 10)
         let mut rows = Vec::new();
@@ -1240,15 +1289,29 @@ pub async fn search(
 pub async fn buy(
     ctx: Context<'_>,
     #[description = "Ticker symbol (e.g. AAPL, BTC-USD)"] ticker_query: String,
-    #[description = "Quantity to buy (fractional ok)"] quantity: f64,
+    #[description = "Number of shares to buy (fractional ok)"] quantity: Option<f64>,
+    #[description = "Dollar amount to spend (e.g. 200 to buy $200 worth)"] amount: Option<f64>,
     #[description = "Portfolio to buy into"] portfolio: String,
 ) -> Result<(), Error> {
-    if quantity <= 0.0 {
+    // Validate: exactly one of quantity or amount must be provided
+    if quantity.is_none() && amount.is_none() {
         ctx.send(
             poise::CreateReply::default().embed(
                 serenity::CreateEmbed::new()
                     .title("Buy")
-                    .description("Quantity must be greater than 0.")
+                    .description("Provide either **quantity** (shares) or **amount** (dollars), not neither.")
+                    .color(data::EMBED_ERROR),
+            ),
+        )
+        .await?;
+        return Ok(());
+    }
+    if quantity.is_some() && amount.is_some() {
+        ctx.send(
+            poise::CreateReply::default().embed(
+                serenity::CreateEmbed::new()
+                    .title("Buy")
+                    .description("Provide either **quantity** (shares) or **amount** (dollars), not both.")
                     .color(data::EMBED_ERROR),
             ),
         )
@@ -1297,6 +1360,21 @@ pub async fn buy(
     };
 
     let price_per_unit = price_to_creds(price_usd);
+    let quantity = quantity.unwrap_or_else(|| amount.unwrap() / price_usd);
+
+    if quantity <= 0.0 {
+        ctx.send(
+            poise::CreateReply::default().embed(
+                serenity::CreateEmbed::new()
+                    .title("Buy")
+                    .description("Quantity must be greater than 0.")
+                    .color(data::EMBED_ERROR),
+            ),
+        )
+        .await?;
+        return Ok(());
+    }
+
     let total_cost = price_per_unit * quantity;
 
     let data_ref = &ctx.data().users;
@@ -1380,21 +1458,20 @@ pub async fn buy(
     }
     drop(user_data);
 
-    ctx.send(
-        poise::CreateReply::default().embed(
-            serenity::CreateEmbed::new()
-                .title("Buy")
-                .description(format!(
-                    "Bought **{:.4} {}** ({}) for **{:.0}** creds\n${:.2}/unit | Portfolio **{}** cash: **{:.0}** creds",
-                    quantity, ticker, asset_name, total_cost, price_usd, portfolio, remaining_cash
-                ))
-                .color(data::EMBED_SUCCESS)
-                .footer(serenity::CreateEmbedFooter::new(
-                    "@~ powered by UwUntu & RustyBamboo",
-                )),
-        ),
-    )
-    .await?;
+    let embed = with_logo(
+        serenity::CreateEmbed::new()
+            .title("Buy")
+            .description(format!(
+                "Bought **{:.4} {}** ({}) for **{:.0}** creds\n${:.2}/unit | Portfolio **{}** cash: **{:.0}** creds",
+                quantity, ticker, asset_name, total_cost, price_usd, portfolio, remaining_cash
+            ))
+            .color(data::EMBED_SUCCESS)
+            .footer(serenity::CreateEmbedFooter::new(
+                "@~ powered by UwUntu & RustyBamboo",
+            )),
+        &ticker,
+    );
+    ctx.send(poise::CreateReply::default().embed(embed)).await?;
     Ok(())
 }
 
@@ -1560,21 +1637,20 @@ pub async fn sell(
     };
     drop(user_data);
 
-    ctx.send(
-        poise::CreateReply::default().embed(
-            serenity::CreateEmbed::new()
-                .title("Sell")
-                .description(format!(
-                    "Sold **{:.4} {}** for **{:.0}** creds (${:.2}/unit)\nRealized P&L: **{}** creds",
-                    quantity, ticker, proceeds, price_usd, pnl_str
-                ))
-                .color(color)
-                .footer(serenity::CreateEmbedFooter::new(
-                    "@~ powered by UwUntu & RustyBamboo",
-                )),
-        ),
-    )
-    .await?;
+    let embed = with_logo(
+        serenity::CreateEmbed::new()
+            .title("Sell")
+            .description(format!(
+                "Sold **{:.4} {}** for **{:.0}** creds (${:.2}/unit)\nRealized P&L: **{}** creds",
+                quantity, ticker, proceeds, price_usd, pnl_str
+            ))
+            .color(color)
+            .footer(serenity::CreateEmbedFooter::new(
+                "@~ powered by UwUntu & RustyBamboo",
+            )),
+        &ticker,
+    );
+    ctx.send(poise::CreateReply::default().embed(embed)).await?;
     Ok(())
 }
 
