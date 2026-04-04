@@ -932,12 +932,24 @@ pub async fn info(ctx: Context<'_>) -> Result<(), Error> {
     let verification_level = format!("{:?}", guild.verification_level);
     let boost_level = format!("{:?}", guild.premium_tier);
     let num_boosts = guild.premium_subscription_count.unwrap_or(0);
-    let emojis = guild
-        .emojis
-        .values()
-        .map(|e| e.to_string())
-        .collect::<Vec<String>>()
-        .join(" ");
+    let emojis = {
+        let raw = guild
+            .emojis
+            .values()
+            .map(|e| e.to_string())
+            .collect::<Vec<String>>()
+            .join(" ");
+        const MAX_EMOJI_LEN: usize = 3700;
+        if raw.len() > MAX_EMOJI_LEN {
+            let mut end = MAX_EMOJI_LEN;
+            while !raw.is_char_boundary(end) {
+                end -= 1;
+            }
+            format!("{}...", &raw[..end])
+        } else {
+            raw
+        }
+    };
 
     ctx.send(
         poise::CreateReply::default().embed(

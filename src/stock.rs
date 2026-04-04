@@ -21,7 +21,7 @@ use poise::serenity_prelude::{futures::StreamExt, ChannelId, CreateMessage, Edit
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 
 type UsersMap = Arc<DashMap<serenity::UserId, Arc<RwLock<UserData>>>>;
@@ -37,7 +37,7 @@ fn creds_to_price(creds: f64) -> f64 {
 }
 
 fn gold_hysa_rate(fed_rate: f64) -> f64 {
-    (fed_rate - 1.15_f64).max(0.5)
+    (fed_rate * 0.92).max(0.5)
 }
 
 fn is_gold(user_data: &UserData) -> bool {
@@ -59,28 +59,41 @@ fn format_large_num(n: f64) -> String {
 // ── Yahoo Finance API structs ─────────────────────────────────────────────────
 
 #[derive(Deserialize)]
-struct SearchResponse {
-    quotes: Vec<SearchQuote>,
+struct YfChartResponse {
+    chart: YfChartOuter,
 }
 
 #[derive(Deserialize)]
-struct SearchQuote {
+struct YfChartOuter {
+    result: Option<Vec<YfChartEntry>>,
+}
+
+#[derive(Deserialize)]
+struct YfChartEntry {
+    meta: YfChartMeta,
+}
+
+#[derive(Deserialize)]
+struct YfChartMeta {
     symbol: String,
-    #[serde(rename = "shortname")]
-    short_name: Option<String>,
-    #[serde(rename = "longname")]
+    #[serde(rename = "longName")]
     long_name: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct YfQuoteResponse {
-    #[serde(rename = "quoteResponse")]
-    quote_response: YfQuoteResult,
-}
-
-#[derive(Deserialize)]
-struct YfQuoteResult {
-    result: Vec<YfQuote>,
+    #[serde(rename = "shortName")]
+    short_name: Option<String>,
+    #[serde(rename = "regularMarketPrice")]
+    regular_market_price: Option<f64>,
+    #[serde(rename = "chartPreviousClose")]
+    chart_previous_close: Option<f64>,
+    #[serde(rename = "regularMarketVolume")]
+    regular_market_volume: Option<u64>,
+    #[serde(rename = "52WeekHigh")]
+    fifty_two_week_high: Option<f64>,
+    #[serde(rename = "52WeekLow")]
+    fifty_two_week_low: Option<f64>,
+    #[serde(rename = "marketCap")]
+    market_cap: Option<f64>,
+    #[serde(rename = "instrumentType")]
+    instrument_type: Option<String>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -121,7 +134,6 @@ impl YfQuote {
 
 // ── HTTP helpers ─────────────────────────────────────────────────────────────
 
-// Shared client so the connection pool is reused across all fetch calls.
 static HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
     reqwest::Client::builder()
         .user_agent("Mozilla/5.0 (compatible; professor-rs/1.0)")
@@ -129,24 +141,12 @@ static HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
         .unwrap_or_else(|_| reqwest::Client::new())
 });
 
-async fn resolve_ticker(query: &str) -> Option<(String, String)> {
-    let resp = HTTP_CLIENT
-        .get("https://query2.finance.yahoo.com/v1/finance/search")
-        .query(&[("q", query), ("quotesCount", "1"), ("newsCount", "0")])
-        .send()
-        .await
-        .ok()?
-        .json::<SearchResponse>()
-        .await
-        .ok()?;
+const QUOTE_CACHE_TTL: Duration = Duration::from_secs(60);
+static QUOTE_CACHE: LazyLock<DashMap<String, (YfQuote, Instant)>> =
+    LazyLock::new(DashMap::new);
 
-    let quote = resp.quotes.into_iter().next()?;
-    let name = quote
-        .long_name
-        .or(quote.short_name)
-        .unwrap_or_else(|| quote.symbol.clone());
-
-    Some((quote.symbol, name))
+async fn resolve_ticker(query: &str) -> Option<YfQuote> {
+    fetch_quote_detail(query.trim().to_uppercase().as_str()).await
 }
 
 async fn fetch_price(ticker: &str) -> Option<f64> {
@@ -156,17 +156,47 @@ async fn fetch_price(ticker: &str) -> Option<f64> {
 }
 
 async fn fetch_quote_detail(ticker: &str) -> Option<YfQuote> {
+    if let Some(entry) = QUOTE_CACHE.get(ticker) {
+        if entry.1.elapsed() < QUOTE_CACHE_TTL {
+            return Some(entry.0.clone());
+        }
+    }
+
     let resp = HTTP_CLIENT
-        .get("https://query2.finance.yahoo.com/v7/finance/quote")
-        .query(&[("symbols", ticker)])
+        .get(format!(
+            "https://query2.finance.yahoo.com/v8/finance/chart/{}",
+            ticker
+        ))
+        .query(&[("interval", "1d"), ("range", "1d")])
         .send()
         .await
         .ok()?
-        .json::<YfQuoteResponse>()
+        .json::<YfChartResponse>()
         .await
         .ok()?;
 
-    resp.quote_response.result.into_iter().next()
+    let meta = resp.chart.result?.into_iter().next()?.meta;
+
+    let price_prev = meta.regular_market_price.zip(meta.chart_previous_close);
+    let change = price_prev.map(|(p, c)| p - c);
+    let change_pct = price_prev.map(|(p, c)| (p - c) / c * 100.0);
+
+    let quote = YfQuote {
+        symbol: meta.symbol,
+        long_name: meta.long_name,
+        short_name: meta.short_name,
+        regular_market_price: meta.regular_market_price,
+        regular_market_change: change,
+        regular_market_change_percent: change_pct,
+        regular_market_volume: meta.regular_market_volume,
+        market_cap: meta.market_cap,
+        trailing_pe: None,
+        fifty_two_week_high: meta.fifty_two_week_high,
+        fifty_two_week_low: meta.fifty_two_week_low,
+        quote_type: meta.instrument_type,
+    };
+    QUOTE_CACHE.insert(quote.symbol.clone(), (quote.clone(), Instant::now()));
+    Some(quote)
 }
 
 fn parse_expiry(date_str: &str) -> Option<chrono::DateTime<Utc>> {
@@ -191,15 +221,51 @@ fn option_type_str(ot: &OptionType) -> &'static str {
     }
 }
 
+// ── FRED API ──────────────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct FredResponse {
+    observations: Vec<FredObservation>,
+}
+
+#[derive(Deserialize)]
+struct FredObservation {
+    value: String,
+}
+
+async fn fetch_fed_funds_rate() -> Option<f64> {
+    let api_key = std::env::var("FRED_API_KEY").ok()?;
+    let resp = HTTP_CLIENT
+        .get("https://api.stlouisfed.org/fred/series/observations")
+        .query(&[
+            ("series_id", "DFF"),
+            ("api_key", &api_key),
+            ("sort_order", "desc"),
+            ("limit", "1"),
+            ("file_type", "json"),
+        ])
+        .send()
+        .await
+        .ok()?
+        .json::<FredResponse>()
+        .await
+        .ok()?;
+
+    resp.observations
+        .into_iter()
+        .next()
+        .and_then(|o| o.value.parse::<f64>().ok())
+}
+
 // ── Maintenance functions ─────────────────────────────────────────────────────
 
 pub async fn refresh_market_rate(rate: &Arc<RwLock<f64>>) {
-    if let Some(price) = fetch_price("^IRX").await {
+    if let Some(r_val) = fetch_fed_funds_rate().await {
         let mut r = rate.write().await;
-        *r = price;
-        tracing::info!("HYSA fed rate updated: {:.2}%", price);
+        *r = r_val;
+        tracing::info!("HYSA fed rate updated: {:.2}%", r_val);
     } else {
-        tracing::warn!("Failed to fetch ^IRX rate; keeping current value");
+        tracing::warn!("Failed to fetch FRED fed funds rate; keeping current value");
     }
 }
 
@@ -513,8 +579,9 @@ async fn portfolio_list(ctx: Context<'_>) -> Result<(), Error> {
         for p in &user_data.stock.portfolios {
             let daily_accrual = daily_rate * p.cash;
             desc += &format!(
-                "**{}** — Cash: **{:.0}** creds | {} positions | ~{:.1} creds/day\n",
+                "**{}** — Cash: **${:.2}** ({:.0} creds) | {} positions | ~{:.1} creds/day\n",
                 p.name,
+                creds_to_price(p.cash),
                 p.cash,
                 p.positions.len(),
                 daily_accrual
@@ -597,9 +664,9 @@ async fn portfolio_view(
     let daily_accrual = (annual_rate / 100.0 / 365.0) * portfolio.cash;
 
     let mut desc = format!(
-        "**Cash:** {:.0} creds (${:.2})\n**Daily interest:** ~{:.1} creds\n\n",
-        portfolio.cash,
+        "**Cash:** ${:.2} ({:.0} creds)\n**Daily interest:** ~{:.1} creds\n\n",
         creds_to_price(portfolio.cash),
+        portfolio.cash,
         daily_accrual
     );
 
@@ -1057,19 +1124,19 @@ async fn portfolio_delete(
 
 // ── Search ─────────────────────────────────────────────────────────────────────
 
-/// Look up a stock, ETF, or crypto by ticker or name
+/// Look up a stock, ETF, or crypto by ticker symbol
 #[poise::command(slash_command)]
 pub async fn search(
     ctx: Context<'_>,
-    #[description = "Ticker or name — comma-separated for multiple (e.g. NVDA, apple, BTC-USD)"]
+    #[description = "Ticker symbol — comma-separated for multiple (e.g. NVDA, AAPL, BTC-USD)"]
     query: String,
 ) -> Result<(), Error> {
     let items: Vec<&str> = query.split(',').map(str::trim).filter(|s| !s.is_empty()).collect();
 
     if items.len() == 1 {
         // Detailed single view
-        let (ticker, _) = match resolve_ticker(items[0]).await {
-            Some(r) => r,
+        let quote = match resolve_ticker(items[0]).await {
+            Some(q) => q,
             None => {
                 ctx.send(
                     poise::CreateReply::default().embed(
@@ -1083,22 +1150,7 @@ pub async fn search(
                 return Ok(());
             }
         };
-
-        let quote = match fetch_quote_detail(&ticker).await {
-            Some(q) => q,
-            None => {
-                ctx.send(
-                    poise::CreateReply::default().embed(
-                        serenity::CreateEmbed::new()
-                            .title("Search")
-                            .description(format!("Could not fetch data for **{}**.", ticker))
-                            .color(data::EMBED_ERROR),
-                    ),
-                )
-                .await?;
-                return Ok(());
-            }
-        };
+        let ticker = quote.symbol.clone();
 
         let price_usd = quote.regular_market_price.unwrap_or(0.0);
         let change = quote.regular_market_change.unwrap_or(0.0);
@@ -1145,14 +1197,11 @@ pub async fn search(
         // Compact multi-asset view (max 10)
         let mut rows = Vec::new();
         for q in items.into_iter().take(10) {
-            let Some((ticker, _)) = resolve_ticker(q).await else {
+            let Some(quote) = resolve_ticker(q).await else {
                 rows.push(format!("`{}` — could not resolve", q));
                 continue;
             };
-            let Some(quote) = fetch_quote_detail(&ticker).await else {
-                rows.push(format!("`{}` — fetch failed", ticker));
-                continue;
-            };
+            let ticker = quote.symbol.clone();
             let price_usd = quote.regular_market_price.unwrap_or(0.0);
             let change_pct = quote.regular_market_change_percent.unwrap_or(0.0);
             let arrow = if change_pct >= 0.0 { "▲" } else { "▼" };
@@ -1190,7 +1239,7 @@ pub async fn search(
 #[poise::command(slash_command)]
 pub async fn buy(
     ctx: Context<'_>,
-    #[description = "Ticker or name (e.g. AAPL or apple)"] ticker_query: String,
+    #[description = "Ticker symbol (e.g. AAPL, BTC-USD)"] ticker_query: String,
     #[description = "Quantity to buy (fractional ok)"] quantity: f64,
     #[description = "Portfolio to buy into"] portfolio: String,
 ) -> Result<(), Error> {
@@ -1207,8 +1256,8 @@ pub async fn buy(
         return Ok(());
     }
 
-    let (ticker, asset_name) = match resolve_ticker(&ticker_query).await {
-        Some(r) => r,
+    let quote = match resolve_ticker(&ticker_query).await {
+        Some(q) => q,
         None => {
             ctx.send(
                 poise::CreateReply::default().embed(
@@ -1222,22 +1271,8 @@ pub async fn buy(
             return Ok(());
         }
     };
-
-    let quote = match fetch_quote_detail(&ticker).await {
-        Some(q) => q,
-        None => {
-            ctx.send(
-                poise::CreateReply::default().embed(
-                    serenity::CreateEmbed::new()
-                        .title("Buy")
-                        .description(format!("Could not fetch price for **{}**.", ticker))
-                        .color(data::EMBED_ERROR),
-                ),
-            )
-            .await?;
-            return Ok(());
-        }
-    };
+    let ticker = quote.symbol.clone();
+    let asset_name = quote.display_name();
 
     let price_usd = match quote.regular_market_price {
         Some(p) => p,
@@ -1367,7 +1402,7 @@ pub async fn buy(
 #[poise::command(slash_command)]
 pub async fn sell(
     ctx: Context<'_>,
-    #[description = "Ticker or name (e.g. AAPL or apple)"] ticker_query: String,
+    #[description = "Ticker symbol (e.g. AAPL, BTC-USD)"] ticker_query: String,
     #[description = "Quantity to sell (fractional ok)"] quantity: f64,
     #[description = "Portfolio to sell from"] portfolio: String,
 ) -> Result<(), Error> {
@@ -1384,8 +1419,8 @@ pub async fn sell(
         return Ok(());
     }
 
-    let (ticker, asset_name) = match resolve_ticker(&ticker_query).await {
-        Some(r) => r,
+    let quote = match resolve_ticker(&ticker_query).await {
+        Some(q) => q,
         None => {
             ctx.send(
                 poise::CreateReply::default().embed(
@@ -1399,15 +1434,16 @@ pub async fn sell(
             return Ok(());
         }
     };
-
-    let price_usd = match fetch_price(&ticker).await {
+    let ticker = quote.symbol.clone();
+    let asset_name = quote.display_name();
+    let price_usd = match quote.regular_market_price {
         Some(p) => p,
         None => {
             ctx.send(
                 poise::CreateReply::default().embed(
                     serenity::CreateEmbed::new()
                         .title("Sell")
-                        .description(format!("Could not fetch price for **{}**.", ticker))
+                        .description(format!("No price data available for **{}**.", ticker))
                         .color(data::EMBED_ERROR),
                 ),
             )
@@ -1557,10 +1593,10 @@ pub async fn watchlist(_ctx: Context<'_>) -> Result<(), Error> {
 #[poise::command(slash_command, rename = "add")]
 async fn watchlist_add(
     ctx: Context<'_>,
-    #[description = "Ticker or name to add"] query: String,
+    #[description = "Ticker symbol to add"] query: String,
 ) -> Result<(), Error> {
-    let (ticker, name) = match resolve_ticker(&query).await {
-        Some(r) => r,
+    let quote = match resolve_ticker(&query).await {
+        Some(q) => q,
         None => {
             ctx.send(
                 poise::CreateReply::default().embed(
@@ -1574,6 +1610,8 @@ async fn watchlist_add(
             return Ok(());
         }
     };
+    let ticker = quote.symbol.clone();
+    let name = quote.display_name();
 
     let data_ref = &ctx.data().users;
     let u = data_ref.get(&ctx.author().id).unwrap();
@@ -1625,12 +1663,12 @@ async fn watchlist_add(
 #[poise::command(slash_command, rename = "remove")]
 async fn watchlist_remove(
     ctx: Context<'_>,
-    #[description = "Ticker or name to remove"] query: String,
+    #[description = "Ticker symbol to remove"] query: String,
 ) -> Result<(), Error> {
     // Try to resolve; fall back to uppercased input if resolution fails
     let ticker = resolve_ticker(&query)
         .await
-        .map(|(t, _)| t)
+        .map(|q| q.symbol)
         .unwrap_or_else(|| query.to_uppercase());
 
     let data_ref = &ctx.data().users;
