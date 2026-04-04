@@ -4,7 +4,9 @@ mod data;
 mod helper;
 mod mods;
 mod reminder;
+mod stock;
 
+use chrono::Datelike;
 use dashmap::DashMap;
 use data::{UserData, VoiceUser};
 use std::{env, sync::Arc};
@@ -64,6 +66,15 @@ async fn main() {
                 clips::next_clip(),
                 mods::give_creds(),
                 mods::take_creds(),
+                stock::portfolio(),
+                stock::search(),
+                stock::buy(),
+                stock::sell(),
+                stock::watchlist(),
+                stock::trades(),
+                stock::options_quote(),
+                stock::options_buy(),
+                stock::options_sell(),
             ],
             prefix_options: poise::PrefixFrameworkOptions {
                 prefix: Some("~".into()),
@@ -79,8 +90,11 @@ async fn main() {
             Box::pin(async move {
                 let users = data.users.clone();
                 let voice_users = data.voice_users.clone();
+                let hysa_rate = data.hysa_fed_rate.clone();
+                let bot_chat = data.bot_chat.clone();
                 background_task(users.clone(), voice_users);
-                maintenance_task(users, http);
+                stock::refresh_market_rate(&data.hysa_fed_rate).await;
+                maintenance_task(users, http, hysa_rate, bot_chat);
                 Ok(data)
             })
         })
@@ -204,11 +218,19 @@ fn background_task(
 fn maintenance_task(
     users: Arc<DashMap<serenity::UserId, Arc<RwLock<UserData>>>>,
     http: Arc<serenity::Http>,
+    hysa_rate: Arc<RwLock<f64>>,
+    bot_chat: String,
 ) {
     tokio::spawn(async move {
         loop {
             reminder::check_birthday(&http).await;
             data::save_users(&users).await;
+            let today = chrono::Utc::now().day();
+            if today == 1 || today == 16 {
+                stock::refresh_market_rate(&hysa_rate).await;
+            }
+            stock::apply_monthly_interest(&users, &hysa_rate).await;
+            stock::sweep_expired_options(&users, &http, &bot_chat).await;
             tokio::time::sleep(std::time::Duration::from_secs(60 * 60 * 12)).await;
         }
     });

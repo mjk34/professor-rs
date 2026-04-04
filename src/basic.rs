@@ -189,6 +189,7 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
     user_data.update_daily();
 
     if levelup {
+        let new_level = user_data.get_level();
         ctx.send(
             poise::CreateReply::default().embed(
                 serenity::CreateEmbed::new()
@@ -196,7 +197,7 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
                     .description(format!(
                         "Wowzers, you powered up! <@{}> reached **Level {}**",
                         user.id,
-                        user_data.get_level()
+                        new_level
                     ))
                     .thumbnail(user.avatar_url().unwrap_or_default())
                     .color(data::EMBED_LEVEL)
@@ -206,6 +207,25 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
             ),
         )
         .await?;
+
+        if new_level == data::GOLD_LEVEL_THRESHOLD {
+            ctx.send(
+                poise::CreateReply::default().embed(
+                    serenity::CreateEmbed::new()
+                        .title("⭐ Gold Status Unlocked!")
+                        .description(format!(
+                            "Congratulations <@{}>! You've reached **Level 20** and unlocked **Gold Status**!\n\nYou now earn a higher HYSA rate on uninvested portfolio cash.",
+                            user.id
+                        ))
+                        .thumbnail(user.avatar_url().unwrap_or_default())
+                        .color(data::EMBED_GOLD)
+                        .footer(serenity::CreateEmbedFooter::new(
+                            "@~ powered by UwUntu & RustyBamboo",
+                        )),
+                ),
+            )
+            .await?;
+        }
     }
 
     Ok(())
@@ -283,6 +303,7 @@ pub async fn claim_bonus(ctx: Context<'_>) -> Result<(), Error> {
 
         let levelup = user_data.update_xp(150);
         if levelup {
+            let new_level = user_data.get_level();
             ctx.send(
                 poise::CreateReply::default().embed(
                     serenity::CreateEmbed::new()
@@ -290,7 +311,7 @@ pub async fn claim_bonus(ctx: Context<'_>) -> Result<(), Error> {
                         .description(format!(
                             "Wowzers, you powered up! <@{}> reached **Level {}**",
                             user.id,
-                            user_data.get_level()
+                            new_level
                         ))
                         .thumbnail(user.avatar_url().unwrap_or_default())
                         .color(data::EMBED_LEVEL)
@@ -300,6 +321,25 @@ pub async fn claim_bonus(ctx: Context<'_>) -> Result<(), Error> {
                 ),
             )
             .await?;
+
+            if new_level == data::GOLD_LEVEL_THRESHOLD {
+                ctx.send(
+                    poise::CreateReply::default().embed(
+                        serenity::CreateEmbed::new()
+                            .title("⭐ Gold Status Unlocked!")
+                            .description(format!(
+                                "Congratulations <@{}>! You've reached **Level 20** and unlocked **Gold Status**!\n\nYou now earn a higher HYSA rate on uninvested portfolio cash.",
+                                user.id
+                            ))
+                            .thumbnail(user.avatar_url().unwrap_or_default())
+                            .color(data::EMBED_GOLD)
+                            .footer(serenity::CreateEmbedFooter::new(
+                                "@~ powered by UwUntu & RustyBamboo",
+                            )),
+                    ),
+                )
+                .await?;
+            }
         }
     } else {
         let desc: String = match bonus {
@@ -363,10 +403,11 @@ pub async fn wallet(ctx: Context<'_>) -> Result<(), Error> {
     let next_level = user_data.get_next_level();
     let creds: i32 = user_data.get_creds();
     let tickets: i32 = user_data.get_tickets();
+    let gold_badge = if level >= data::GOLD_LEVEL_THRESHOLD { "  ⭐ **Gold Status**" } else { "" };
 
     let desc = format!(
-        "**Level {} **  -  {}/{}\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\nDaily UwU........... . . . **{}**\nAverage Luck..... . . . **{}**\nClaim Bonus....... . . . **{}**\n\nTotal Creds: **{}** \u{3000}\u{3000}\u{2000}Tickets: **{}**\n",
-        level, xp, next_level, daily, luck, claim, creds, tickets
+        "**Level {}**{}  -  {}/{}\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\nDaily UwU........... . . . **{}**\nAverage Luck..... . . . **{}**\nClaim Bonus....... . . . **{}**\n\nTotal Creds: **{}** \u{3000}\u{3000}\u{2000}Tickets: **{}**\n",
+        level, gold_badge, xp, next_level, daily, luck, claim, creds, tickets
     );
 
     ctx.send(

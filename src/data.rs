@@ -1,12 +1,18 @@
 use crate::serenity;
 use chrono::prelude::{DateTime, Utc};
 use dashmap::DashMap;
+use std::collections::VecDeque;
 use poise::serenity_prelude::RoleId;
 use serde::{Deserialize, Serialize};
 use serenity::Color;
 use std::sync::Arc;
 use std::{env, fs};
 use tokio::sync::RwLock;
+
+// Stock feature constants
+pub const GOLD_LEVEL_THRESHOLD: i32 = 20;
+pub const BASE_HYSA_RATE: f64 = 0.1;  // annual % for non-gold users
+pub const TRADE_HISTORY_LIMIT: usize = 500;
 
 // Constants
 pub const NUMBER_EMOJS: [&str; 10] = [
@@ -65,6 +71,8 @@ pub struct UserData {
 
     pub submits: Vec<Option<ClipData>>,
     tickets: i32,
+
+    pub stock: StockProfile,
 }
 
 impl UserData {
@@ -308,7 +316,8 @@ pub struct Data {
     pub sub_chat: String,
     pub prof_id: String,
     pub bad_fortune: Vec<String>,
-    pub good_fortune: Vec<String>
+    pub good_fortune: Vec<String>,
+    pub hysa_fed_rate: Arc<RwLock<f64>>,
 }
 
 impl Data {
@@ -396,7 +405,8 @@ impl Data {
             sub_chat,
             prof_id,
             bad_fortune,
-            good_fortune
+            good_fortune,
+            hysa_fed_rate: Arc::new(RwLock::new(3.35)),
         }
     }
 }
@@ -430,4 +440,86 @@ fn read_lines(filename: &str) -> Vec<String> {
             Vec::new()
         }
     }
+}
+
+// ──────────────────────────────────────────────
+// Stock / portfolio types
+// ──────────────────────────────────────────────
+
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+pub struct StockProfile {
+    pub portfolios: Vec<Portfolio>,
+    pub trade_history: VecDeque<TradeRecord>,
+    pub watchlist: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Portfolio {
+    pub name: String,
+    pub cash: f64,
+    pub last_interest_credited: DateTime<Utc>,
+    pub positions: Vec<Position>,
+    pub created_at: DateTime<Utc>,
+}
+
+impl Portfolio {
+    pub fn new(name: String) -> Self {
+        Portfolio {
+            name,
+            cash: 0.0,
+            last_interest_credited: Utc::now(),
+            positions: Vec::new(),
+            created_at: Utc::now(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Position {
+    pub ticker: String,
+    pub asset_type: AssetType,
+    pub quantity: f64,
+    pub avg_cost: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum AssetType {
+    Stock,
+    #[allow(clippy::upper_case_acronyms)]
+    ETF,
+    Crypto,
+    Option(OptionContract),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OptionContract {
+    pub strike: f64,
+    pub expiry: DateTime<Utc>,
+    pub option_type: OptionType,
+    pub contracts: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum OptionType {
+    Call,
+    Put,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TradeRecord {
+    pub portfolio: String,
+    pub ticker: String,
+    pub asset_name: String,
+    pub action: TradeAction,
+    pub quantity: f64,
+    pub price_per_unit: f64,
+    pub total_creds: f64,
+    pub realized_pnl: Option<f64>,
+    pub timestamp: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum TradeAction {
+    Buy,
+    Sell,
 }
