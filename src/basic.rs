@@ -31,8 +31,7 @@ use tokio::sync::RwLock;
 pub async fn ping(ctx: Context<'_>) -> Result<(), Error> {
     let author = ctx.author();
     let pong_image = ctx.data().pong.choose(&mut thread_rng()).unwrap();
-    let latency: f32 =
-        (ctx.created_at().time() - Utc::now().time()).num_milliseconds() as f32 / 1000.0;
+    let latency = (Utc::now() - *ctx.created_at()).num_milliseconds() as f32 / 1000.0;
 
     ctx.send(
         poise::CreateReply::default().embed(

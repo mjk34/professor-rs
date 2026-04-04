@@ -56,6 +56,32 @@ fn format_large_num(n: f64) -> String {
     }
 }
 
+// ── FMP API structs ───────────────────────────────────────────────────────────
+
+#[derive(Deserialize, Clone)]
+struct FmpProfile {
+    price: Option<f64>,
+    #[serde(rename = "marketCap")]
+    market_cap: Option<f64>,
+    change: Option<f64>,
+    #[serde(rename = "changePercentage")]
+    change_percentage: Option<f64>,
+    volume: Option<u64>,
+    #[serde(rename = "companyName")]
+    company_name: Option<String>,
+    exchange: Option<String>,
+    industry: Option<String>,
+    sector: Option<String>,
+    country: Option<String>,
+    range: Option<String>,
+}
+
+#[derive(Deserialize, Clone)]
+struct FmpRatios {
+    #[serde(rename = "priceToEarningsRatioTTM")]
+    pe_ratio: Option<f64>,
+}
+
 // ── Yahoo Finance API structs ─────────────────────────────────────────────────
 
 #[derive(Deserialize)]
@@ -84,6 +110,17 @@ struct YfChartEntry {
 }
 
 #[derive(Deserialize)]
+struct YfTradingSession {
+    start: i64,
+    end: i64,
+}
+
+#[derive(Deserialize)]
+struct YfCurrentTradingPeriod {
+    regular: YfTradingSession,
+}
+
+#[derive(Deserialize)]
 struct YfChartMeta {
     symbol: String,
     #[serde(rename = "longName")]
@@ -94,16 +131,10 @@ struct YfChartMeta {
     regular_market_price: Option<f64>,
     #[serde(rename = "chartPreviousClose")]
     chart_previous_close: Option<f64>,
-    #[serde(rename = "regularMarketVolume")]
-    regular_market_volume: Option<u64>,
-    #[serde(rename = "52WeekHigh")]
-    fifty_two_week_high: Option<f64>,
-    #[serde(rename = "52WeekLow")]
-    fifty_two_week_low: Option<f64>,
-    #[serde(rename = "marketCap")]
-    market_cap: Option<f64>,
     #[serde(rename = "instrumentType")]
     instrument_type: Option<String>,
+    #[serde(rename = "currentTradingPeriod")]
+    current_trading_period: Option<YfCurrentTradingPeriod>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -115,22 +146,11 @@ struct YfQuote {
     short_name: Option<String>,
     #[serde(rename = "regularMarketPrice")]
     regular_market_price: Option<f64>,
-    #[serde(rename = "regularMarketChange")]
-    regular_market_change: Option<f64>,
     #[serde(rename = "regularMarketChangePercent")]
     regular_market_change_percent: Option<f64>,
-    #[serde(rename = "regularMarketVolume")]
-    regular_market_volume: Option<u64>,
-    #[serde(rename = "marketCap")]
-    market_cap: Option<f64>,
-    #[serde(rename = "trailingPE")]
-    trailing_pe: Option<f64>,
-    #[serde(rename = "fiftyTwoWeekHigh")]
-    fifty_two_week_high: Option<f64>,
-    #[serde(rename = "fiftyTwoWeekLow")]
-    fifty_two_week_low: Option<f64>,
     #[serde(rename = "quoteType")]
     quote_type: Option<String>,
+    market_open: bool,
 }
 
 impl YfQuote {
@@ -139,6 +159,14 @@ impl YfQuote {
             .clone()
             .or_else(|| self.short_name.clone())
             .unwrap_or_else(|| self.symbol.clone())
+    }
+
+    fn is_market_open(&self) -> bool {
+        self.market_open
+    }
+
+    fn market_status(&self) -> &'static str {
+        if self.market_open { "Market: Open" } else { "Market: Closed" }
     }
 }
 
@@ -155,9 +183,29 @@ const QUOTE_CACHE_TTL: Duration = Duration::from_secs(60);
 static QUOTE_CACHE: LazyLock<DashMap<String, (YfQuote, Instant)>> =
     LazyLock::new(DashMap::new);
 
+const FMP_CACHE_TTL: Duration = Duration::from_secs(300);
+static FMP_CACHE: LazyLock<DashMap<String, (FmpProfile, Instant)>> =
+    LazyLock::new(DashMap::new);
+
+const FMP_RATIOS_CACHE_TTL: Duration = Duration::from_secs(60 * 60 * 24 * 15);
+static FMP_RATIOS_CACHE: LazyLock<DashMap<String, (FmpRatios, Instant)>> =
+    LazyLock::new(DashMap::new);
+
+static LOGO_API_KEY: LazyLock<Option<String>> =
+    LazyLock::new(|| std::env::var("LOGO_API_KEY").ok());
+
 fn logo_url(ticker: &str) -> Option<String> {
-    let key = std::env::var("LOGO_API_KEY").ok()?;
+    let key = LOGO_API_KEY.as_deref()?;
     Some(format!("https://img.logo.dev/ticker/{}?token={}", ticker, key))
+}
+
+fn market_closed_reply(action: &str, ticker: &str) -> poise::CreateReply {
+    poise::CreateReply::default().embed(
+        serenity::CreateEmbed::new()
+            .title(action)
+            .description(format!("Market is currently closed for **{}**.", ticker))
+            .color(data::EMBED_ERROR),
+    )
 }
 
 fn with_logo(embed: serenity::CreateEmbed, ticker: &str) -> serenity::CreateEmbed {
@@ -169,9 +217,9 @@ fn with_logo(embed: serenity::CreateEmbed, ticker: &str) -> serenity::CreateEmbe
 
 fn looks_like_ticker(s: &str) -> bool {
     !s.is_empty()
-        && s.len() <= 10
         && s.chars()
             .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '-' || c == '.')
+        && (s.len() <= 4 || s.contains('-') || s.contains('.'))
 }
 
 async fn resolve_ticker(query: &str) -> Option<YfQuote> {
@@ -228,25 +276,77 @@ async fn fetch_quote_detail(ticker: &str) -> Option<YfQuote> {
     let meta = resp.chart.result?.into_iter().next()?.meta;
 
     let price_prev = meta.regular_market_price.zip(meta.chart_previous_close);
-    let change = price_prev.map(|(p, c)| p - c);
     let change_pct = price_prev.map(|(p, c)| (p - c) / c * 100.0);
+
+    let market_open = meta
+        .current_trading_period
+        .map(|p| {
+            let now = Utc::now().timestamp();
+            now >= p.regular.start && now < p.regular.end
+        })
+        .unwrap_or(false);
 
     let quote = YfQuote {
         symbol: meta.symbol,
         long_name: meta.long_name,
         short_name: meta.short_name,
         regular_market_price: meta.regular_market_price,
-        regular_market_change: change,
         regular_market_change_percent: change_pct,
-        regular_market_volume: meta.regular_market_volume,
-        market_cap: meta.market_cap,
-        trailing_pe: None,
-        fifty_two_week_high: meta.fifty_two_week_high,
-        fifty_two_week_low: meta.fifty_two_week_low,
         quote_type: meta.instrument_type,
+        market_open,
     };
     QUOTE_CACHE.insert(quote.symbol.clone(), (quote.clone(), Instant::now()));
     Some(quote)
+}
+
+async fn fetch_fmp_profile(ticker: &str) -> Option<FmpProfile> {
+    if let Some(entry) = FMP_CACHE.get(ticker) {
+        if entry.1.elapsed() < FMP_CACHE_TTL {
+            return Some(entry.0.clone());
+        }
+    }
+
+    let api_key = std::env::var("FMP_API_KEY").ok()?;
+    let mut profiles = HTTP_CLIENT
+        .get(format!(
+            "https://financialmodelingprep.com/stable/profile?symbol={}&apikey={}",
+            ticker, api_key
+        ))
+        .send()
+        .await
+        .ok()?
+        .json::<Vec<FmpProfile>>()
+        .await
+        .ok()?;
+
+    let profile = profiles.pop()?;
+    FMP_CACHE.insert(ticker.to_string(), (profile.clone(), Instant::now()));
+    Some(profile)
+}
+
+async fn fetch_fmp_ratios(ticker: &str) -> Option<FmpRatios> {
+    if let Some(entry) = FMP_RATIOS_CACHE.get(ticker) {
+        if entry.1.elapsed() < FMP_RATIOS_CACHE_TTL {
+            return Some(entry.0.clone());
+        }
+    }
+
+    let api_key = std::env::var("FMP_API_KEY").ok()?;
+    let mut list = HTTP_CLIENT
+        .get(format!(
+            "https://financialmodelingprep.com/stable/ratios-ttm?symbol={}&apikey={}",
+            ticker, api_key
+        ))
+        .send()
+        .await
+        .ok()?
+        .json::<Vec<FmpRatios>>()
+        .await
+        .ok()?;
+
+    let ratios = list.pop()?;
+    FMP_RATIOS_CACHE.insert(ticker.to_string(), (ratios.clone(), Instant::now()));
+    Some(ratios)
 }
 
 fn parse_expiry(date_str: &str) -> Option<chrono::DateTime<Utc>> {
@@ -629,12 +729,12 @@ async fn portfolio_list(ctx: Context<'_>) -> Result<(), Error> {
         for p in &user_data.stock.portfolios {
             let daily_accrual = daily_rate * p.cash;
             desc += &format!(
-                "**{}** — Cash: **${:.2}** ({:.0} creds) | {} positions | ~{:.1} creds/day\n",
+                "**{}** — Cash: **${:.2}** ({:.0} creds) | {} positions | ~${:.2}/day\n",
                 p.name,
                 creds_to_price(p.cash),
                 p.cash,
                 p.positions.len(),
-                daily_accrual
+                creds_to_price(daily_accrual)
             );
         }
 
@@ -1201,39 +1301,65 @@ pub async fn search(
             }
         };
         let ticker = quote.symbol.clone();
+        let (profile, ratios) = tokio::join!(
+            fetch_fmp_profile(&ticker),
+            fetch_fmp_ratios(&ticker)
+        );
 
-        let price_usd = quote.regular_market_price.unwrap_or(0.0);
-        let change = quote.regular_market_change.unwrap_or(0.0);
-        let change_pct = quote.regular_market_change_percent.unwrap_or(0.0);
+        let price_usd = profile
+            .as_ref()
+            .and_then(|p| p.price)
+            .or(quote.regular_market_price)
+            .unwrap_or(0.0);
+        let change = profile.as_ref().and_then(|p| p.change).unwrap_or(0.0);
+        let change_pct = profile
+            .as_ref()
+            .and_then(|p| p.change_percentage)
+            .unwrap_or(0.0);
         let color = if change >= 0.0 {
             data::EMBED_SUCCESS
         } else {
             data::EMBED_FAIL
         };
+        let display_name = profile
+            .as_ref()
+            .and_then(|p| p.company_name.clone())
+            .unwrap_or_else(|| quote.display_name());
 
-        let mut desc = format!(
-            "**${:.2}** / {:.0} creds\nDay change: **{:+.2} ({:+.2}%)**\n",
-            price_usd,
-            price_to_creds(price_usd),
-            change,
-            change_pct
-        );
-        if let Some(vol) = quote.regular_market_volume {
-            desc += &format!("Volume: **{}**\n", format_large_num(vol as f64));
+        let arrow = if change_pct >= 0.0 { "+" } else { "" };
+        let mut desc = format!("**${:.2}** ({}{:.2}%)\n", price_usd, arrow, change_pct);
+
+        if let Some(p) = &profile {
+            desc += "─────────────────────\n";
+            let mut meta = Vec::new();
+            if let Some(sector) = &p.sector { meta.push(sector.clone()); }
+            if let Some(industry) = &p.industry { meta.push(industry.clone()); }
+            if !meta.is_empty() {
+                desc += &format!("{}\n", meta.join(" · "));
+            }
+            if let Some(country) = &p.country {
+                let exchange = p.exchange.as_deref().unwrap_or("");
+                desc += &format!("Country: **{}**  Exchange: **{}**\n", country.to_uppercase(), exchange.to_uppercase());
+            }
+            desc += "─────────────────────\n";
+            if let Some(vol) = p.volume {
+                desc += &format!("Volume: **{}**\n", format_large_num(vol as f64));
+            }
+            if let Some(mc) = p.market_cap {
+                desc += &format!("Market Cap: **{}**\n", format_large_num(mc));
+            }
+            if let Some(pe) = ratios.as_ref().and_then(|r| r.pe_ratio).filter(|&v| v > 0.0) {
+                desc += &format!("P/E (TTM): **{:.2}**\n", pe);
+            }
+            if let Some(r) = &p.range {
+                desc += &format!("52-Week: **{}**\n", r);
+            }
         }
-        if let Some(mc) = quote.market_cap {
-            desc += &format!("Market cap: **{}**\n", format_large_num(mc));
-        }
-        if let (Some(lo), Some(hi)) = (quote.fifty_two_week_low, quote.fifty_two_week_high) {
-            desc += &format!("52-week: **${:.2} – ${:.2}**\n", lo, hi);
-        }
-        if let Some(pe) = quote.trailing_pe {
-            desc += &format!("P/E ratio: **{:.2}**\n", pe);
-        }
+        desc += &format!("\n{}", quote.market_status());
 
         let embed = with_logo(
             serenity::CreateEmbed::new()
-                .title(format!("{} — {}", ticker, quote.display_name()))
+                .title(format!("{} — {}", ticker, display_name))
                 .description(desc)
                 .color(color)
                 .footer(serenity::CreateEmbedFooter::new(
@@ -1336,6 +1462,11 @@ pub async fn buy(
     };
     let ticker = quote.symbol.clone();
     let asset_name = quote.display_name();
+
+    if !quote.is_market_open() {
+        ctx.send(market_closed_reply("Buy", &ticker)).await?;
+        return Ok(());
+    }
 
     let price_usd = match quote.regular_market_price {
         Some(p) => p,
@@ -1513,6 +1644,12 @@ pub async fn sell(
     };
     let ticker = quote.symbol.clone();
     let asset_name = quote.display_name();
+
+    if !quote.is_market_open() {
+        ctx.send(market_closed_reply("Sell", &ticker)).await?;
+        return Ok(());
+    }
+
     let price_usd = match quote.regular_market_price {
         Some(p) => p,
         None => {
