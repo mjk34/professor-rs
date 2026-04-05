@@ -23,12 +23,12 @@ async fn modify_creds(
 ) -> Result<(), Error> {
     let title = if is_give { "Give Creds" } else { "Take Creds" };
 
-    if amount > 10000 {
+    if amount > 100000 {
         ctx.send(
             poise::CreateReply::default().embed(
                 serenity::CreateEmbed::new()
                     .title(title)
-                    .description("The max amount allowed is 10000.")
+                    .description("The max amount allowed is 100000.")
                     .image("https://cdn.discordapp.com/attachments/1196582162057662484/1205685838877433866/tenor_2.gif?ex=65d94570&is=65c6d070&hm=be06433cb7dd2c592468560dfffbc5ce6c294582db38f177028ba80a46f67a43&")
                     .color(data::EMBED_ERROR)
                     .footer(serenity::CreateEmbedFooter::new(
@@ -161,7 +161,7 @@ async fn modify_creds(
 pub async fn give_creds(
     ctx: Context<'_>,
     #[description = "@username | example: @UwUntu @Rustybamboo"] mentioned: String,
-    #[description = "amount of creds to give (max: 10000)"] amount: u32,
+    #[description = "amount of creds to give (max: 100000)"] amount: u32,
 ) -> Result<(), Error> {
     modify_creds(ctx, mentioned, amount, true).await
 }
@@ -171,7 +171,7 @@ pub async fn give_creds(
 pub async fn take_creds(
     ctx: Context<'_>,
     #[description = "@username | example: @UwUntu @Rustybamboo"] mentioned: String,
-    #[description = "amount of creds to take (max: 10000)"] amount: u32,
+    #[description = "amount of creds to take (max: 100000)"] amount: u32,
 ) -> Result<(), Error> {
     modify_creds(ctx, mentioned, amount, false).await
 }

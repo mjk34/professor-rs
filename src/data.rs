@@ -10,7 +10,7 @@ use std::{env, fs};
 use tokio::sync::RwLock;
 
 // Stock feature constants
-pub const GOLD_LEVEL_THRESHOLD: i32 = 20;
+pub const GOLD_LEVEL_THRESHOLD: i32 = 10;
 pub const BASE_HYSA_RATE: f64 = 0.1;  // annual % for non-gold users
 pub const TRADE_HISTORY_LIMIT: usize = 500;
 
@@ -330,7 +330,9 @@ impl Data {
                 return Ok(());
             }
 
-            data.insert(user_id, Default::default());
+            let mut new_user = UserData::default();
+            new_user.add_creds(100_000);
+            data.insert(user_id, Arc::new(RwLock::new(new_user)));
         }
 
         ctx.send(

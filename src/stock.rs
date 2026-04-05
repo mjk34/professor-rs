@@ -15,7 +15,7 @@ use crate::data::{
     UserData, GOLD_LEVEL_THRESHOLD, TRADE_HISTORY_LIMIT,
 };
 use crate::{serenity, Context, Error};
-use chrono::{Datelike, NaiveDate, TimeZone, Utc};
+use chrono::{Datelike, NaiveDate, TimeZone, Timelike, Utc, Weekday};
 use dashmap::DashMap;
 use poise::serenity_prelude::{futures::StreamExt, ChannelId, CreateMessage, EditMessage};
 use serde::Deserialize;
@@ -42,6 +42,14 @@ fn gold_hysa_rate(fed_rate: f64) -> f64 {
 
 fn is_gold(user_data: &UserData) -> bool {
     user_data.get_level() >= GOLD_LEVEL_THRESHOLD
+}
+
+fn fmt_qty(q: f64) -> String {
+    if q.fract() == 0.0 {
+        format!("{:.0}", q)
+    } else {
+        format!("{:.4}", q)
+    }
 }
 
 fn format_large_num(n: f64) -> String {
@@ -170,6 +178,32 @@ impl YfQuote {
     }
 }
 
+// ── Market hours ─────────────────────────────────────────────────────────────
+
+static TZ_OFFSET: LazyLock<i64> = LazyLock::new(|| {
+    std::env::var("TZ_OFFSET_HOURS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(-4)
+});
+
+fn is_market_hours() -> bool {
+    let now_eastern = Utc::now() + chrono::Duration::hours(*TZ_OFFSET);
+    let hour = now_eastern.hour();
+    matches!(
+        now_eastern.weekday(),
+        Weekday::Mon | Weekday::Tue | Weekday::Wed | Weekday::Thu | Weekday::Fri
+    ) && hour >= 9 && hour < 17
+}
+
+fn fmt_pct_change(value: f64, basis: f64) -> String {
+    if basis > 0.0 {
+        format!(" ({:+.1}%)", value / basis * 100.0)
+    } else {
+        String::new()
+    }
+}
+
 // ── HTTP helpers ─────────────────────────────────────────────────────────────
 
 static HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
@@ -255,7 +289,7 @@ async fn fetch_price(ticker: &str) -> Option<f64> {
 
 async fn fetch_quote_detail(ticker: &str) -> Option<YfQuote> {
     if let Some(entry) = QUOTE_CACHE.get(ticker) {
-        if entry.1.elapsed() < QUOTE_CACHE_TTL {
+        if !is_market_hours() || entry.1.elapsed() < QUOTE_CACHE_TTL {
             return Some(entry.0.clone());
         }
     }
@@ -301,7 +335,7 @@ async fn fetch_quote_detail(ticker: &str) -> Option<YfQuote> {
 
 async fn fetch_fmp_profile(ticker: &str) -> Option<FmpProfile> {
     if let Some(entry) = FMP_CACHE.get(ticker) {
-        if entry.1.elapsed() < FMP_CACHE_TTL {
+        if !is_market_hours() || entry.1.elapsed() < FMP_CACHE_TTL {
             return Some(entry.0.clone());
         }
     }
@@ -326,7 +360,7 @@ async fn fetch_fmp_profile(ticker: &str) -> Option<FmpProfile> {
 
 async fn fetch_fmp_ratios(ticker: &str) -> Option<FmpRatios> {
     if let Some(entry) = FMP_RATIOS_CACHE.get(ticker) {
-        if entry.1.elapsed() < FMP_RATIOS_CACHE_TTL {
+        if !is_market_hours() || entry.1.elapsed() < FMP_RATIOS_CACHE_TTL {
             return Some(entry.0.clone());
         }
     }
@@ -699,8 +733,8 @@ async fn portfolio_list(ctx: Context<'_>) -> Result<(), Error> {
     let data = &ctx.data().users;
     let u = data.get(&ctx.author().id).unwrap();
 
-    // Collect everything we need under the read lock, then drop it.
-    let (desc, rate_label) = {
+    // Collect portfolios and rate label under the read lock, then drop it.
+    let (portfolios, rate_label) = {
         let user_data = u.read().await;
 
         if user_data.stock.portfolios.is_empty() {
@@ -718,35 +752,42 @@ async fn portfolio_list(ctx: Context<'_>) -> Result<(), Error> {
             return Ok(());
         }
 
-        let annual_rate = if is_gold(&user_data) {
-            gold_hysa_rate(fed_rate_val)
-        } else {
-            data::BASE_HYSA_RATE
-        };
-        let daily_rate = annual_rate / 100.0 / 365.0;
-
-        let mut desc = String::new();
-        for p in &user_data.stock.portfolios {
-            let daily_accrual = daily_rate * p.cash;
-            desc += &format!(
-                "**{}** — Cash: **${:.2}** ({:.0} creds) | {} positions | ~${:.2}/day\n",
-                p.name,
-                creds_to_price(p.cash),
-                p.cash,
-                p.positions.len(),
-                creds_to_price(daily_accrual)
-            );
-        }
-
         let rate_label = if is_gold(&user_data) {
             format!("Gold HYSA: {:.2}% APY", gold_hysa_rate(fed_rate_val))
         } else {
             format!("Base HYSA: {:.2}% APY", data::BASE_HYSA_RATE)
         };
 
-        (desc, rate_label)
+        (user_data.stock.portfolios.clone(), rate_label)
         // read lock released here
     };
+
+    // Fetch live prices and build description outside the lock.
+    let mut desc = String::new();
+    for p in &portfolios {
+        let mut positions_value: f64 = 0.0;
+        let mut cost_basis: f64 = 0.0;
+        for pos in &p.positions {
+            if let Some(price) = fetch_price(&pos.ticker).await {
+                positions_value += price_to_creds(price) * pos.quantity;
+            }
+            cost_basis += pos.avg_cost * pos.quantity;
+        }
+        let total_creds = p.cash + positions_value;
+        let pnl_str = if cost_basis > 0.0 {
+            let pct = (positions_value - cost_basis) / cost_basis * 100.0;
+            format!("{:+.2}%", pct)
+        } else {
+            "—".to_string()
+        };
+        desc += &format!(
+            "**{}** — **${:.2}** (total value) | {} | {} positions\n",
+            p.name,
+            creds_to_price(total_creds),
+            pnl_str,
+            p.positions.len(),
+        );
+    }
 
     ctx.send(
         poise::CreateReply::default().embed(
@@ -813,10 +854,24 @@ async fn portfolio_view(
 
     let daily_accrual = (annual_rate / 100.0 / 365.0) * portfolio.cash;
 
+    let mut price_cache: HashMap<String, f64> = HashMap::new();
+    let mut positions_value: f64 = 0.0;
+    for pos in &portfolio.positions {
+        let price = if let Some(&p) = price_cache.get(&pos.ticker) {
+            p
+        } else {
+            let p = fetch_price(&pos.ticker).await.unwrap_or(0.0);
+            price_cache.insert(pos.ticker.clone(), p);
+            p
+        };
+        positions_value += price_to_creds(price) * pos.quantity;
+    }
+    let total_value = portfolio.cash + positions_value;
+
     let mut desc = format!(
-        "**Cash:** ${:.2} ({:.0} creds)\n**Daily interest:** ~${:.2}\n\n",
+        "**Total Value:** ${:.2}\n**Cash:** ${:.2} | **Daily interest:** ~${:.2}\n\n",
+        creds_to_price(total_value),
         creds_to_price(portfolio.cash),
-        portfolio.cash,
         creds_to_price(daily_accrual)
     );
 
@@ -825,7 +880,7 @@ async fn portfolio_view(
     } else {
         desc += "**Positions:**\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n";
         for pos in &portfolio.positions {
-            let current_price_usd = fetch_price(&pos.ticker).await.unwrap_or(0.0);
+            let current_price_usd = price_cache.get(&pos.ticker).copied().unwrap_or(0.0);
             let cost_basis = pos.avg_cost * pos.quantity;
 
             match &pos.asset_type {
@@ -843,15 +898,17 @@ async fn portfolio_view(
                         0.0
                     };
                     desc += &format!(
-                        "**{} {} ${:.2}** exp {} — {} contracts\nCost: {:.0} | Value: {:.0} | P&L: {:+.0} ({:+.1}%)\n\n",
+                        "**{} {} ${:.2}** exp {} — {} contracts\nCost: **${:.2}** ({:.0} creds) | Value: **${:.2}** ({:.0} creds) | P&L: **${:+.2}** ({:+.1}%)\n\n",
                         pos.ticker,
                         option_type_str(&contract.option_type),
                         contract.strike,
                         contract.expiry.format("%Y-%m-%d"),
                         contract.contracts,
+                        creds_to_price(cost_basis),
                         cost_basis,
+                        creds_to_price(current_value),
                         current_value,
-                        pnl,
+                        creds_to_price(pnl),
                         pnl_pct
                     );
                 }
@@ -865,13 +922,14 @@ async fn portfolio_view(
                         0.0
                     };
                     desc += &format!(
-                        "**{}** × {:.4} — Avg: {:.0}¢ | Now: {:.0}¢\nValue: {:.0} creds | P&L: {:+.0} ({:+.1}%)\n\n",
+                        "**{}** × {} — Avg: ${:.2} | Now: ${:.2}\nValue: **${:.2}** ({:.0} creds) | P&L: **${:+.2}** ({:+.1}%)\n\n",
                         pos.ticker,
-                        pos.quantity,
-                        pos.avg_cost,
-                        current_creds,
+                        fmt_qty(pos.quantity),
+                        creds_to_price(pos.avg_cost),
+                        current_price_usd,
+                        creds_to_price(current_value),
                         current_value,
-                        pnl,
+                        creds_to_price(pnl),
                         pnl_pct
                     );
                 }
@@ -899,14 +957,14 @@ async fn portfolio_view(
 async fn portfolio_fund(
     ctx: Context<'_>,
     #[description = "Portfolio name"] name: String,
-    #[description = "Amount of creds to deposit"] amount: u32,
+    #[description = "Dollar amount to deposit (e.g. $1.00 = 100 creds)"] dollars: f64,
 ) -> Result<(), Error> {
-    if amount == 0 {
+    if dollars <= 0.0 || dollars > 100_000.0 {
         ctx.send(
             poise::CreateReply::default().embed(
                 serenity::CreateEmbed::new()
                     .title("Portfolio — Fund")
-                    .description("Amount must be greater than 0.")
+                    .description("Amount must be between $0.01 and $100,000.00.")
                     .color(data::EMBED_ERROR),
             ),
         )
@@ -914,16 +972,18 @@ async fn portfolio_fund(
         return Ok(());
     }
 
+    let amount = price_to_creds(dollars) as i32;
+
     let data = &ctx.data().users;
     let u = data.get(&ctx.author().id).unwrap();
 
     let fund_result: Result<f64, String> = {
         let mut user_data = u.write().await;
-        if user_data.get_creds() < amount as i32 {
+        if user_data.get_creds() < amount {
             Err(format!(
-                "Insufficient creds. You have **{}** but tried to deposit **{}**.",
-                user_data.get_creds(),
-                amount
+                "Insufficient creds. You have **${:.2}** ({} creds) but tried to deposit **${:.2}** ({} creds).",
+                creds_to_price(user_data.get_creds() as f64), user_data.get_creds(),
+                dollars, amount
             ))
         } else {
             match user_data
@@ -936,7 +996,7 @@ async fn portfolio_fund(
                 Some(p) => {
                     p.cash += amount as f64;
                     let new_cash = p.cash;
-                    user_data.sub_creds(amount as i32);
+                    user_data.sub_creds(amount);
                     Ok(new_cash)
                 }
             }
@@ -962,8 +1022,8 @@ async fn portfolio_fund(
                     serenity::CreateEmbed::new()
                         .title("Portfolio — Fund")
                         .description(format!(
-                            "Deposited **{}** creds into **{}**.\nNew cash balance: **{:.0}** creds.",
-                            amount, name, new_cash
+                            "Deposited **${:.2}** into **{}**.\nNew cash balance: **${:.2}**.",
+                            dollars, name, creds_to_price(new_cash)
                         ))
                         .color(data::EMBED_SUCCESS)
                         .footer(serenity::CreateEmbedFooter::new(
@@ -982,20 +1042,22 @@ async fn portfolio_fund(
 async fn portfolio_withdraw(
     ctx: Context<'_>,
     #[description = "Portfolio name"] name: String,
-    #[description = "Amount of creds to withdraw"] amount: u32,
+    #[description = "Dollar amount to withdraw (e.g. $1.00 = 100 creds)"] dollars: f64,
 ) -> Result<(), Error> {
-    if amount == 0 {
+    if dollars <= 0.0 || dollars > 100_000.0 {
         ctx.send(
             poise::CreateReply::default().embed(
                 serenity::CreateEmbed::new()
                     .title("Portfolio — Withdraw")
-                    .description("Amount must be greater than 0.")
+                    .description("Amount must be between $0.01 and $100,000.00.")
                     .color(data::EMBED_ERROR),
             ),
         )
         .await?;
         return Ok(());
     }
+
+    let amount = price_to_creds(dollars) as i32;
 
     let data = &ctx.data().users;
     let u = data.get(&ctx.author().id).unwrap();
@@ -1010,13 +1072,13 @@ async fn portfolio_withdraw(
         {
             None => Err(format!("No portfolio named **{}** found.", name)),
             Some(p) if p.cash < amount as f64 => Err(format!(
-                "Insufficient cash. **{}** has **{:.0}** creds but tried to withdraw **{}**.",
-                name, p.cash, amount
+                "Insufficient cash. **{}** has **${:.2}** but tried to withdraw **${:.2}**.",
+                name, creds_to_price(p.cash), dollars
             )),
             Some(p) => {
                 p.cash -= amount as f64;
                 let remaining = p.cash;
-                user_data.add_creds(amount as i32);
+                user_data.add_creds(amount);
                 Ok(remaining)
             }
         }
@@ -1041,8 +1103,8 @@ async fn portfolio_withdraw(
                     serenity::CreateEmbed::new()
                         .title("Portfolio — Withdraw")
                         .description(format!(
-                            "Withdrew **{}** creds from **{}** to your wallet.\nRemaining cash: **{:.0}** creds.",
-                            amount, name, remaining_cash
+                            "Withdrew **${:.2}** from **{}** to your wallet.\nRemaining cash: **${:.2}**.",
+                            dollars, name, creds_to_price(remaining_cash)
                         ))
                         .color(data::EMBED_SUCCESS)
                         .footer(serenity::CreateEmbedFooter::new(
@@ -1512,7 +1574,7 @@ pub async fn buy(
     let u = data_ref.get(&ctx.author().id).unwrap();
     let mut user_data = u.write().await;
 
-    let remaining_cash = {
+    let _remaining_cash = {
         let port = match user_data
             .stock
             .portfolios
@@ -1540,8 +1602,8 @@ pub async fn buy(
                     serenity::CreateEmbed::new()
                         .title("Buy")
                         .description(format!(
-                            "Insufficient cash. Need **{:.0}** creds but **{}** has **{:.0}**.",
-                            total_cost, portfolio, port.cash
+                            "Insufficient cash. Need **${:.2}** ({:.0} creds) but **{}** has **${:.2}** ({:.0} creds).",
+                            creds_to_price(total_cost), total_cost, portfolio, creds_to_price(port.cash), port.cash
                         ))
                         .color(data::EMBED_ERROR),
                 ),
@@ -1593,8 +1655,8 @@ pub async fn buy(
         serenity::CreateEmbed::new()
             .title("Buy")
             .description(format!(
-                "Bought **{:.4} {}** ({}) for **{:.0}** creds\n${:.2}/unit | Portfolio **{}** cash: **{:.0}** creds",
-                quantity, ticker, asset_name, total_cost, price_usd, portfolio, remaining_cash
+                "Bought **{} {}** ({}) for **${:.2}** ({:.0} creds)\n${:.2}/unit | Portfolio: **{}**",
+                fmt_qty(quantity), ticker, asset_name, creds_to_price(total_cost), total_cost, price_usd, portfolio
             ))
             .color(data::EMBED_SUCCESS)
             .footer(serenity::CreateEmbedFooter::new(
@@ -1611,15 +1673,16 @@ pub async fn buy(
 pub async fn sell(
     ctx: Context<'_>,
     #[description = "Ticker symbol (e.g. AAPL, BTC-USD)"] ticker_query: String,
-    #[description = "Quantity to sell (fractional ok)"] quantity: f64,
     #[description = "Portfolio to sell from"] portfolio: String,
+    #[description = "Number of shares to sell (fractional ok)"] quantity: Option<f64>,
+    #[description = "Dollar amount to sell (e.g. 200 to sell $200 worth)"] amount: Option<f64>,
 ) -> Result<(), Error> {
-    if quantity <= 0.0 {
+    if quantity.is_some() && amount.is_some() {
         ctx.send(
             poise::CreateReply::default().embed(
                 serenity::CreateEmbed::new()
                     .title("Sell")
-                    .description("Quantity must be greater than 0.")
+                    .description("Provide either a **quantity** or a **dollar amount**, not both.")
                     .color(data::EMBED_ERROR),
             ),
         )
@@ -1667,12 +1730,13 @@ pub async fn sell(
     };
 
     let price_per_unit = price_to_creds(price_usd);
+    // quantity resolved below after position lookup for "sell all" case
 
     let data_ref = &ctx.data().users;
     let u = data_ref.get(&ctx.author().id).unwrap();
     let mut user_data = u.write().await;
 
-    let (proceeds, pnl) = {
+    let (proceeds, pnl, quantity) = {
         let port = match user_data
             .stock
             .portfolios
@@ -1717,14 +1781,22 @@ pub async fn sell(
             }
         };
 
+        let quantity = if let Some(q) = quantity {
+            q
+        } else if let Some(a) = amount {
+            price_to_creds(a) / price_per_unit
+        } else {
+            port.positions[pos_idx].quantity
+        };
+
         if port.positions[pos_idx].quantity < quantity - 1e-9 {
             ctx.send(
                 poise::CreateReply::default().embed(
                     serenity::CreateEmbed::new()
                         .title("Sell")
                         .description(format!(
-                            "You only hold **{:.4}** of **{}** but tried to sell **{:.4}**.",
-                            port.positions[pos_idx].quantity, ticker, quantity
+                            "You only hold **{}** of **{}** but tried to sell **{}**.",
+                            fmt_qty(port.positions[pos_idx].quantity), ticker, fmt_qty(quantity)
                         ))
                         .color(data::EMBED_ERROR),
                 ),
@@ -1743,7 +1815,7 @@ pub async fn sell(
             port.positions.remove(pos_idx);
         }
 
-        (proceeds, pnl)
+        (proceeds, pnl, quantity)
     };
 
     let record = TradeRecord {
@@ -1763,9 +1835,9 @@ pub async fn sell(
     }
 
     let pnl_str = if pnl >= 0.0 {
-        format!("▲ +{:.0}", pnl)
+        format!("▲ +${:.2} ({:.0} creds)", creds_to_price(pnl), pnl)
     } else {
-        format!("▼ {:.0}", pnl)
+        format!("▼ -${:.2} ({:.0} creds)", creds_to_price(pnl.abs()), pnl)
     };
     let color = if pnl >= 0.0 {
         data::EMBED_SUCCESS
@@ -1778,8 +1850,8 @@ pub async fn sell(
         serenity::CreateEmbed::new()
             .title("Sell")
             .description(format!(
-                "Sold **{:.4} {}** for **{:.0}** creds (${:.2}/unit)\nRealized P&L: **{}** creds",
-                quantity, ticker, proceeds, price_usd, pnl_str
+                "Sold **{} {}** for **${:.2}** ({:.0} creds)\n${:.2}/unit | Realized P&L: **{}**",
+                fmt_qty(quantity), ticker, creds_to_price(proceeds), proceeds, price_usd, pnl_str
             ))
             .color(color)
             .footer(serenity::CreateEmbedFooter::new(
@@ -1796,7 +1868,7 @@ pub async fn sell(
 /// Manage your watchlist
 #[poise::command(
     slash_command,
-    subcommands("watchlist_add", "watchlist_remove", "watchlist_list")
+    subcommands("watchlist_add", "watchlist_remove", "watchlist_list", "watchlist_clear")
 )]
 pub async fn watchlist(_ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
@@ -1955,11 +2027,10 @@ async fn watchlist_list(ctx: Context<'_>) -> Result<(), Error> {
         let change_pct = quote.regular_market_change_percent.unwrap_or(0.0);
         let arrow = if change_pct >= 0.0 { "▲" } else { "▼" };
         rows.push(format!(
-            "**{}** — {} | ${:.2} / {:.0}¢ | {} {:.2}%",
+            "**{}** — {} | ${:.2} | {} **{:.2}%**",
             ticker,
             quote.display_name(),
             price_usd,
-            price_to_creds(price_usd),
             arrow,
             change_pct.abs()
         ));
@@ -1980,14 +2051,39 @@ async fn watchlist_list(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
+/// Clear all tickers from your watchlist
+#[poise::command(slash_command, rename = "clear")]
+async fn watchlist_clear(ctx: Context<'_>) -> Result<(), Error> {
+    let data_ref = &ctx.data().users;
+    let u = data_ref.get(&ctx.author().id).unwrap();
+    let mut user_data = u.write().await;
+    let count = user_data.stock.watchlist.len();
+    user_data.stock.watchlist.clear();
+    drop(user_data);
+
+    ctx.send(
+        poise::CreateReply::default().embed(
+            serenity::CreateEmbed::new()
+                .title("Watchlist")
+                .description(format!("Cleared **{}** ticker(s) from your watchlist.", count))
+                .color(data::EMBED_SUCCESS),
+        ),
+    )
+    .await?;
+    Ok(())
+}
+
 // ── Trade History ─────────────────────────────────────────────────────────────
 
 fn build_summary_embed(trades: &std::collections::VecDeque<TradeRecord>) -> serenity::CreateEmbed {
-    let mut map: HashMap<&str, (f64, f64, u32)> = HashMap::new();
+    // (gains, losses, count, cost_basis)
+    let mut map: HashMap<&str, (f64, f64, u32, f64)> = HashMap::new();
     for t in trades {
-        let entry = map.entry(t.portfolio.as_str()).or_insert((0.0, 0.0, 0));
+        let entry = map.entry(t.portfolio.as_str()).or_insert((0.0, 0.0, 0, 0.0));
         entry.2 += 1;
         if let Some(pnl) = t.realized_pnl {
+            let cost = t.total_creds - pnl;
+            entry.3 += cost;
             if pnl >= 0.0 {
                 entry.0 += pnl;
             } else {
@@ -2005,17 +2101,19 @@ fn build_summary_embed(trades: &std::collections::VecDeque<TradeRecord>) -> sere
 
     let mut desc = String::new();
     let mut total_net = 0.0_f64;
+    let mut total_basis = 0.0_f64;
     let mut sorted: Vec<_> = map.iter().collect();
     sorted.sort_by_key(|(k, _)| *k);
-    for (name, (gains, losses, count)) in sorted {
+    for (name, (gains, losses, count, basis)) in sorted {
         let net = gains + losses;
         total_net += net;
+        total_basis += basis;
         desc += &format!(
-            "**{}** — {} trades | +{:.0} gains | {:.0} losses | Net: {:+.0}\n",
-            name, count, gains, losses, net
+            "**{}** — {} trades | +${:.2} gains | -${:.2} losses | Net: **${:+.2}{}**\n",
+            name, count, creds_to_price(*gains), creds_to_price(losses.abs()), creds_to_price(net), fmt_pct_change(net, *basis)
         );
     }
-    desc += &format!("\n**Total Net P&L: {:+.0} creds**", total_net);
+    desc += &format!("\n**Total Net P&L: ${:+.2}{}**", creds_to_price(total_net), fmt_pct_change(total_net, total_basis));
 
     serenity::CreateEmbed::new()
         .title("Trade History — Summary")
@@ -2055,13 +2153,15 @@ fn build_filtered_embed(trades: &std::collections::VecDeque<TradeRecord>, gains_
     let mut desc = String::new();
     for t in filtered.iter().rev().take(15) {
         let pnl = t.realized_pnl.unwrap_or(0.0);
+        let cost = t.total_creds - pnl;
         desc += &format!(
-            "{} **{}** [{}] × {:.4} | P&L: {:+.0}\n",
+            "{} **{}** [{}] × {} | P&L: **${:+.2}{}**\n",
             t.timestamp.format("%m/%d"),
             t.ticker,
             t.portfolio,
-            t.quantity,
-            pnl
+            fmt_qty(t.quantity),
+            creds_to_price(pnl),
+            fmt_pct_change(pnl, cost)
         );
     }
 
@@ -2094,15 +2194,18 @@ fn build_all_trades_embed(trades: &std::collections::VecDeque<TradeRecord>) -> s
         };
         let pnl_str = t
             .realized_pnl
-            .map(|p| format!(" | {:+.0}", p))
+            .map(|p| {
+                let cost = t.total_creds - p;
+                format!(" | P&L: **${:+.2}{}**", creds_to_price(p), fmt_pct_change(p, cost))
+            })
             .unwrap_or_default();
         desc += &format!(
-            "{} `{}` **{}** × {:.4} — {:.0}¢{}\n",
+            "{} `{}` **{}** × {} — **${:.2}**{}\n",
             t.timestamp.format("%m/%d"),
             action,
             t.ticker,
-            t.quantity,
-            t.total_creds,
+            fmt_qty(t.quantity),
+            creds_to_price(t.total_creds),
             pnl_str
         );
     }
@@ -2431,8 +2534,8 @@ pub async fn options_buy(
                     serenity::CreateEmbed::new()
                         .title("Options Buy")
                         .description(format!(
-                            "Insufficient cash. Need **{:.0}** creds but have **{:.0}**.",
-                            total_cost, port.cash
+                            "Insufficient cash. Need **${:.2}** ({:.0} creds) but **{}** has **${:.2}** ({:.0} creds).",
+                            creds_to_price(total_cost), total_cost, portfolio, creds_to_price(port.cash), port.cash
                         ))
                         .color(data::EMBED_ERROR),
                 ),

@@ -61,7 +61,6 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
     let u = data.get(&user.id).unwrap();
     let mut user_data = u.write().await;
 
-    // check if daily is available
     if !user_data.check_daily() {
         ctx.send(
             poise::CreateReply::default().embed(
@@ -81,8 +80,8 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
 
     let bonus = 0; // change this to scale with level
 
-    let low = (check - 1) * 50;
-    let high = check * 50;
+    let low = 2_000 + (check - 1) * 600;
+    let high = 2_000 + check * 600;
     let fortune = thread_rng().gen_range(low..high);
 
     let total: i32;
@@ -91,12 +90,12 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
     let roll_color: Color;
 
     if d20 == 20 {
-        total = 1200;
+        total = thread_rng().gen_range(50_000..200_000);
         roll_str = "**Critical Success!!**".to_string();
         roll_context = "+".to_string();
         roll_color = data::EMBED_GOLD;
     } else if d20 == 1 {
-        total = fortune;
+        total = thread_rng().gen_range(15_000..40_000);
         roll_str = "**Critical Failure!**".to_string();
         roll_context = "-".to_string();
         roll_color = data::EMBED_FAIL;
@@ -213,7 +212,7 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
                     serenity::CreateEmbed::new()
                         .title("⭐ Gold Status Unlocked!")
                         .description(format!(
-                            "Congratulations <@{}>! You've reached **Level 20** and unlocked **Gold Status**!\n\nYou now earn a higher HYSA rate on uninvested portfolio cash.",
+                            "Congratulations <@{}>! You've reached **Level 10** and unlocked **Gold Status**!\n\nYou now earn a higher HYSA rate on uninvested portfolio cash.",
                             user.id
                         ))
                         .thumbnail(user.avatar_url().unwrap_or_default())
@@ -327,7 +326,7 @@ pub async fn claim_bonus(ctx: Context<'_>) -> Result<(), Error> {
                         serenity::CreateEmbed::new()
                             .title("⭐ Gold Status Unlocked!")
                             .description(format!(
-                                "Congratulations <@{}>! You've reached **Level 20** and unlocked **Gold Status**!\n\nYou now earn a higher HYSA rate on uninvested portfolio cash.",
+                                "Congratulations <@{}>! You've reached **Level 10** and unlocked **Gold Status**!\n\nYou now earn a higher HYSA rate on uninvested portfolio cash.",
                                 user.id
                             ))
                             .thumbnail(user.avatar_url().unwrap_or_default())
