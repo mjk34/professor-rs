@@ -493,12 +493,24 @@ pub enum AssetType {
     Option(OptionContract),
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum OptionSide {
+    Long,
+    Short,
+}
+
+fn default_long() -> OptionSide {
+    OptionSide::Long
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OptionContract {
     pub strike: f64,
     pub expiry: DateTime<Utc>,
     pub option_type: OptionType,
     pub contracts: u32,
+    #[serde(default = "default_long")]
+    pub side: OptionSide,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

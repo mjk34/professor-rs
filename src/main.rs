@@ -75,6 +75,8 @@ async fn main() {
                 stock::options_quote(),
                 stock::options_buy(),
                 stock::options_sell(),
+                stock::options_write(),
+                stock::options_cover(),
             ],
             prefix_options: poise::PrefixFrameworkOptions {
                 prefix: Some("~".into()),
