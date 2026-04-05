@@ -427,6 +427,12 @@ async fn fetch_price(ticker: &str) -> Option<f64> {
 }
 
 async fn fetch_quote_detail(ticker: &str) -> Option<YfQuote> {
+    // Validate ticker before interpolating into URL — guards against SSRF from user or AI input
+    if ticker.is_empty() || ticker.len() > 20 || !ticker.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.') {
+        tracing::warn!("fetch_quote_detail: rejected invalid ticker {:?}", ticker);
+        return None;
+    }
+
     if let Some(entry) = QUOTE_CACHE.get(ticker) {
         if !is_market_hours() || entry.1.elapsed() < QUOTE_CACHE_TTL {
             return Some(entry.0.clone());
@@ -3535,7 +3541,7 @@ async fn trading_session(
         .trim_start_matches("```json").trim_start_matches("```").trim_end_matches("```").trim();
     match serde_json::from_str::<ProfessorResponse>(json_str) {
         Ok(r) => Some(r),
-        Err(e) => { tracing::warn!("Professor parse failed: {e}\nRaw: {raw}"); None }
+        Err(e) => { tracing::warn!("Professor parse failed: {e} (response length: {} chars)", raw.len()); None }
     }
 }
 
