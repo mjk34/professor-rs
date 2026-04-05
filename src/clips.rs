@@ -472,7 +472,6 @@ pub async fn next_clip(ctx: Context<'_>) -> Result<(), Error> {
         .read()
         .await
         .await_component_interactions(ctx)
-        .timeout(Duration::new(10 * 60, 0))
         .stream();
 
     let mod_id = ctx.data().mod_id;
@@ -485,7 +484,7 @@ pub async fn next_clip(ctx: Context<'_>) -> Result<(), Error> {
     tokio::spawn(async move {
         let score: AtomicF64 = AtomicF64::new(0.0);
         let voted_users = DashMap::new();
-        while let Some(reaction) = reactions.next().await {
+        while let Ok(Some(reaction)) = tokio::time::timeout(Duration::new(10 * 60, 0), reactions.next()).await {
             let roles = reaction.member.clone().unwrap_or_default().roles;
             if reaction.data.custom_id == "vote-done" {
                 if !roles.contains(&mod_id) {

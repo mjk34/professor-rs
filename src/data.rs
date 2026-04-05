@@ -89,11 +89,18 @@ pub struct UserData {
 
     #[serde(default)]
     pub professor_memory: Option<ProfessorMemory>,
+
+    #[serde(default)]
+    recent_rolls: VecDeque<i32>,
 }
 
 impl UserData {
     pub fn update_level(&mut self) {
         self.level += 1;
+    }
+
+    pub fn set_level(&mut self, level: i32) {
+        self.level = level;
     }
 
     pub fn update_xp(&mut self, xp: i32) -> bool {
@@ -188,11 +195,11 @@ impl UserData {
         if average < 6 {
             luck = "Horrible".to_string();
         } else if (6..9).contains(&average) {
-            luck = "Below Average".to_string();
+            luck = "Bad".to_string();
         } else if (9..12).contains(&average) {
             luck = "Average".to_string();
         } else if (12..15).contains(&average) {
-            luck = "Above Average".to_string();
+            luck = "Good".to_string();
         } else {
             luck = "Blessed".to_string();
         }
@@ -202,6 +209,38 @@ impl UserData {
 
     pub fn get_luck_score(&self) -> i32 {
         self.rolls / (self.daily_count + 1)
+    }
+
+    pub fn push_roll(&mut self, d20: i32) {
+        if self.recent_rolls.len() >= 7 {
+            self.recent_rolls.pop_front();
+        }
+        self.recent_rolls.push_back(d20);
+    }
+
+    pub fn get_rolling_luck_score(&self) -> i32 {
+        if self.recent_rolls.is_empty() {
+            return 0;
+        }
+        self.recent_rolls.iter().sum::<i32>() / self.recent_rolls.len() as i32
+    }
+
+    pub fn get_rolling_luck(&self) -> String {
+        if self.recent_rolls.is_empty() {
+            return "N/A".to_string();
+        }
+        let average = self.get_rolling_luck_score();
+        if average < 6 {
+            "Horrible".to_string()
+        } else if (6..9).contains(&average) {
+            "Bad".to_string()
+        } else if (9..12).contains(&average) {
+            "Average".to_string()
+        } else if (12..15).contains(&average) {
+            "Good".to_string()
+        } else {
+            "Blessed".to_string()
+        }
     }
 
     pub fn get_bonus(&self) -> i32 {
@@ -425,7 +464,12 @@ impl Data {
             bad_fortune,
             good_fortune,
             hysa_fed_rate: Arc::new(RwLock::new(3.35)),
-            bot_user_id: serenity::UserId::new(0),
+            bot_user_id: serenity::UserId::new(
+                env::var("PROFESSOR")
+                    .expect("missing PROFESSOR id")
+                    .parse()
+                    .expect("PROFESSOR id is not a valid u64"),
+            ),
         }
     }
 }

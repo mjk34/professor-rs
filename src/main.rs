@@ -60,12 +60,15 @@ async fn main() {
                 basic::voice_status(),
                 basic::info(),
                 basic::buy_tickets(),
+                basic::leaderboard(),
                 clips::submit_clip(),
                 clips::server_clips(),
                 clips::my_clips(),
                 clips::next_clip(),
                 mods::give_creds(),
                 mods::take_creds(),
+                mods::test_seed_data(),
+                mods::test_set_level(),
                 stock::portfolio(),
                 stock::search(),
                 stock::buy(),
@@ -78,6 +81,7 @@ async fn main() {
                 stock::options_write(),
                 stock::options_cover(),
                 stock::professor(),
+                stock::test_professor(),
             ],
             prefix_options: poise::PrefixFrameworkOptions {
                 prefix: Some("~".into()),
@@ -97,6 +101,7 @@ async fn main() {
                 let bot_chat = data.bot_chat.clone();
                 background_task(users.clone(), voice_users);
                 stock::refresh_market_rate(&data.hysa_fed_rate).await;
+                stock::api_health_check().await;
                 maintenance_task(users.clone(), http.clone(), hysa_rate, bot_chat.clone());
 
                 // Seed Professor's UserData and start the daily AI trading task
@@ -117,8 +122,7 @@ async fn main() {
                         core_behavior: core_behavior.clone(),
                         entries: std::collections::VecDeque::new(),
                     });
-                    let mut port = data::Portfolio::new("ProfessorPort".to_string());
-                    port.cash = 100_000.0; // 100k creds = $1,000 starting cash
+                    let port = data::Portfolio::new("ProfessorPort".to_string());
                     prof.stock.portfolios.push(port);
                     data.users.insert(bot_user_id, Arc::new(RwLock::new(prof)));
                 } else {
@@ -140,7 +144,7 @@ async fn main() {
         .activity(serenity::ActivityData {
             name: "Coding Rust".to_string(),
             kind: serenity::ActivityType::Custom,
-            state: Some("Phase1 - Testing".to_string()),
+            state: Some("StonkBot - Testing".to_string()),
             url: None,
         })
         .status(serenity::OnlineStatus::Online)

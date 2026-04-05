@@ -7,7 +7,7 @@
 //!     [x] - uwu                                                       !
 //!     [x] - claim_bonus                                               !
 //!     [-] - wallet                                                    !
-//!     [-] - leaderboard                                               !
+//!     [x] - leaderboard                                               !
 //!     [x] - buy_tickets                                               !
 //!     [x] - voice_status                                              !
 //!     [x] - info                                                      !
@@ -82,19 +82,8 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
     let u = data.get(&user.id).unwrap();
     let mut user_data = u.write().await;
 
-    if !user_data.check_daily() {
-        ctx.send(
-            poise::CreateReply::default().embed(
-                serenity::CreateEmbed::new()
-                    .title("Daily")
-                    .description("Your next **/uwu** is tomorrow")
-                    .color(data::EMBED_ERROR)
-                    .thumbnail(user.avatar_url().unwrap_or_default()),
-            ),
-        )
-        .await?;
-        return Ok(());
-    }
+    // [TEST] daily cooldown disabled
+    // if !user_data.check_daily() { ... }
 
     let d20 = thread_rng().gen_range(1..21);
     let check = thread_rng().gen_range(6..15);
@@ -204,6 +193,7 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
 
     let levelup = user_data.update_xp(500);
     user_data.add_rolls(d20);
+    user_data.push_roll(d20);
     user_data.add_bonus();
     user_data.update_daily();
 
@@ -430,208 +420,243 @@ pub async fn wallet(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-/*
-/// show the top wealthiest users in the server
+fn fmt_pnl_short(pnl: f64) -> String {
+    let sign = if pnl >= 0.0 { "+" } else { "-" };
+    let abs = pnl.abs();
+    if abs >= 1_000_000.0 {
+        format!("{}${:.2}m", sign, abs / 1_000_000.0)
+    } else if abs >= 1_000.0 {
+        format!("{}${:.2}k", sign, abs / 1_000.0)
+    } else {
+        format!("{}${:.2}", sign, abs)
+    }
+}
+
+/// show server rankings — use buttons to switch between Creds, Fortune, and Investment
 #[poise::command(slash_command)]
-pub async fn leaderboard(
-    ctx: Context<'_>,
-    #[description = "F - sort by fortune | L - sort by level"] display: Option<String>,
-) -> Result<(), Error> {
+pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
     let data = &ctx.data().users;
-    let mut info = Vec::new();
 
-    let fortune: Vec<Option<String>> = vec![
-        Some("Fortune".to_string()),
-        Some("FORTUNE".to_string()),
-        Some("fortune".to_string()),
-        Some("F".to_string()),
-        Some("f".to_string()),
-    ];
-
-    let level: Vec<Option<String>> = vec![
-        Some("Level".to_string()),
-        Some("LEVEL".to_string()),
-        Some("level".to_string()),
-        Some("L".to_string()),
-        Some("l".to_string()),
-    ];
+    type InfoVec = Vec<(UserId, i64, String, String)>;
+    let mut creds_info: InfoVec = Vec::new();
+    let mut fortune_info: InfoVec = Vec::new();
+    let mut invest_info: InfoVec = Vec::new();
 
     for x in data.iter() {
         let (id, u) = x.pair();
-        let u = u.read().await;
+
+        let (creds, luck_score, luck_label, invest_pnl, invest_cost) = {
+            let u = u.read().await;
+            let creds = u.get_creds();
+            let luck_score = u.get_rolling_luck_score();
+            let luck_label = u.get_rolling_luck();
+            let mut total_pnl = 0.0f64;
+            let mut total_cost = 0.0f64;
+            for trade in &u.stock.trade_history {
+                if let Some(pnl) = trade.realized_pnl {
+                    total_pnl += pnl;
+                    total_cost += trade.total_creds - pnl;
+                }
+            }
+            (creds, luck_score, luck_label, total_pnl, total_cost)
+        };
 
         let user_name = id.to_user(ctx).await?.name;
 
-        if fortune.contains(&display) {
-            info.push((*id, u.get_luck_score(), u.get_luck(), user_name));
-        } else if level.contains(&display) {
-            let total_xp = u.get_level() * 80 + u.get_xp();
-            info.push((*id, total_xp, format!("Level {}", u.get_level()), user_name));
-        } else {
-            info.push((*id, u.get_creds(), String::new(), user_name));
+        creds_info.push((*id, creds as i64, creds.to_string(), user_name.clone()));
+
+        if luck_score > 0 {
+            fortune_info.push((*id, luck_score as i64, luck_label, user_name.clone()));
+        }
+
+        if invest_pnl != 0.0 {
+            let pct = if invest_cost > 0.0 { invest_pnl / invest_cost * 100.0 } else { 0.0 };
+            let label = format!("{} ({:+.1}%)", fmt_pnl_short(invest_pnl / 100.0), pct);
+            invest_info.push((*id, invest_pnl as i64, label, user_name));
         }
     }
-    info.sort_by(|a, b| b.1.cmp(&a.1));
 
-    let total_pages = (&info.len()) / 10 + 1;
+    creds_info.sort_by(|a, b| b.1.cmp(&a.1));
+    fortune_info.sort_by(|a, b| b.1.cmp(&a.1));
+    invest_info.sort_by(|a, b| b.1.cmp(&a.1));
 
-    fn get_leaderboard(
-        info: &[(UserId, i32, String, String)],
-        display: &Option<String>,
-        fortune: &[Option<String>],
-        level: &[Option<String>],
-        start: usize,
-    ) -> String {
-        let mut leaderboard_text = String::new();
-        leaderboard_text.push_str("﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n");
+    if creds_info.is_empty() {
+        ctx.say("No users found.").await?;
+        return Ok(());
+    }
 
-        for (index, (_id, u, s, user_name)) in info.iter().enumerate().skip(start).take(10) {
-            let rank = if index == 0 {
-                if fortune.contains(display) || level.contains(display) {
-                    format!(
-                        "\u{3000}** #{} ** \u{3000}\u{3000} **{}** \u{3000}\u{3000}~({})\n",
-                        index + 1,
-                        user_name,
-                        s
-                    )
-                } else {
-                    format!(
-                        "\u{3000}** #{} ** \u{3000}\u{3000} **{}** \u{3000}\u{3000}~({})\n",
-                        index + 1,
-                        user_name,
-                        u
-                    )
-                }
-            } else if index > 9 {
-                format!(
-                    "\u{3000}** #{} ** \u{3000}\u{2000} *{}*\n",
-                    index + 1,
-                    user_name,
-                )
-            } else {
-                format!(
-                    "\u{3000}** #{} ** \u{3000}\u{3000} *{}*\n",
-                    index + 1,
-                    user_name,
-                )
+    fn build_page(info: &[(UserId, i64, String, String)], start: usize) -> String {
+        let mut text = String::from("﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n```\n");
+        for (index, (_id, value, label, user_name)) in
+            info.iter().enumerate().skip(start).take(10)
+        {
+            let display = if label.is_empty() { value.to_string() } else { label.clone() };
+            let name: String = user_name.chars().take(16).collect();
+            text.push_str(&format!(
+                "{:<4} {:^16} {:>18}\n",
+                format!("#{}", index + 1),
+                name,
+                display
+            ));
+        }
+        text.push_str("```");
+        text
+    }
+
+    #[derive(Clone, Copy, PartialEq)]
+    enum Sort { Creds, Fortune, Invest }
+
+    fn make_components(active: Sort) -> Vec<serenity::CreateActionRow> {
+        use poise::serenity_prelude::ButtonStyle::{Primary, Secondary};
+        let buttons = vec![
+            serenity::CreateButton::new("lb_creds")
+                .label("Creds")
+                .style(if active == Sort::Creds { Primary } else { Secondary }),
+            serenity::CreateButton::new("lb_fortune")
+                .label("Fortune")
+                .style(if active == Sort::Fortune { Primary } else { Secondary }),
+            serenity::CreateButton::new("lb_invest")
+                .label("Investment")
+                .style(if active == Sort::Invest { Primary } else { Secondary }),
+            serenity::CreateButton::new("lb_back").label("<").style(Secondary),
+            serenity::CreateButton::new("lb_next").label(">").style(Secondary),
+        ];
+        vec![serenity::CreateActionRow::Buttons(buttons)]
+    }
+
+    let creds_thumb   = creds_info[0].0.to_user(ctx).await?.avatar_url().unwrap_or_default();
+    let fortune_thumb = if let Some(e) = fortune_info.first() { e.0.to_user(ctx).await?.avatar_url().unwrap_or_else(|| creds_thumb.clone()) } else { creds_thumb.clone() };
+    let invest_thumb  = if let Some(e) = invest_info.first()  { e.0.to_user(ctx).await?.avatar_url().unwrap_or_else(|| creds_thumb.clone()) } else { creds_thumb.clone() };
+
+    fn make_embed(
+        info: &[(UserId, i64, String, String)],
+        sort: Sort,
+        page: usize,
+        thumbnail: &str,
+    ) -> serenity::CreateEmbed {
+        let total_pages = (info.len() + 9) / 10;
+        let title = match sort {
+            Sort::Creds   => "Leaderboard — Creds",
+            Sort::Fortune => "Leaderboard — Rolling Fortune",
+            Sort::Invest  => "Leaderboard — Investment Gains",
+        };
+        let text = build_page(info, page * 10);
+        serenity::CreateEmbed::new()
+            .title(title)
+            .color(data::EMBED_CYAN)
+            .thumbnail(thumbnail.to_string())
+            .description("Here lists the most accomplished in UwUversity!")
+            .field("Rankings", text, false)
+            .field("Page", format!("{}/{}", page + 1, total_pages.max(1)), false)
+            .footer(serenity::CreateEmbedFooter::new("@~ powered by UwUntu & RustyBamboo"))
+    }
+
+    let initial_embed = make_embed(&creds_info, Sort::Creds, 0, &creds_thumb);
+    let initial_components = make_components(Sort::Creds);
+
+    let reply = ctx
+        .send(poise::CreateReply::default().embed(initial_embed).components(initial_components))
+        .await?;
+
+    let msg_og = Arc::new(RwLock::new(reply.into_message().await?));
+    let msg = Arc::clone(&msg_og);
+
+    let mut interactions = msg
+        .read()
+        .await
+        .await_component_interactions(ctx)
+        .stream();
+
+    let ctx = ctx.serenity_context().clone();
+
+    tokio::spawn(async move {
+        let mut current_sort = Sort::Creds;
+        let mut current_page: usize = 0;
+
+        while let Ok(Some(interaction)) = tokio::time::timeout(Duration::new(60, 0), interactions.next()).await {
+            let active_info = match current_sort {
+                Sort::Creds   => &creds_info,
+                Sort::Fortune => &fortune_info,
+                Sort::Invest  => &invest_info,
+            };
+            let total_pages = (active_info.len() + 9) / 10;
+
+            match interaction.data.custom_id.as_str() {
+                "lb_creds"   => { current_sort = Sort::Creds;   current_page = 0; }
+                "lb_fortune" => { current_sort = Sort::Fortune; current_page = 0; }
+                "lb_invest"  => { current_sort = Sort::Invest;  current_page = 0; }
+                "lb_back"    => { if current_page > 0 { current_page -= 1; } }
+                "lb_next"    => { if current_page < total_pages.saturating_sub(1) { current_page += 1; } }
+                _ => (),
+            }
+
+            let active_info = match current_sort {
+                Sort::Creds   => &creds_info,
+                Sort::Fortune => &fortune_info,
+                Sort::Invest  => &invest_info,
             };
 
-            leaderboard_text.push_str(&rank);
-        }
-        leaderboard_text
-    }
+            let empty_msg = match current_sort {
+                Sort::Fortune => Some("No fortune data yet — users need to /uwu first."),
+                Sort::Invest  => Some("No investment data yet — users need to make trades first."),
+                Sort::Creds   => None,
+            };
 
-    let buttons = vec![
-        serenity::CreateButton::new("open_modal")
-            .label("<")
-            .custom_id("back".to_string())
-            .style(poise::serenity_prelude::ButtonStyle::Secondary),
-        serenity::CreateButton::new("open_modal")
-            .label(">")
-            .custom_id("next".to_string())
-            .style(poise::serenity_prelude::ButtonStyle::Secondary),
-    ];
-    let components = vec![serenity::CreateActionRow::Buttons(buttons)];
-
-    let first_thumbnail = info[0]
-        .0
-        .to_user(ctx)
-        .await?
-        .avatar_url()
-        .unwrap_or_default();
-
-    let leaderboard_text = get_leaderboard(&info, &display, &fortune, &level, 0);
-
-    let embed = serenity::CreateEmbed::new()
-        .title("Leaderboard")
-        .color(data::EMBED_CYAN)
-        .thumbnail(first_thumbnail.clone())
-        .description("Here lists the most accomplished in UwUversity!")
-        .field("Rankings", leaderboard_text, false)
-        .footer(serenity::CreateEmbedFooter::new(
-            "@~ powered by UwUntu & RustyBamboo",
-        ));
-
-    if total_pages > 1 {
-        let reply = ctx
-            .send(
-                poise::CreateReply::default()
-                    .embed(embed)
-                    .components(components),
-            )
-            .await?;
-
-        let msg_og = Arc::new(RwLock::new(reply.into_message().await?));
-
-        let msg = Arc::clone(&msg_og);
-
-        let mut reactions = msg
-            .read()
-            .await
-            .await_component_interactions(ctx)
-            .timeout(Duration::new(60, 0))
-            .stream();
-
-        let ctx = ctx.serenity_context().clone();
-
-        let info = info.clone();
-        let display = display.clone();
-        let fortune = fortune.clone();
-        let level = level.clone();
-        tokio::spawn(async move {
-            let mut current_page: usize = 0;
-            while let Some(reaction) = reactions.next().await {
-                let label = reaction.data.custom_id.as_str();
-                match label {
-                    "back" => {
-                        if current_page > 0 {
-                            current_page -= 10;
-                        }
-                    }
-                    "next" => {
-                        if current_page < total_pages - 1 {
-                            current_page += 10;
-                        }
-                    }
-                    _ => (),
+            let embed = if active_info.is_empty() {
+                serenity::CreateEmbed::new()
+                    .title(match current_sort {
+                        Sort::Creds   => "Leaderboard — Creds",
+                        Sort::Fortune => "Leaderboard — Rolling Fortune",
+                        Sort::Invest  => "Leaderboard — Investment Gains",
+                    })
+                    .color(data::EMBED_ERROR)
+                    .description(empty_msg.unwrap_or("No data."))
+                    .footer(serenity::CreateEmbedFooter::new("@~ powered by UwUntu & RustyBamboo"))
+            } else {
+                let thumb = match current_sort {
+                    Sort::Creds   => &creds_thumb,
+                    Sort::Fortune => &fortune_thumb,
+                    Sort::Invest  => &invest_thumb,
                 };
+                make_embed(active_info, current_sort, current_page, thumb)
+            };
 
-                let leaderboard_text =
-                    get_leaderboard(&info, &display, &fortune, &level, current_page);
+            let components = make_components(current_sort);
 
-                reaction
-                    .create_response(&ctx, serenity::CreateInteractionResponse::Acknowledge)
-                    .await
-                    .unwrap();
+            interaction
+                .create_response(&ctx, serenity::CreateInteractionResponse::Acknowledge)
+                .await
+                .unwrap();
 
-                let embed = serenity::CreateEmbed::new()
-                    .title("Leaderboard")
-                    .color(data::EMBED_CYAN)
-                    .thumbnail(first_thumbnail.clone())
-                    .description("Here lists the most accomplished in UwUversity!")
-                    .field("Rankings", leaderboard_text, false)
-                    .footer(serenity::CreateEmbedFooter::new(
-                        "@~ powered by UwUntu & RustyBamboo",
-                    ));
-                msg.write()
-                    .await
-                    .edit(&ctx, EditMessage::default().embed(embed))
-                    .await
-                    .unwrap();
-            }
-        });
-    } else {
-        ctx.send(
-            poise::CreateReply::default()
-                .embed(embed)
-                .components(components),
-        )
-        .await?;
-    }
+            msg.write()
+                .await
+                .edit(&ctx, EditMessage::default().embed(embed).components(components))
+                .await
+                .unwrap();
+        }
+
+        // timeout — strip buttons and grey out embed
+        let active_info = match current_sort {
+            Sort::Creds   => &creds_info,
+            Sort::Fortune => &fortune_info,
+            Sort::Invest  => &invest_info,
+        };
+        let thumb = match current_sort {
+            Sort::Creds   => &creds_thumb,
+            Sort::Fortune => &fortune_thumb,
+            Sort::Invest  => &invest_thumb,
+        };
+        let timed_out_embed = make_embed(active_info, current_sort, current_page, thumb)
+            .color(data::EMBED_ERROR);
+        msg.write()
+            .await
+            .edit(&ctx, EditMessage::default().embed(timed_out_embed).components(vec![]))
+            .await
+            .ok();
+    });
 
     Ok(())
 }
-*/
 
 /// buy tickets for the battle pass raffle
 #[poise::command(slash_command)]
@@ -740,7 +765,6 @@ pub async fn buy_tickets(ctx: Context<'_>) -> Result<(), Error> {
         .read()
         .await
         .await_component_interactions(ctx)
-        .timeout(Duration::new(60, 0))
         .stream();
 
     let ctx = ctx.serenity_context().clone();
@@ -750,7 +774,7 @@ pub async fn buy_tickets(ctx: Context<'_>) -> Result<(), Error> {
     let u = Arc::clone(&u);
 
     tokio::spawn(async move {
-        while let Some(reaction) = reactions.next().await {
+        while let Ok(Some(reaction)) = tokio::time::timeout(Duration::new(60, 0), reactions.next()).await {
             let bought_tickets;
             let purchase_cost;
 
@@ -988,9 +1012,8 @@ pub async fn info(ctx: Context<'_>) -> Result<(), Error> {
 /// Simulate a /uwu roll for Professor.
 /// Returns creds awarded (negative on critical failure, 0 if cooldown not met).
 pub fn simulate_uwu(user_data: &mut data::UserData) -> i32 {
-    if !user_data.check_daily() {
-        return 0;
-    }
+    // [TEST] daily cooldown disabled
+    // if !user_data.check_daily() { return 0; }
     let d20: i32 = thread_rng().gen_range(1..21);
     let check: i32 = thread_rng().gen_range(6..15);
     let low = 2_000 + (check - 1) * 600;
@@ -1014,6 +1037,7 @@ pub fn simulate_uwu(user_data: &mut data::UserData) -> i32 {
     }
     user_data.update_xp(500);
     user_data.add_rolls(d20);
+    user_data.push_roll(d20);
     user_data.add_bonus();
     user_data.update_daily();
     total

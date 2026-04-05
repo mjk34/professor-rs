@@ -20,7 +20,7 @@ use dashmap::DashMap;
 use poise::serenity_prelude::{futures, futures::StreamExt, ChannelId, CreateMessage, EditMessage};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
-use std::sync::{Arc, LazyLock};
+use std::sync::{Arc, LazyLock, atomic::{AtomicBool, Ordering}};
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 
@@ -367,6 +367,9 @@ static FMP_RATIOS_CACHE: LazyLock<DashMap<String, (FmpRatios, Instant)>> =
 static LOGO_API_KEY: LazyLock<Option<String>> =
     LazyLock::new(|| std::env::var("LOGO_API_KEY").ok());
 
+/// Set to true when Yahoo Finance returns HTTP 429; cleared on next successful response.
+static YAHOO_RATE_LIMITED: AtomicBool = AtomicBool::new(false);
+
 fn logo_url(ticker: &str) -> Option<String> {
     let key = LOGO_API_KEY.as_deref()?;
     Some(format!("https://img.logo.dev/ticker/{}?token={}", ticker, key))
@@ -379,6 +382,16 @@ fn market_closed_reply(action: &str, ticker: &str) -> poise::CreateReply {
             .description(format!("Market is currently closed for **{}**.", ticker))
             .color(data::EMBED_ERROR),
     )
+}
+
+/// Returns a user-facing description when market data can't be fetched.
+/// If the Yahoo Finance rate limit was recently hit, tells the user to try again tomorrow.
+fn market_data_err(query: &str) -> String {
+    if YAHOO_RATE_LIMITED.load(Ordering::Relaxed) {
+        "Market data API is rate limited — try again tomorrow when the limit resets.".to_string()
+    } else {
+        format!("Could not fetch market data for **{}**.", query)
+    }
 }
 
 fn with_logo(embed: serenity::CreateEmbed, ticker: &str) -> serenity::CreateEmbed {
@@ -439,7 +452,7 @@ async fn fetch_quote_detail(ticker: &str) -> Option<YfQuote> {
         }
     }
 
-    let resp = HTTP_CLIENT
+    let http_resp = HTTP_CLIENT
         .get(format!(
             "https://query2.finance.yahoo.com/v8/finance/chart/{}",
             ticker
@@ -447,10 +460,16 @@ async fn fetch_quote_detail(ticker: &str) -> Option<YfQuote> {
         .query(&[("interval", "1d"), ("range", "1d")])
         .send()
         .await
-        .ok()?
-        .json::<YfChartResponse>()
-        .await
         .ok()?;
+
+    if http_resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+        tracing::warn!("Yahoo Finance rate limit hit (429) for ticker {ticker}");
+        YAHOO_RATE_LIMITED.store(true, Ordering::Relaxed);
+        return None;
+    }
+
+    let resp = http_resp.json::<YfChartResponse>().await.ok()?;
+    YAHOO_RATE_LIMITED.store(false, Ordering::Relaxed);
 
     let meta = resp.chart.result?.into_iter().next()?.meta;
 
@@ -584,6 +603,42 @@ async fn fetch_fed_funds_rate() -> Option<f64> {
         .into_iter()
         .next()
         .and_then(|o| o.value.parse::<f64>().ok())
+}
+
+// ── API health checks ─────────────────────────────────────────────────────────
+
+pub async fn api_health_check() {
+    // FRED
+    match fetch_fed_funds_rate().await {
+        Some(r) => tracing::info!("[API] FRED ✓ — fed funds rate: {:.2}%", r),
+        None    => tracing::warn!("[API] FRED ✗ — failed to fetch fed funds rate"),
+    }
+
+    // FMP — probe with a known ticker
+    match fetch_fmp_profile("SPY").await {
+        Some(p) => tracing::info!("[API] FMP ✓ — SPY price: ${:.2}", p.price.unwrap_or(0.0)),
+        None    => tracing::warn!("[API] FMP ✗ — failed to fetch SPY profile"),
+    }
+
+    // FINNHUB — fetch market news
+    let news = fetch_market_news().await;
+    if !news.is_empty() {
+        tracing::info!("[API] FINNHUB ✓ — {} headlines fetched", news.len());
+    } else {
+        tracing::warn!("[API] FINNHUB ✗ — no headlines returned (check key or rate limit)");
+    }
+
+    // CLAUDE — key presence only (no paid call on startup)
+    match std::env::var("CLAUDE_API_KEY") {
+        Ok(_)  => tracing::info!("[API] CLAUDE ✓ — key present"),
+        Err(_) => tracing::warn!("[API] CLAUDE ✗ — CLAUDE_API_KEY not set"),
+    }
+
+    // LOGO.DEV — key presence only (URL-embedded, no HTTP call needed)
+    match std::env::var("LOGO_API_KEY") {
+        Ok(_)  => tracing::info!("[API] LOGO ✓ — key present"),
+        Err(_) => tracing::warn!("[API] LOGO ✗ — LOGO_API_KEY not set (stock thumbnails disabled)"),
+    }
 }
 
 // ── Maintenance functions ─────────────────────────────────────────────────────
@@ -822,14 +877,14 @@ pub async fn portfolio(_ctx: Context<'_>) -> Result<(), Error> {
 #[poise::command(slash_command, rename = "create")]
 async fn portfolio_create(
     ctx: Context<'_>,
-    #[description = "Name for the new portfolio (max 20 chars)"] name: String,
+    #[description = "Name for the new portfolio (max 32 chars)"] name: String,
 ) -> Result<(), Error> {
-    if name.len() > 20 {
+    if name.len() > 32 {
         ctx.send(
             poise::CreateReply::default().embed(
                 serenity::CreateEmbed::new()
                     .title("Portfolio — Create")
-                    .description("Portfolio name must be 20 characters or fewer.")
+                    .description("Portfolio name must be 32 characters or fewer.")
                     .color(data::EMBED_ERROR),
             ),
         )
@@ -1199,7 +1254,7 @@ async fn portfolio_fund(
                         .title("Portfolio — Fund")
                         .description(format!(
                             "Deposited **${:.2}** into **{}**.\nNew cash balance: **${:.2}**.",
-                            dollars, name, creds_to_price(new_cash)
+                            creds_to_price(price_to_creds(dollars).floor()), name, creds_to_price(new_cash)
                         ))
                         .color(data::EMBED_SUCCESS)
                         .footer(serenity::CreateEmbedFooter::new(
@@ -1396,7 +1451,7 @@ async fn portfolio_delete(
         )
         .await?;
 
-    let msg = reply.into_message().await?;
+    let mut msg = reply.into_message().await?;
     let interaction = msg
         .await_component_interactions(ctx)
         .author_id(ctx.author().id)
@@ -1405,13 +1460,17 @@ async fn portfolio_delete(
 
     match interaction {
         None => {
-            ctx.send(
-                poise::CreateReply::default().embed(
-                    serenity::CreateEmbed::new()
-                        .title("Portfolio — Delete")
-                        .description("Timed out. Portfolio not deleted.")
-                        .color(data::EMBED_ERROR),
-                ),
+            msg.edit(
+                ctx.serenity_context(),
+                EditMessage::default()
+                    .embed(
+                        serenity::CreateEmbed::new()
+                            .title("Portfolio — Delete")
+                            .description(format!("{}\n\nTimed out. Portfolio not deleted.", detail))
+                            .color(data::EMBED_ERROR)
+                            .footer(serenity::CreateEmbedFooter::new("@~ powered by UwUntu & RustyBamboo")),
+                    )
+                    .components(vec![]),
             )
             .await?;
         }
@@ -1530,7 +1589,7 @@ pub async fn search(
                     poise::CreateReply::default().embed(
                         serenity::CreateEmbed::new()
                             .title("Search")
-                            .description(format!("Could not resolve **{}**.", items[0]))
+                            .description(market_data_err(&items[0]))
                             .color(data::EMBED_ERROR),
                     ),
                 )
@@ -1690,7 +1749,7 @@ pub async fn buy(
                 poise::CreateReply::default().embed(
                     serenity::CreateEmbed::new()
                         .title("Buy")
-                        .description(format!("Could not resolve **{}**.", ticker_query))
+                        .description(market_data_err(&ticker_query))
                         .color(data::EMBED_ERROR),
                 ),
             )
@@ -1701,10 +1760,8 @@ pub async fn buy(
     let ticker = quote.symbol.clone();
     let asset_name = quote.display_name();
 
-    if !quote.is_market_open() {
-        ctx.send(market_closed_reply("Buy", &ticker)).await?;
-        return Ok(());
-    }
+    // [TEST] market open guard disabled
+    // if !quote.is_market_open() { ctx.send(market_closed_reply("Buy", &ticker)).await?; return Ok(()); }
 
     let price_usd = match quote.regular_market_price {
         Some(p) => p,
@@ -1713,7 +1770,7 @@ pub async fn buy(
                 poise::CreateReply::default().embed(
                     serenity::CreateEmbed::new()
                         .title("Buy")
-                        .description(format!("No price data available for **{}**.", ticker))
+                        .description(market_data_err(&ticker))
                         .color(data::EMBED_ERROR),
                 ),
             )
@@ -1836,7 +1893,7 @@ pub async fn sell(
                 poise::CreateReply::default().embed(
                     serenity::CreateEmbed::new()
                         .title("Sell")
-                        .description(format!("Could not resolve **{}**.", ticker_query))
+                        .description(market_data_err(&ticker_query))
                         .color(data::EMBED_ERROR),
                 ),
             )
@@ -1847,10 +1904,8 @@ pub async fn sell(
     let ticker = quote.symbol.clone();
     let asset_name = quote.display_name();
 
-    if !quote.is_market_open() {
-        ctx.send(market_closed_reply("Sell", &ticker)).await?;
-        return Ok(());
-    }
+    // [TEST] market open guard disabled
+    // if !quote.is_market_open() { ctx.send(market_closed_reply("Sell", &ticker)).await?; return Ok(()); }
 
     let price_usd = match quote.regular_market_price {
         Some(p) => p,
@@ -1859,7 +1914,7 @@ pub async fn sell(
                 poise::CreateReply::default().embed(
                     serenity::CreateEmbed::new()
                         .title("Sell")
-                        .description(format!("No price data available for **{}**.", ticker))
+                        .description(market_data_err(&ticker))
                         .color(data::EMBED_ERROR),
                 ),
             )
@@ -1994,7 +2049,7 @@ async fn watchlist_add(
                 poise::CreateReply::default().embed(
                     serenity::CreateEmbed::new()
                         .title("Watchlist — Add")
-                        .description(format!("Could not resolve **{}**.", query))
+                        .description(market_data_err(&query))
                         .color(data::EMBED_ERROR),
                 ),
             )
@@ -2373,11 +2428,12 @@ pub async fn trades(ctx: Context<'_>) -> Result<(), Error> {
     tokio::spawn(async move {
         let mut interactions = msg
             .await_component_interactions(&ctx_serenity)
-            .timeout(Duration::from_secs(5 * 60))
             .author_id(author_id)
             .stream();
 
-        while let Some(interaction) = interactions.next().await {
+        let mut last_embed = build_summary_embed(&trade_history);
+
+        while let Ok(Some(interaction)) = tokio::time::timeout(Duration::from_secs(5 * 60), interactions.next()).await {
             let embed = match interaction.data.custom_id.as_str() {
                 "trades-summary" => build_summary_embed(&trade_history),
                 "trades-gains" => build_filtered_embed(&trade_history, true),
@@ -2397,15 +2453,17 @@ pub async fn trades(ctx: Context<'_>) -> Result<(), Error> {
             msg.edit(
                     &ctx_serenity,
                     EditMessage::default()
-                        .embed(embed)
+                        .embed(embed.clone())
                         .components(trade_buttons()),
                 )
                 .await
                 .ok();
+
+            last_embed = embed;
         }
 
-        // Remove buttons on timeout
-        msg.edit(&ctx_serenity, EditMessage::default().components(Vec::new()))
+        // timeout — strip buttons and grey out last active embed
+        msg.edit(&ctx_serenity, EditMessage::default().embed(last_embed.color(data::EMBED_ERROR)).components(Vec::new()))
             .await
             .ok();
     });
@@ -2477,7 +2535,7 @@ pub async fn options_quote(
                 poise::CreateReply::default().embed(
                     serenity::CreateEmbed::new()
                         .title("Options Quote")
-                        .description(format!("Could not fetch price for **{}**.", ticker))
+                        .description(market_data_err(&ticker))
                         .color(data::EMBED_ERROR),
                 ),
             )
@@ -2593,7 +2651,7 @@ pub async fn options_buy(
                 poise::CreateReply::default().embed(
                     serenity::CreateEmbed::new()
                         .title("Options Buy")
-                        .description(format!("Could not fetch price for **{}**.", ticker))
+                        .description(market_data_err(&ticker))
                         .color(data::EMBED_ERROR),
                 ),
             )
@@ -2780,7 +2838,7 @@ pub async fn options_sell(
                 poise::CreateReply::default().embed(
                     serenity::CreateEmbed::new()
                         .title("Options Sell")
-                        .description(format!("Could not fetch price for **{}**.", ticker))
+                        .description(market_data_err(&ticker))
                         .color(data::EMBED_ERROR),
                 ),
             )
@@ -2995,7 +3053,7 @@ pub async fn options_write(
                 poise::CreateReply::default().embed(
                     serenity::CreateEmbed::new()
                         .title("Options Write")
-                        .description(format!("Could not fetch price for **{}**.", ticker))
+                        .description(market_data_err(&ticker))
                         .color(data::EMBED_ERROR),
                 ),
             )
@@ -3213,7 +3271,7 @@ pub async fn options_cover(
                 poise::CreateReply::default().embed(
                     serenity::CreateEmbed::new()
                         .title("Options Cover")
-                        .description(format!("Could not fetch price for **{}**.", ticker))
+                        .description(market_data_err(&ticker))
                         .color(data::EMBED_ERROR),
                 ),
             )
@@ -3433,21 +3491,28 @@ async fn fetch_market_news() -> Vec<String> {
         Err(_) => { tracing::warn!("FINNHUB_API_KEY not set"); return vec![]; }
     };
     let resp = HTTP_CLIENT
-        .get("https://finnhub.io/api/v1/market-news")
+        .get("https://finnhub.io/api/v1/news")
         .query(&[("category", "general"), ("token", api_key.as_str())])
         .send().await;
     let resp = match resp { Ok(r) => r, Err(e) => { tracing::warn!("Finnhub fetch failed: {e}"); return vec![]; } };
-    let mut items: Vec<FinnhubNewsItem> = match resp.json().await {
-        Ok(v) => v, Err(e) => { tracing::warn!("Finnhub parse failed: {e}"); return vec![]; }
+    let bytes = match resp.bytes().await {
+        Ok(b) => b, Err(e) => { tracing::warn!("Finnhub body read failed: {e}"); return vec![]; }
+    };
+    let mut items: Vec<FinnhubNewsItem> = match serde_json::from_slice(&bytes) {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!("Finnhub parse failed: {e} — body: {}", String::from_utf8_lossy(&bytes).chars().take(200).collect::<String>());
+            return vec![];
+        }
     };
     items.sort_by(|a, b| b.datetime.cmp(&a.datetime));
     items.into_iter().take(15).map(|n| format!("{} — {}", n.headline, n.source)).collect()
 }
 
 async fn call_claude(system: &str, user: &str) -> String {
-    let api_key = match std::env::var("ANTHROPIC_API_KEY") {
+    let api_key = match std::env::var("CLAUDE_API_KEY") {
         Ok(k) => k,
-        Err(_) => { tracing::warn!("ANTHROPIC_API_KEY not set"); return String::new(); }
+        Err(_) => { tracing::warn!("CLAUDE_API_KEY not set"); return String::new(); }
     };
     let body = ClaudeRequest {
         model: "claude-sonnet-4-6".to_string(),
@@ -3551,6 +3616,9 @@ pub async fn professor_daily_session(
     bot_chat: &str,
     bot_user_id: serenity::UserId,
 ) {
+    // [TEST] market open guard disabled
+    // let market_open = is_market_open().await;
+
     let u = match users.get(&bot_user_id) {
         Some(u) => u,
         None => { tracing::warn!("Professor UserData not found"); return; }
@@ -3559,8 +3627,42 @@ pub async fn professor_daily_session(
     // Write lock acquired here, snapshot taken, lock released before any async calls
     let (uwu_creds, claim_creds, memory, portfolio_snapshot, held_tickers) = {
         let mut ud = u.write().await;
+
+        // Ensure professor_memory is initialized (handles data loaded before this field existed)
+        if ud.professor_memory.is_none() {
+            let core = std::fs::read_to_string("MEMORY.txt").unwrap_or_else(|_| {
+                "You are Professor, a Discord bot managing your own investment portfolio. \
+                 Prefer diversified long-term holds. Only make HIGH conviction trades. \
+                 Never exceed 30% of cash per trade. Maximum 3 trades per session.".to_string()
+            });
+            ud.professor_memory = Some(data::ProfessorMemory {
+                core_behavior: core,
+                entries: std::collections::VecDeque::new(),
+            });
+        }
+
+        // Ensure ProfessorPort exists; if missing, create it funded from wallet balance
+        if !ud.stock.portfolios.iter().any(|p| p.name == PROFESSOR_PORT) {
+            let wallet = ud.get_creds().max(0);
+            ud.sub_creds(wallet);
+            let mut port = data::Portfolio::new(PROFESSOR_PORT.to_string());
+            port.cash = wallet as f64;
+            ud.stock.portfolios.push(port);
+            tracing::info!("Professor: created missing ProfessorPort with {wallet} creds cash");
+        }
+
         let uwu_creds = crate::basic::simulate_uwu(&mut ud);
         let claim_creds = crate::basic::simulate_claim(&mut ud);
+
+        // Sweep full wallet into portfolio cash (covers initial 100k + any daily earnings)
+        let wallet = ud.get_creds().max(0);
+        if wallet > 0 {
+            ud.sub_creds(wallet);
+            if let Some(port) = ud.stock.portfolios.iter_mut().find(|p| p.name == PROFESSOR_PORT) {
+                port.cash += wallet as f64;
+            }
+        }
+
         let memory = ud.professor_memory.clone().unwrap_or_default();
         let (snap, tickers) = ud.stock.portfolios.iter()
             .find(|p| p.name == PROFESSOR_PORT)
@@ -3578,6 +3680,9 @@ pub async fn professor_daily_session(
         (uwu_creds, claim_creds, memory, snap, tickers)
     };
 
+
+    // [TEST] market closed early return disabled
+    // if !market_open { ... }
 
     let headlines = fetch_market_news().await;
     let pulse = morning_pulse(&headlines, &memory).await;
@@ -3611,7 +3716,6 @@ pub async fn professor_daily_session(
         }).unwrap_or_default()
     };
 
-
     let midday_scores = midday_check(&pulse, &positions_with_prices, &memory).await;
 
     let entries_str = if memory.entries.is_empty() {
@@ -3627,7 +3731,6 @@ pub async fn professor_daily_session(
         .map(|p| creds_to_price(p.cash)).unwrap_or(0.0)
     };
 
-
     let response = trading_session(&entries_str, &pulse, &sentiment, &midday_scores, &portfolio_snapshot, cash_usd, &memory).await;
 
     // Re-acquire write lock to execute trades and persist memory entry
@@ -3639,7 +3742,8 @@ pub async fn professor_daily_session(
         let cash_limit_creds = price_to_creds(cash_usd * 0.30);
         let mut ud = u.write().await;
         let port_idx = match ud.stock.portfolios.iter().position(|p| p.name == PROFESSOR_PORT) {
-            Some(i) => i, None => return,
+            Some(i) => i,
+            None => { tracing::warn!("Professor: ProfessorPort missing at trade execution — skipping trades"); return; }
         };
         for trade in resp.trades.iter().take(3) {
             let Some((price_usd, asset_name, asset_type)) = prices.get(&trade.ticker).map(|(p,n,at)| (*p, n.clone(), at.clone())) else { continue; };
@@ -3665,7 +3769,7 @@ pub async fn professor_daily_session(
                         Some(p) => p.quantity * sell_pct, None => continue,
                     };
                     let Some(pnl) = apply_sell(port, history, &trade.ticker, &asset_name, qty, price_creds, PROFESSOR_PORT) else { continue; };
-                    executed.push(ExecutedTrade { action: "SELL".to_string(), ticker: trade.ticker.clone(), amount_usd: price_usd * qty, price_usd, pnl: Some(creds_to_price(pnl)) });
+                    executed.push(ExecutedTrade { action: "SELL".to_string(), ticker: trade.ticker.clone(), amount_usd: price_usd * qty, price_usd, pnl: Some(pnl) });
                 }
                 _ => {}
             }
@@ -3686,7 +3790,7 @@ pub async fn professor_daily_session(
             if t.action == "BUY" {
                 format!("✦ BOUGHT **{}** @ ${:.2} — ${:.2}", t.ticker, t.price_usd, t.amount_usd)
             } else {
-                let pnl_str = t.pnl.map(|p| fmt_pnl(price_to_creds(p))).unwrap_or_default();
+                let pnl_str = t.pnl.map(fmt_pnl).unwrap_or_default();
                 format!("✦ SOLD **{}** @ ${:.2} — ${:.2}  {}", t.ticker, t.price_usd, t.amount_usd, pnl_str)
             }
         }).collect::<Vec<_>>().join("\n")
@@ -3775,5 +3879,27 @@ pub async fn professor(ctx: Context<'_>) -> Result<(), Error> {
             .color(data::EMBED_CYAN)
             .footer(serenity::CreateEmbedFooter::new("@~ powered by UwUntu & RustyBamboo")),
     )).await?;
+    Ok(())
+}
+
+/// [MOD] Manually trigger Professor's daily session
+#[poise::command(slash_command)]
+pub async fn test_professor(ctx: Context<'_>) -> Result<(), Error> {
+    if !crate::clips::check_mod(ctx).await? {
+        ctx.say("You don't have permission to run this.").await?;
+        return Ok(());
+    }
+
+    ctx.say("Triggering Professor's daily session...").await?;
+
+    let users = Arc::clone(&ctx.data().users);
+    let http = ctx.serenity_context().http.clone();
+    let bot_chat = ctx.data().bot_chat.clone();
+    let bot_user_id = ctx.data().bot_user_id;
+
+    tokio::spawn(async move {
+        professor_daily_session(&users, &http, &bot_chat, bot_user_id).await;
+    });
+
     Ok(())
 }
