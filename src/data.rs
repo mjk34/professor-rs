@@ -9,6 +9,19 @@ use std::sync::Arc;
 use std::{env, fs};
 use tokio::sync::RwLock;
 
+// Professor AI memory
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryEntry {
+    pub date: DateTime<Utc>,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ProfessorMemory {
+    pub core_behavior: String,
+    pub entries: VecDeque<MemoryEntry>,
+}
+
 // Stock feature constants
 pub const GOLD_LEVEL_THRESHOLD: i32 = 10;
 pub const BASE_HYSA_RATE: f64 = 0.1;  // annual % for non-gold users
@@ -73,6 +86,9 @@ pub struct UserData {
     tickets: i32,
 
     pub stock: StockProfile,
+
+    #[serde(default)]
+    pub professor_memory: Option<ProfessorMemory>,
 }
 
 impl UserData {
@@ -300,7 +316,6 @@ impl std::ops::Deref for SaveData {
 }
 
 /// User data, which is stored and accessible in all command invocations
-#[derive(Default)]
 pub struct Data {
     /// Persistent data of users
     pub users: Arc<DashMap<serenity::UserId, Arc<RwLock<UserData>>>>,
@@ -318,6 +333,7 @@ pub struct Data {
     pub bad_fortune: Vec<String>,
     pub good_fortune: Vec<String>,
     pub hysa_fed_rate: Arc<RwLock<f64>>,
+    pub bot_user_id: serenity::UserId,
 }
 
 impl Data {
@@ -409,6 +425,7 @@ impl Data {
             bad_fortune,
             good_fortune,
             hysa_fed_rate: Arc::new(RwLock::new(3.35)),
+            bot_user_id: serenity::UserId::new(0),
         }
     }
 }

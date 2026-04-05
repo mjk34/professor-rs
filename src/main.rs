@@ -6,7 +6,7 @@ mod mods;
 mod reminder;
 mod stock;
 
-use chrono::Datelike;
+use chrono::{Datelike, Timelike, Weekday};
 use dashmap::DashMap;
 use data::{UserData, VoiceUser};
 use std::{env, sync::Arc};
@@ -28,7 +28,7 @@ async fn main() {
     tracing_subscriber::fmt::init();
     dotenvy::dotenv().expect("Failed to read .env file");
     let token = env::var("DISCORD_TOKEN").expect("missing DISCORD_TOKEN");
-    let data = data::Data::load();
+    let mut data = data::Data::load();
 
     let intents = serenity::GatewayIntents::GUILD_MESSAGES
         | serenity::GatewayIntents::DIRECT_MESSAGES
@@ -77,6 +77,7 @@ async fn main() {
                 stock::options_sell(),
                 stock::options_write(),
                 stock::options_cover(),
+                stock::professor(),
             ],
             prefix_options: poise::PrefixFrameworkOptions {
                 prefix: Some("~".into()),
@@ -96,7 +97,40 @@ async fn main() {
                 let bot_chat = data.bot_chat.clone();
                 background_task(users.clone(), voice_users);
                 stock::refresh_market_rate(&data.hysa_fed_rate).await;
-                maintenance_task(users, http, hysa_rate, bot_chat);
+                maintenance_task(users.clone(), http.clone(), hysa_rate, bot_chat.clone());
+
+                // Seed Professor's UserData and start the daily AI trading task
+                let bot_user_id = ctx.cache.current_user().id;
+                data.bot_user_id = bot_user_id;
+
+                let core_behavior = std::fs::read_to_string("MEMORY.txt").unwrap_or_else(|_| {
+                    tracing::warn!("MEMORY.txt not found — using default core behavior");
+                    "You are Professor, a Discord bot managing your own investment portfolio. \
+                     Prefer diversified long-term holds. Only make HIGH conviction trades. \
+                     Never exceed 30% of cash per trade. Maximum 3 trades per session.".to_string()
+                });
+
+                if !data.users.contains_key(&bot_user_id) {
+                    let mut prof = data::UserData::default();
+                    prof.add_creds(100_000);
+                    prof.professor_memory = Some(data::ProfessorMemory {
+                        core_behavior: core_behavior.clone(),
+                        entries: std::collections::VecDeque::new(),
+                    });
+                    let mut port = data::Portfolio::new("ProfessorPort".to_string());
+                    port.cash = 100_000.0; // 100k creds = $1,000 starting cash
+                    prof.stock.portfolios.push(port);
+                    data.users.insert(bot_user_id, Arc::new(RwLock::new(prof)));
+                } else {
+                    // Refresh core_behavior from file on each restart
+                    let u = data.users.get(&bot_user_id).unwrap();
+                    let mut prof = u.write().await;
+                    if let Some(mem) = prof.professor_memory.as_mut() {
+                        mem.core_behavior = core_behavior;
+                    }
+                }
+
+                professor_task(users, http, bot_chat, bot_user_id);
                 Ok(data)
             })
         })
@@ -192,18 +226,13 @@ fn background_task(
                     }
                     let user_data = user_data.unwrap();
 
-                    if let Some(last) = vu.last_reward {
-                        if (now - last).num_minutes() >= CRED_TIME {
-                            // Give user credits
-                            let mut user_data = user_data.write().await;
-                            user_data.add_creds(REWARD_CREDITS);
-                            user_data.update_xp(REWARD_XP);
-                            vu.last_reward = Some(now);
-                        }
-                    }
+                    let should_reward = if let Some(last) = vu.last_reward {
+                        (now - last).num_minutes() >= CRED_TIME
+                    } else {
+                        (now - joined).num_minutes() >= CRED_TIME
+                    };
 
-                    if (now - joined).num_minutes() >= CRED_TIME {
-                        // Give user credits
+                    if should_reward {
                         let mut user_data = user_data.write().await;
                         user_data.add_creds(REWARD_CREDITS);
                         user_data.update_xp(REWARD_XP);
@@ -236,4 +265,52 @@ fn maintenance_task(
             tokio::time::sleep(std::time::Duration::from_secs(60 * 60 * 12)).await;
         }
     });
+}
+
+fn professor_task(
+    users: Arc<DashMap<serenity::UserId, Arc<RwLock<UserData>>>>,
+    http: Arc<serenity::Http>,
+    bot_chat: String,
+    bot_user_id: serenity::UserId,
+) {
+    tokio::spawn(async move {
+        loop {
+            let now = chrono::Utc::now();
+
+            // Skip weekends
+            if matches!(now.weekday(), Weekday::Sat | Weekday::Sun) {
+                let days_until_mon: u64 = if now.weekday() == Weekday::Sat { 2 } else { 1 };
+                let secs = days_until_mon * 86_400 + secs_until_hm(now.hour(), now.minute(), 15, 0);
+                tokio::time::sleep(std::time::Duration::from_secs(secs)).await;
+                continue;
+            }
+
+            // Fire at 15:00 UTC on weekdays — session handles all 3 Claude calls internally
+            let secs_to_fire = secs_until_hm(now.hour(), now.minute(), 15, 0);
+            if secs_to_fire > 0 {
+                tokio::time::sleep(std::time::Duration::from_secs(secs_to_fire)).await;
+            }
+
+            if stock::is_market_open().await {
+                stock::professor_daily_session(&users, &http, &bot_chat, bot_user_id).await;
+            }
+
+            // Sleep until tomorrow 15:00 UTC
+            let now2 = chrono::Utc::now();
+            let elapsed = now2.hour() as u64 * 3600 + now2.minute() as u64 * 60 + now2.second() as u64;
+            let secs_to_next = 86_400 - elapsed + 15 * 3600;
+            tokio::time::sleep(std::time::Duration::from_secs(secs_to_next)).await;
+        }
+    });
+}
+
+/// Seconds until the next occurrence of hour:minute UTC (0 if already past).
+fn secs_until_hm(cur_h: u32, cur_m: u32, target_h: u32, target_m: u32) -> u64 {
+    let cur_secs = cur_h as u64 * 3600 + cur_m as u64 * 60;
+    let target_secs = target_h as u64 * 3600 + target_m as u64 * 60;
+    if target_secs > cur_secs {
+        target_secs - cur_secs
+    } else {
+        0
+    }
 }

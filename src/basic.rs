@@ -53,6 +53,27 @@ pub async fn ping(ctx: Context<'_>) -> Result<(), Error> {
 }
 
 
+async fn send_gold_unlock(ctx: Context<'_>) -> Result<(), crate::Error> {
+    let user = ctx.author();
+    ctx.send(
+        poise::CreateReply::default().embed(
+            serenity::CreateEmbed::new()
+                .title("⭐ Gold Status Unlocked!")
+                .description(format!(
+                    "Congratulations <@{}>! You've reached **Level 10** and unlocked **Gold Status**!\n\nYou now earn a higher HYSA rate on uninvested portfolio cash.",
+                    user.id
+                ))
+                .thumbnail(user.avatar_url().unwrap_or_default())
+                .color(data::EMBED_GOLD)
+                .footer(serenity::CreateEmbedFooter::new(
+                    "@~ powered by UwUntu & RustyBamboo",
+                )),
+        ),
+    )
+    .await?;
+    Ok(())
+}
+
 /// claim your daily, 500xp (Once a day)
 #[poise::command(slash_command)]
 pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
@@ -207,22 +228,7 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
         .await?;
 
         if new_level == data::GOLD_LEVEL_THRESHOLD {
-            ctx.send(
-                poise::CreateReply::default().embed(
-                    serenity::CreateEmbed::new()
-                        .title("⭐ Gold Status Unlocked!")
-                        .description(format!(
-                            "Congratulations <@{}>! You've reached **Level 10** and unlocked **Gold Status**!\n\nYou now earn a higher HYSA rate on uninvested portfolio cash.",
-                            user.id
-                        ))
-                        .thumbnail(user.avatar_url().unwrap_or_default())
-                        .color(data::EMBED_GOLD)
-                        .footer(serenity::CreateEmbedFooter::new(
-                            "@~ powered by UwUntu & RustyBamboo",
-                        )),
-                ),
-            )
-            .await?;
+            send_gold_unlock(ctx).await?;
         }
     }
 
@@ -973,4 +979,59 @@ pub async fn info(ctx: Context<'_>) -> Result<(), Error> {
     .await?;
 
     Ok(())
+}
+
+// ── Professor simulation helpers ─────────────────────────────────────────────
+// These replicate the core logic of /uwu and /claim_bonus without Discord ctx.
+// Used by the Professor AI background task.
+
+/// Simulate a /uwu roll for Professor.
+/// Returns creds awarded (negative on critical failure, 0 if cooldown not met).
+pub fn simulate_uwu(user_data: &mut data::UserData) -> i32 {
+    if !user_data.check_daily() {
+        return 0;
+    }
+    let d20: i32 = thread_rng().gen_range(1..21);
+    let check: i32 = thread_rng().gen_range(6..15);
+    let low = 2_000 + (check - 1) * 600;
+    let high = 2_000 + check * 600;
+    let fortune: i32 = thread_rng().gen_range(low..high);
+
+    let total: i32 = if d20 == 20 {
+        thread_rng().gen_range(50_000..200_000)
+    } else if d20 == 1 {
+        -thread_rng().gen_range(15_000..40_000)
+    } else if d20 >= check {
+        fortune
+    } else {
+        fortune / 2
+    };
+
+    if total < 0 {
+        user_data.sub_creds(-total);
+    } else {
+        user_data.add_creds(total);
+    }
+    user_data.update_xp(500);
+    user_data.add_rolls(d20);
+    user_data.add_bonus();
+    user_data.update_daily();
+    total
+}
+
+/// Simulate a /claim_bonus roll for Professor.
+/// Returns creds awarded (0 if bonus_count < 3).
+pub fn simulate_claim(user_data: &mut data::UserData) -> i32 {
+    if !user_data.check_claim() {
+        return 0;
+    }
+    let d20: i32 = thread_rng().gen_range(1..21);
+    let proficiency = 2 + user_data.get_level() / 8;
+    let low = (d20 + proficiency - 1) * 40;
+    let high = (d20 + proficiency) * 40;
+    let fortune: i32 = thread_rng().gen_range(low..high);
+    user_data.add_creds(fortune);
+    user_data.update_xp(150);
+    user_data.reset_bonus();
+    fortune
 }

@@ -11,15 +11,15 @@
 //!---------------------------------------------------------------------!
 
 use crate::data::{
-    self, AssetType, OptionContract, OptionSide, OptionType, Portfolio, Position, TradeAction,
-    TradeRecord, UserData, GOLD_LEVEL_THRESHOLD, TRADE_HISTORY_LIMIT,
+    self, AssetType, MemoryEntry, OptionContract, OptionSide, OptionType, Portfolio, Position,
+    ProfessorMemory, TradeAction, TradeRecord, UserData, GOLD_LEVEL_THRESHOLD, TRADE_HISTORY_LIMIT,
 };
 use crate::{serenity, Context, Error};
 use chrono::{DateTime, Datelike, NaiveDate, TimeZone, Timelike, Utc, Weekday};
 use dashmap::DashMap;
-use poise::serenity_prelude::{futures::StreamExt, ChannelId, CreateMessage, EditMessage};
-use serde::Deserialize;
-use std::collections::HashMap;
+use poise::serenity_prelude::{futures, futures::StreamExt, ChannelId, CreateMessage, EditMessage};
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
@@ -173,6 +173,14 @@ impl YfQuote {
         self.market_open
     }
 
+    fn asset_type(&self) -> AssetType {
+        match self.quote_type.as_deref() {
+            Some("ETF") => AssetType::ETF,
+            Some("CRYPTOCURRENCY") => AssetType::Crypto,
+            _ => AssetType::Stock,
+        }
+    }
+
     fn market_status(&self) -> &'static str {
         if self.market_open { "Market: Open" } else { "Market: Closed" }
     }
@@ -204,6 +212,13 @@ fn fmt_pct_change(value: f64, basis: f64) -> String {
     }
 }
 
+fn option_intrinsic(opt_type: &OptionType, price_usd: f64, strike: f64) -> f64 {
+    match opt_type {
+        OptionType::Call => (price_usd - strike).max(0.0),
+        OptionType::Put => (strike - price_usd).max(0.0),
+    }
+}
+
 /// Option premium in creds: intrinsic + $0.05/DTE time value, minimum $0.01/contract.
 fn option_premium_creds(intrinsic_usd: f64, expiry: &DateTime<Utc>, contracts: u32) -> f64 {
     let dte = (*expiry - Utc::now()).num_days().max(0) as f64;
@@ -217,6 +232,95 @@ fn fmt_pnl(pnl: f64) -> String {
     } else {
         format!("▼ -${:.2}", creds_to_price(pnl.abs()))
     }
+}
+
+const PROFESSOR_PORT: &str = "ProfessorPort";
+
+fn apply_buy(
+    port: &mut Portfolio,
+    history: &mut VecDeque<TradeRecord>,
+    ticker: &str,
+    asset_name: &str,
+    asset_type: AssetType,
+    quantity: f64,
+    price_per_unit: f64,
+    portfolio_name: &str,
+) {
+    port.cash -= price_per_unit * quantity;
+
+    if let Some(existing) = port.positions.iter_mut().find(|p| {
+        p.ticker == ticker && !matches!(&p.asset_type, AssetType::Option(_))
+    }) {
+        let total_qty = existing.quantity + quantity;
+        existing.avg_cost =
+            (existing.avg_cost * existing.quantity + price_per_unit * quantity) / total_qty;
+        existing.quantity = total_qty;
+    } else {
+        port.positions.push(Position {
+            ticker: ticker.to_string(),
+            asset_type,
+            quantity,
+            avg_cost: price_per_unit,
+        });
+    }
+
+    let record = TradeRecord {
+        portfolio: portfolio_name.to_string(),
+        ticker: ticker.to_string(),
+        asset_name: asset_name.to_string(),
+        action: TradeAction::Buy,
+        quantity,
+        price_per_unit,
+        total_creds: price_per_unit * quantity,
+        realized_pnl: None,
+        timestamp: Utc::now(),
+    };
+    history.push_back(record);
+    if history.len() > TRADE_HISTORY_LIMIT {
+        history.pop_front();
+    }
+}
+
+fn apply_sell(
+    port: &mut Portfolio,
+    history: &mut VecDeque<TradeRecord>,
+    ticker: &str,
+    asset_name: &str,
+    quantity: f64,
+    price_per_unit: f64,
+    portfolio_name: &str,
+) -> Option<f64> {
+    let pos_idx = port
+        .positions
+        .iter()
+        .position(|p| p.ticker == ticker && !matches!(&p.asset_type, AssetType::Option(_)))?;
+
+    let avg_cost = port.positions[pos_idx].avg_cost;
+    let proceeds = price_per_unit * quantity;
+    let pnl = proceeds - avg_cost * quantity;
+
+    port.cash += proceeds;
+    port.positions[pos_idx].quantity -= quantity;
+    if port.positions[pos_idx].quantity < 1e-9 {
+        port.positions.remove(pos_idx);
+    }
+
+    let record = TradeRecord {
+        portfolio: portfolio_name.to_string(),
+        ticker: ticker.to_string(),
+        asset_name: asset_name.to_string(),
+        action: TradeAction::Sell,
+        quantity,
+        price_per_unit,
+        total_creds: proceeds,
+        realized_pnl: Some(pnl),
+        timestamp: Utc::now(),
+    };
+    history.push_back(record);
+    if history.len() > TRADE_HISTORY_LIMIT {
+        history.pop_front();
+    }
+    Some(pnl)
 }
 
 fn find_option_idx(
@@ -1640,80 +1744,43 @@ pub async fn buy(
     let u = data_ref.get(&ctx.author().id).unwrap();
     let mut user_data = u.write().await;
 
-    let _remaining_cash = {
-        let port = match user_data
-            .stock
-            .portfolios
-            .iter_mut()
-            .find(|p| p.name.eq_ignore_ascii_case(&portfolio))
-        {
-            Some(p) => p,
-            None => {
-                ctx.send(
-                    poise::CreateReply::default().embed(
-                        serenity::CreateEmbed::new()
-                            .title("Buy")
-                            .description(format!("No portfolio named **{}** found.", portfolio))
-                            .color(data::EMBED_ERROR),
-                    ),
-                )
-                .await?;
-                return Ok(());
-            }
-        };
-
-        if port.cash < total_cost {
+    let port_idx = match user_data.stock.portfolios.iter().position(|p| p.name.eq_ignore_ascii_case(&portfolio)) {
+        Some(i) => i,
+        None => {
             ctx.send(
                 poise::CreateReply::default().embed(
                     serenity::CreateEmbed::new()
                         .title("Buy")
-                        .description(format!(
-                            "Insufficient cash. Need **${:.2}** ({:.0} creds) but **{}** has **${:.2}** ({:.0} creds).",
-                            creds_to_price(total_cost), total_cost, portfolio, creds_to_price(port.cash), port.cash
-                        ))
+                        .description(format!("No portfolio named **{}** found.", portfolio))
                         .color(data::EMBED_ERROR),
                 ),
             )
             .await?;
             return Ok(());
         }
-
-        port.cash -= total_cost;
-
-        // Weighted avg cost update
-        if let Some(existing) = port.positions.iter_mut().find(|p| {
-            p.ticker == ticker && !matches!(&p.asset_type, AssetType::Option(_))
-        }) {
-            let total_qty = existing.quantity + quantity;
-            existing.avg_cost =
-                (existing.avg_cost * existing.quantity + price_per_unit * quantity) / total_qty;
-            existing.quantity = total_qty;
-        } else {
-            port.positions.push(Position {
-                ticker: ticker.clone(),
-                asset_type,
-                quantity,
-                avg_cost: price_per_unit,
-            });
-        }
-
-        port.cash
     };
 
-    let record = TradeRecord {
-        portfolio: portfolio.clone(),
-        ticker: ticker.clone(),
-        asset_name: asset_name.clone(),
-        action: TradeAction::Buy,
-        quantity,
-        price_per_unit,
-        total_creds: total_cost,
-        realized_pnl: None,
-        timestamp: Utc::now(),
-    };
-    user_data.stock.trade_history.push_back(record);
-    if user_data.stock.trade_history.len() > TRADE_HISTORY_LIMIT {
-        user_data.stock.trade_history.pop_front();
+    if user_data.stock.portfolios[port_idx].cash < total_cost {
+        ctx.send(
+            poise::CreateReply::default().embed(
+                serenity::CreateEmbed::new()
+                    .title("Buy")
+                    .description(format!(
+                        "Insufficient cash. Need **${:.2}** ({:.0} creds) but **{}** has **${:.2}** ({:.0} creds).",
+                        creds_to_price(total_cost), total_cost, portfolio,
+                        creds_to_price(user_data.stock.portfolios[port_idx].cash),
+                        user_data.stock.portfolios[port_idx].cash
+                    ))
+                    .color(data::EMBED_ERROR),
+            ),
+        )
+        .await?;
+        return Ok(());
+    }
+
+    {
+        let stock = &mut user_data.stock;
+        apply_buy(&mut stock.portfolios[port_idx], &mut stock.trade_history, &ticker, &asset_name, asset_type, quantity, price_per_unit, &portfolio);
     }
     drop(user_data);
 
@@ -1802,103 +1869,71 @@ pub async fn sell(
     let u = data_ref.get(&ctx.author().id).unwrap();
     let mut user_data = u.write().await;
 
-    let (proceeds, pnl, quantity) = {
-        let port = match user_data
-            .stock
-            .portfolios
-            .iter_mut()
-            .find(|p| p.name.eq_ignore_ascii_case(&portfolio))
-        {
-            Some(p) => p,
-            None => {
-                ctx.send(
-                    poise::CreateReply::default().embed(
-                        serenity::CreateEmbed::new()
-                            .title("Sell")
-                            .description(format!("No portfolio named **{}** found.", portfolio))
-                            .color(data::EMBED_ERROR),
-                    ),
-                )
-                .await?;
-                return Ok(());
-            }
-        };
-
-        let pos_idx = match port
-            .positions
-            .iter()
-            .position(|p| p.ticker == ticker && !matches!(&p.asset_type, AssetType::Option(_)))
-        {
-            Some(i) => i,
-            None => {
-                ctx.send(
-                    poise::CreateReply::default().embed(
-                        serenity::CreateEmbed::new()
-                            .title("Sell")
-                            .description(format!(
-                                "No **{}** position in portfolio **{}**.",
-                                ticker, portfolio
-                            ))
-                            .color(data::EMBED_ERROR),
-                    ),
-                )
-                .await?;
-                return Ok(());
-            }
-        };
-
-        let quantity = if let Some(q) = quantity {
-            q
-        } else if let Some(a) = amount {
-            price_to_creds(a) / price_per_unit
-        } else {
-            port.positions[pos_idx].quantity
-        };
-
-        if port.positions[pos_idx].quantity < quantity - 1e-9 {
+    let port_idx = match user_data.stock.portfolios.iter().position(|p| p.name.eq_ignore_ascii_case(&portfolio)) {
+        Some(i) => i,
+        None => {
             ctx.send(
                 poise::CreateReply::default().embed(
                     serenity::CreateEmbed::new()
                         .title("Sell")
-                        .description(format!(
-                            "You only hold **{}** of **{}** but tried to sell **{}**.",
-                            fmt_qty(port.positions[pos_idx].quantity), ticker, fmt_qty(quantity)
-                        ))
+                        .description(format!("No portfolio named **{}** found.", portfolio))
                         .color(data::EMBED_ERROR),
                 ),
             )
             .await?;
             return Ok(());
         }
+    };
 
-        let avg_cost = port.positions[pos_idx].avg_cost;
-        let proceeds = price_per_unit * quantity;
-        let pnl = proceeds - avg_cost * quantity;
-
-        port.cash += proceeds;
-        port.positions[pos_idx].quantity -= quantity;
-        if port.positions[pos_idx].quantity < 1e-9 {
-            port.positions.remove(pos_idx);
+    let pos_idx = match user_data.stock.portfolios[port_idx]
+        .positions
+        .iter()
+        .position(|p| p.ticker == ticker && !matches!(&p.asset_type, AssetType::Option(_)))
+    {
+        Some(i) => i,
+        None => {
+            ctx.send(
+                poise::CreateReply::default().embed(
+                    serenity::CreateEmbed::new()
+                        .title("Sell")
+                        .description(format!("No **{}** position in portfolio **{}**.", ticker, portfolio))
+                        .color(data::EMBED_ERROR),
+                ),
+            )
+            .await?;
+            return Ok(());
         }
-
-        (proceeds, pnl, quantity)
     };
 
-    let record = TradeRecord {
-        portfolio: portfolio.clone(),
-        ticker: ticker.clone(),
-        asset_name: asset_name.clone(),
-        action: TradeAction::Sell,
-        quantity,
-        price_per_unit,
-        total_creds: proceeds,
-        realized_pnl: Some(pnl),
-        timestamp: Utc::now(),
+    let quantity = if let Some(q) = quantity {
+        q
+    } else if let Some(a) = amount {
+        a / price_usd
+    } else {
+        user_data.stock.portfolios[port_idx].positions[pos_idx].quantity
     };
-    user_data.stock.trade_history.push_back(record);
-    if user_data.stock.trade_history.len() > TRADE_HISTORY_LIMIT {
-        user_data.stock.trade_history.pop_front();
+
+    if user_data.stock.portfolios[port_idx].positions[pos_idx].quantity < quantity - 1e-9 {
+        ctx.send(
+            poise::CreateReply::default().embed(
+                serenity::CreateEmbed::new()
+                    .title("Sell")
+                    .description(format!(
+                        "You only hold **{}** of **{}** but tried to sell **{}**.",
+                        fmt_qty(user_data.stock.portfolios[port_idx].positions[pos_idx].quantity), ticker, fmt_qty(quantity)
+                    ))
+                    .color(data::EMBED_ERROR),
+            ),
+        )
+        .await?;
+        return Ok(());
     }
+
+    let (proceeds, pnl) = {
+        let stock = &mut user_data.stock;
+        let pnl = apply_sell(&mut stock.portfolios[port_idx], &mut stock.trade_history, &ticker, &asset_name, quantity, price_per_unit, &portfolio).unwrap_or(0.0);
+        (price_per_unit * quantity, pnl)
+    };
 
     let pnl_str = if pnl >= 0.0 {
         format!("▲ +${:.2} ({:.0} creds)", creds_to_price(pnl), pnl)
@@ -2445,10 +2480,7 @@ pub async fn options_quote(
         }
     };
 
-    let intrinsic = match opt_type {
-        OptionType::Call => (price_usd - strike).max(0.0),
-        OptionType::Put => (strike - price_usd).max(0.0),
-    };
+    let intrinsic = option_intrinsic(&opt_type, price_usd, strike);
     let dte = (expiry_dt - Utc::now()).num_days().max(0);
     let time_value_usd = dte as f64 * 0.05;
     let premium_per_contract_usd = (intrinsic + time_value_usd).max(0.01) * 100.0;
@@ -2564,10 +2596,7 @@ pub async fn options_buy(
         }
     };
 
-    let intrinsic = match opt_type {
-        OptionType::Call => (price_usd - strike).max(0.0),
-        OptionType::Put => (strike - price_usd).max(0.0),
-    };
+    let intrinsic = option_intrinsic(&opt_type, price_usd, strike);
     let total_cost = option_premium_creds(intrinsic, &expiry_dt, contracts);
     let cost_per_contract = total_cost / contracts as f64;
 
@@ -2754,10 +2783,7 @@ pub async fn options_sell(
         }
     };
 
-    let intrinsic = match opt_type {
-        OptionType::Call => (price_usd - strike).max(0.0),
-        OptionType::Put => (strike - price_usd).max(0.0),
-    };
+    let intrinsic = option_intrinsic(&opt_type, price_usd, strike);
     let total_proceeds = option_premium_creds(intrinsic, &expiry_dt, contracts);
     let proceeds_per_contract = total_proceeds / contracts as f64;
 
@@ -2972,10 +2998,7 @@ pub async fn options_write(
         }
     };
 
-    let intrinsic = match opt_type {
-        OptionType::Call => (price_usd - strike).max(0.0),
-        OptionType::Put => (strike - price_usd).max(0.0),
-    };
+    let intrinsic = option_intrinsic(&opt_type, price_usd, strike);
     let premium = option_premium_creds(intrinsic, &expiry_dt, contracts);
     let premium_per_contract = premium / contracts as f64;
 
@@ -3193,10 +3216,7 @@ pub async fn options_cover(
         }
     };
 
-    let intrinsic = match opt_type {
-        OptionType::Call => (price_usd - strike).max(0.0),
-        OptionType::Put => (strike - price_usd).max(0.0),
-    };
+    let intrinsic = option_intrinsic(&opt_type, price_usd, strike);
     let cost_to_close = option_premium_creds(intrinsic, &expiry_dt, contracts);
     let cost_per_contract = cost_to_close / contracts as f64;
 
@@ -3342,5 +3362,412 @@ pub async fn options_cover(
     )
     .await?;
 
+    Ok(())
+}
+
+// ── Professor AI Portfolio ────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct FinnhubNewsItem {
+    headline: String,
+    source: String,
+    datetime: i64,
+}
+
+#[derive(Deserialize)]
+struct TradeCall {
+    #[serde(rename = "fn")]
+    func: String,
+    ticker: String,
+    #[allow(dead_code)]
+    asset_type: Option<String>,
+    amount_usd: Option<f64>,
+    sell_pct: Option<f64>,
+}
+
+#[derive(Deserialize)]
+struct ProfessorResponse {
+    reason: String,
+    trades: Vec<TradeCall>,
+}
+
+#[derive(Serialize)]
+struct ClaudeMessage {
+    role: String,
+    content: String,
+}
+
+#[derive(Serialize)]
+struct ClaudeRequest {
+    model: String,
+    max_tokens: u32,
+    system: String,
+    messages: Vec<ClaudeMessage>,
+}
+
+#[derive(Deserialize)]
+struct ClaudeContent {
+    text: String,
+}
+
+#[derive(Deserialize)]
+struct ClaudeResponse {
+    content: Vec<ClaudeContent>,
+}
+
+pub async fn is_market_open() -> bool {
+    fetch_quote_detail("SPY").await
+        .and_then(|q| Some(q.is_market_open()))
+        .unwrap_or(false)
+}
+
+async fn fetch_market_news() -> Vec<String> {
+    let api_key = match std::env::var("FINNHUB_API_KEY") {
+        Ok(k) => k,
+        Err(_) => { tracing::warn!("FINNHUB_API_KEY not set"); return vec![]; }
+    };
+    let resp = HTTP_CLIENT
+        .get("https://finnhub.io/api/v1/market-news")
+        .query(&[("category", "general"), ("token", api_key.as_str())])
+        .send().await;
+    let resp = match resp { Ok(r) => r, Err(e) => { tracing::warn!("Finnhub fetch failed: {e}"); return vec![]; } };
+    let mut items: Vec<FinnhubNewsItem> = match resp.json().await {
+        Ok(v) => v, Err(e) => { tracing::warn!("Finnhub parse failed: {e}"); return vec![]; }
+    };
+    items.sort_by(|a, b| b.datetime.cmp(&a.datetime));
+    items.into_iter().take(15).map(|n| format!("{} — {}", n.headline, n.source)).collect()
+}
+
+async fn call_claude(system: &str, user: &str) -> String {
+    let api_key = match std::env::var("ANTHROPIC_API_KEY") {
+        Ok(k) => k,
+        Err(_) => { tracing::warn!("ANTHROPIC_API_KEY not set"); return String::new(); }
+    };
+    let body = ClaudeRequest {
+        model: "claude-sonnet-4-6".to_string(),
+        max_tokens: 1024,
+        system: system.to_string(),
+        messages: vec![ClaudeMessage { role: "user".to_string(), content: user.to_string() }],
+    };
+    let resp = HTTP_CLIENT
+        .post("https://api.anthropic.com/v1/messages")
+        .header("x-api-key", &api_key)
+        .header("anthropic-version", "2023-06-01")
+        .header("content-type", "application/json")
+        .json(&body).send().await;
+    let resp = match resp { Ok(r) => r, Err(e) => { tracing::warn!("Claude request failed: {e}"); return String::new(); } };
+    let parsed: ClaudeResponse = match resp.json().await {
+        Ok(v) => v, Err(e) => { tracing::warn!("Claude parse failed: {e}"); return String::new(); }
+    };
+    parsed.content.into_iter().next().map(|c| c.text).unwrap_or_default()
+}
+
+async fn morning_pulse(headlines: &[String], memory: &ProfessorMemory) -> String {
+    if headlines.is_empty() { return String::new(); }
+    let headlines_str = headlines.join("\n");
+    let user_prompt = format!(
+        "Split these headlines into macro events and individual stock news.\n\
+         For each, write one bullet. Then list tickers to watch.\n\n\
+         MACRO (rates, geopolitics, commodities, indices):\n- ...\n\n\
+         STOCKS (individual company news):\n- ...\n\n\
+         WATCH: [comma-separated tickers relevant to today's news]\n\
+         SENTIMENT: risk-on | risk-off | neutral\n\n\
+         Headlines:\n{headlines_str}"
+    );
+    call_claude(&memory.core_behavior, &user_prompt).await
+}
+
+fn parse_watch_tickers(pulse: &str) -> Vec<String> {
+    for line in pulse.lines() {
+        if line.trim_start().starts_with("WATCH:") {
+            let s = line.trim_start_matches("WATCH:").trim();
+            return s.split(',').map(|t| t.trim().to_uppercase()).filter(|t| !t.is_empty()).collect();
+        }
+    }
+    vec![]
+}
+
+fn parse_sentiment(pulse: &str) -> String {
+    for line in pulse.lines() {
+        if line.trim_start().starts_with("SENTIMENT:") {
+            return line.trim_start_matches("SENTIMENT:").trim().to_string();
+        }
+    }
+    "neutral".to_string()
+}
+
+async fn midday_check(pulse: &str, positions_str: &str, memory: &ProfessorMemory) -> String {
+    if pulse.is_empty() && positions_str.is_empty() { return String::new(); }
+    let user_prompt = format!(
+        "Today's market:\n{pulse}\n\n\
+         Your current positions (live prices):\n{positions_str}\n\n\
+         Score each position: HOLD | ADD | REDUCE — one line each with a brief reason."
+    );
+    call_claude(&memory.core_behavior, &user_prompt).await
+}
+
+async fn trading_session(
+    entries_str: &str,
+    pulse: &str,
+    sentiment: &str,
+    midday_scores: &str,
+    portfolio_str: &str,
+    cash_usd: f64,
+    memory: &ProfessorMemory,
+) -> Option<ProfessorResponse> {
+    let max_per_trade = cash_usd * 0.30;
+    let user_prompt = format!(
+        "Your recent trade log (last 7 days):\n{entries_str}\n\n\
+         Today's market:\n{pulse}\nSentiment: {sentiment}\n\n\
+         Positions and midday scores:\n{midday_scores}\n\n\
+         Portfolio:\n{portfolio_str}\n\n\
+         AVAILABLE FUNCTIONS:\n\
+         apply_buy(ticker, asset_type: \"Stock\"|\"ETF\"|\"Crypto\", amount_usd)\n\
+         apply_sell(ticker, sell_pct: 0.0-1.0)\n\n\
+         CONSTRAINTS: cash={cash_usd:.2}, max_per_trade={max_per_trade:.2}, max_trades=3, min_position=50\n\n\
+         Only HIGH conviction trades — default to hold.\n\
+         Return ONLY JSON: {{\"reason\":\"...\",\"trades\":[{{\"fn\":\"apply_buy\",\"ticker\":\"XOM\",\"asset_type\":\"Stock\",\"amount_usd\":120.0}}]}}\n\
+         No trades: {{\"reason\":\"...\",\"trades\":[]}}"
+    );
+    let raw = call_claude(&memory.core_behavior, &user_prompt).await;
+    if raw.is_empty() { return None; }
+    let json_str = raw.trim()
+        .trim_start_matches("```json").trim_start_matches("```").trim_end_matches("```").trim();
+    match serde_json::from_str::<ProfessorResponse>(json_str) {
+        Ok(r) => Some(r),
+        Err(e) => { tracing::warn!("Professor parse failed: {e}\nRaw: {raw}"); None }
+    }
+}
+
+pub async fn professor_daily_session(
+    users: &UsersMap,
+    http: &Arc<serenity::Http>,
+    bot_chat: &str,
+    bot_user_id: serenity::UserId,
+) {
+    let u = match users.get(&bot_user_id) {
+        Some(u) => u,
+        None => { tracing::warn!("Professor UserData not found"); return; }
+    };
+
+    // Write lock acquired here, snapshot taken, lock released before any async calls
+    let (uwu_creds, claim_creds, memory, portfolio_snapshot, held_tickers) = {
+        let mut ud = u.write().await;
+        let uwu_creds = crate::basic::simulate_uwu(&mut ud);
+        let claim_creds = crate::basic::simulate_claim(&mut ud);
+        let memory = ud.professor_memory.clone().unwrap_or_default();
+        let (snap, tickers) = ud.stock.portfolios.iter()
+            .find(|p| p.name == PROFESSOR_PORT)
+            .map(|port| {
+                let snap = format!("Cash: ${:.2}\nPositions:\n{}", creds_to_price(port.cash),
+                    port.positions.iter().filter(|p| !matches!(&p.asset_type, AssetType::Option(_)))
+                    .map(|p| format!("  {}: {:.4}sh @ ${:.2}", p.ticker, p.quantity, creds_to_price(p.avg_cost)))
+                    .collect::<Vec<_>>().join("\n"));
+                let tickers = port.positions.iter()
+                    .filter(|p| !matches!(&p.asset_type, AssetType::Option(_)))
+                    .map(|p| p.ticker.clone()).collect::<Vec<_>>();
+                (snap, tickers)
+            })
+            .unwrap_or_default();
+        (uwu_creds, claim_creds, memory, snap, tickers)
+    };
+
+
+    let headlines = fetch_market_news().await;
+    let pulse = morning_pulse(&headlines, &memory).await;
+    let watch_tickers = parse_watch_tickers(&pulse);
+    let sentiment = parse_sentiment(&pulse);
+
+    let mut all_tickers = held_tickers.clone();
+    for t in &watch_tickers { if !all_tickers.contains(t) { all_tickers.push(t.clone()); } }
+    let price_results = futures::future::join_all(
+        all_tickers.iter().map(|t| { let t = t.clone(); async move { (t.clone(), fetch_quote_detail(&t).await) } })
+    ).await;
+    let mut prices: HashMap<String, (f64, String, AssetType)> = HashMap::new();
+    for (ticker, q) in price_results {
+        if let Some(q) = q {
+            if let Some(price) = q.regular_market_price {
+                prices.insert(ticker, (price, q.display_name(), q.asset_type()));
+            }
+        }
+    }
+
+    let positions_with_prices = {
+        let ur = u.read().await;
+        ur.stock.portfolios.iter().find(|p| p.name == PROFESSOR_PORT).map(|port| {
+            port.positions.iter().filter(|p| !matches!(&p.asset_type, AssetType::Option(_)))
+            .map(|p| {
+                let cur = prices.get(&p.ticker).map(|(pr,_,_)| *pr).unwrap_or(0.0);
+                let avg = creds_to_price(p.avg_cost);
+                let pct = if avg > 0.0 { (cur - avg) / avg * 100.0 } else { 0.0 };
+                format!("  {}: {:.4}sh @ ${:.2}, now ${:.2} ({:+.1}%)", p.ticker, p.quantity, avg, cur, pct)
+            }).collect::<Vec<_>>().join("\n")
+        }).unwrap_or_default()
+    };
+
+
+    let midday_scores = midday_check(&pulse, &positions_with_prices, &memory).await;
+
+    let entries_str = if memory.entries.is_empty() {
+        "No previous entries yet.".to_string()
+    } else {
+        memory.entries.iter().map(|e| format!("[{}] {}", e.date.format("%a %b %d"), e.content))
+        .collect::<Vec<_>>().join("\n")
+    };
+
+    let cash_usd = {
+        let ur = u.read().await;
+        ur.stock.portfolios.iter().find(|p| p.name == PROFESSOR_PORT)
+        .map(|p| creds_to_price(p.cash)).unwrap_or(0.0)
+    };
+
+
+    let response = trading_session(&entries_str, &pulse, &sentiment, &midday_scores, &portfolio_snapshot, cash_usd, &memory).await;
+
+    // Re-acquire write lock to execute trades and persist memory entry
+    struct ExecutedTrade { action: String, ticker: String, amount_usd: f64, price_usd: f64, pnl: Option<f64> }
+    let mut executed: Vec<ExecutedTrade> = vec![];
+    let reason = response.as_ref().map(|r| r.reason.clone()).unwrap_or_else(|| "No data from Claude today.".to_string());
+
+    if let Some(ref resp) = response {
+        let cash_limit_creds = price_to_creds(cash_usd * 0.30);
+        let mut ud = u.write().await;
+        let port_idx = match ud.stock.portfolios.iter().position(|p| p.name == PROFESSOR_PORT) {
+            Some(i) => i, None => return,
+        };
+        for trade in resp.trades.iter().take(3) {
+            let Some((price_usd, asset_name, asset_type)) = prices.get(&trade.ticker).map(|(p,n,at)| (*p, n.clone(), at.clone())) else { continue; };
+            let price_creds = price_to_creds(price_usd);
+            // Split disjoint borrows each iteration — portfolios and trade_history are separate fields
+            let stock = &mut ud.stock;
+            let (portfolios, history) = (&mut stock.portfolios, &mut stock.trade_history);
+            let port = &mut portfolios[port_idx];
+            match trade.func.as_str() {
+                "apply_buy" => {
+                    let amount_usd = trade.amount_usd.unwrap_or(0.0);
+                    if amount_usd < 50.0 { continue; }
+                    let cost_creds = price_to_creds(amount_usd);
+                    if port.cash < cost_creds || cost_creds > cash_limit_creds { continue; }
+                    let quantity = amount_usd / price_usd;
+                    apply_buy(port, history, &trade.ticker, &asset_name, asset_type, quantity, price_creds, PROFESSOR_PORT);
+                    executed.push(ExecutedTrade { action: "BUY".to_string(), ticker: trade.ticker.clone(), amount_usd, price_usd, pnl: None });
+                }
+                "apply_sell" => {
+                    let sell_pct = trade.sell_pct.unwrap_or(0.0).clamp(0.0, 1.0);
+                    if sell_pct == 0.0 { continue; }
+                    let qty = match port.positions.iter().find(|p| p.ticker == trade.ticker && !matches!(&p.asset_type, AssetType::Option(_))) {
+                        Some(p) => p.quantity * sell_pct, None => continue,
+                    };
+                    let Some(pnl) = apply_sell(port, history, &trade.ticker, &asset_name, qty, price_creds, PROFESSOR_PORT) else { continue; };
+                    executed.push(ExecutedTrade { action: "SELL".to_string(), ticker: trade.ticker.clone(), amount_usd: price_usd * qty, price_usd, pnl: Some(creds_to_price(pnl)) });
+                }
+                _ => {}
+            }
+        }
+
+        if let Some(mem) = ud.professor_memory.as_mut() {
+            mem.entries.push_back(MemoryEntry { date: Utc::now(), content: reason.clone() });
+            let cutoff = Utc::now() - chrono::Duration::days(7);
+            mem.entries.retain(|e| e.date > cutoff);
+        }
+    }
+
+
+    let trade_lines = if executed.is_empty() {
+        "No trades today — holding conviction.".to_string()
+    } else {
+        executed.iter().map(|t| {
+            if t.action == "BUY" {
+                format!("✦ BOUGHT **{}** @ ${:.2} — ${:.2}", t.ticker, t.price_usd, t.amount_usd)
+            } else {
+                let pnl_str = t.pnl.map(|p| fmt_pnl(price_to_creds(p))).unwrap_or_default();
+                format!("✦ SOLD **{}** @ ${:.2} — ${:.2}  {}", t.ticker, t.price_usd, t.amount_usd, pnl_str)
+            }
+        }).collect::<Vec<_>>().join("\n")
+    };
+
+    let uwu_line = if uwu_creds > 0 { format!("+{uwu_creds} creds") } else if uwu_creds < 0 { format!("{uwu_creds} creds (crit fail)") } else { "cooldown".to_string() };
+    let claim_line = if claim_creds > 0 { format!("+{claim_creds} creds") } else { "not yet (need 3 uwu rolls)".to_string() };
+
+    let portfolio_after = {
+        let ur = u.read().await;
+        ur.stock.portfolios.iter().find(|p| p.name == PROFESSOR_PORT).map(|port| {
+            let total_usd = port.positions.iter().filter(|p| !matches!(&p.asset_type, AssetType::Option(_)))
+                .map(|p| prices.get(&p.ticker).map(|(pr,_,_)| *pr).unwrap_or(0.0) * p.quantity)
+                .sum::<f64>() + creds_to_price(port.cash);
+            let pos_lines = port.positions.iter().filter(|p| !matches!(&p.asset_type, AssetType::Option(_)))
+                .map(|p| {
+                    let cur = prices.get(&p.ticker).map(|(pr,_,_)| *pr).unwrap_or(0.0);
+                    let avg = creds_to_price(p.avg_cost);
+                    let pct = if avg > 0.0 { (cur-avg)/avg*100.0 } else { 0.0 };
+                    format!("{}: {:.4}sh  {:+.1}%", p.ticker, p.quantity, pct)
+                }).collect::<Vec<_>>().join("\n");
+            format!("Cash: ${:.2}\n{}\nTotal Value: ${:.2}", creds_to_price(port.cash), pos_lines, total_usd)
+        }).unwrap_or_default()
+    };
+
+    let desc = format!(
+        "**Daily Income**\n/uwu: {uwu_line}\n/claim: {claim_line}\n\n\
+         **Market Today**\n{pulse}\n\n\
+         **Portfolio Changes**\n{trade_lines}\n\n\
+         *{reason}*\n\n\
+         **Portfolio After**\n{portfolio_after}"
+    );
+
+    let embed = serenity::CreateEmbed::new()
+        .title(format!("Professor's Daily Report — {}", Utc::now().format("%b %d, %Y")))
+        .description(desc)
+        .color(data::EMBED_CYAN)
+        .footer(serenity::CreateEmbedFooter::new("@~ powered by UwUntu & RustyBamboo"));
+
+    let channel_id: u64 = match bot_chat.parse() {
+        Ok(id) => id,
+        Err(_) => { tracing::warn!("Invalid bot_chat channel id: {bot_chat}"); return; }
+    };
+    if let Err(e) = ChannelId::new(channel_id).send_message(http, CreateMessage::new().embed(embed)).await {
+        tracing::warn!("Failed to post professor summary: {e}");
+    }
+}
+
+#[poise::command(slash_command, description_localized("en-US", "View Professor's AI portfolio"))]
+pub async fn professor(ctx: Context<'_>) -> Result<(), Error> {
+    let bot_user_id = ctx.data().bot_user_id;
+    let u = match ctx.data().users.get(&bot_user_id) {
+        Some(u) => u,
+        None => { ctx.say("Professor's portfolio hasn't been initialized yet.").await?; return Ok(()); }
+    };
+    let user_data = u.read().await;
+    let port = match user_data.stock.portfolios.iter().find(|p| p.name == PROFESSOR_PORT) {
+        Some(p) => p,
+        None => { ctx.say("Professor doesn't have a portfolio yet.").await?; return Ok(()); }
+    };
+
+    let pos_lines = {
+        let stocks: Vec<String> = port.positions.iter()
+            .filter(|p| !matches!(&p.asset_type, AssetType::Option(_)))
+            .map(|p| format!("**{}**: {:.4}sh @ avg ${:.2}", p.ticker, p.quantity, creds_to_price(p.avg_cost)))
+            .collect();
+        if stocks.is_empty() { "No positions yet.".to_string() } else { stocks.join("\n") }
+    };
+
+    let memory_str = user_data.professor_memory.as_ref()
+        .and_then(|m| m.entries.back())
+        .map(|e| format!("_{}_\n{}", e.date.format("%b %d, %Y"), e.content))
+        .unwrap_or_else(|| "_No entries yet._".to_string());
+
+    let desc = format!(
+        "**Cash:** ${:.2}\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n\
+         **Positions:**\n{pos_lines}\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n\
+         **Latest Thoughts:**\n{memory_str}",
+        creds_to_price(port.cash)
+    );
+
+    ctx.send(poise::CreateReply::default().embed(
+        serenity::CreateEmbed::new()
+            .title("Professor's Portfolio")
+            .description(desc)
+            .color(data::EMBED_CYAN)
+            .footer(serenity::CreateEmbedFooter::new("@~ powered by UwUntu & RustyBamboo")),
+    )).await?;
     Ok(())
 }

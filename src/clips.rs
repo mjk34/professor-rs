@@ -157,8 +157,6 @@ pub async fn server_clips(ctx: Context<'_>) -> Result<(), Error> {
         }
     }
 
-    println!("{:}", &desc);
-
     if all_clips.is_empty() {
         ctx.send(
             poise::CreateReply::default().embed(
@@ -214,8 +212,6 @@ pub async fn server_clips(ctx: Context<'_>) -> Result<(), Error> {
     if *top_len > 0 {
         desc = top_ten_desc + "-\n" + &desc;
     }
-
-    println!("{:}", &desc);
 
     ctx.send(
         poise::CreateReply::default().embed(
@@ -443,7 +439,10 @@ pub async fn next_clip(ctx: Context<'_>) -> Result<(), Error> {
     ];
 
     let user = rand_clip.1.read().await;
-    let clip = user.submits[rand_clip.2].clone().unwrap();
+    let clip = match user.submits.get(rand_clip.2).and_then(|c| c.clone()) {
+        Some(c) => c,
+        None => { ctx.say("That clip is no longer available.").await?; return Ok(()); }
+    };
 
     ctx.send(poise::CreateReply::default().content(format!("**{}**\n{}", clip.title, clip.link)))
         .await?;
