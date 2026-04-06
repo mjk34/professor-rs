@@ -370,6 +370,14 @@ static LOGO_API_KEY: LazyLock<Option<String>> =
 /// Set to true when Yahoo Finance returns HTTP 429; cleared on next successful response.
 static YAHOO_RATE_LIMITED: AtomicBool = AtomicBool::new(false);
 
+/// Daily cache for morning_pulse — reused within the same UTC day to avoid redundant Claude calls.
+static PULSE_CACHE: LazyLock<tokio::sync::RwLock<Option<(chrono::NaiveDate, String)>>> =
+    LazyLock::new(|| tokio::sync::RwLock::new(None));
+
+/// Daily cache for midday_check — reused within the same UTC day.
+static MIDDAY_CACHE: LazyLock<tokio::sync::RwLock<Option<(chrono::NaiveDate, String)>>> =
+    LazyLock::new(|| tokio::sync::RwLock::new(None));
+
 fn logo_url(ticker: &str) -> Option<String> {
     let key = LOGO_API_KEY.as_deref()?;
     Some(format!("https://img.logo.dev/ticker/{}?token={}", ticker, key))
@@ -3527,13 +3535,30 @@ async fn call_claude(system: &str, user: &str) -> String {
         .header("content-type", "application/json")
         .json(&body).send().await;
     let resp = match resp { Ok(r) => r, Err(e) => { tracing::warn!("Claude request failed: {e}"); return String::new(); } };
-    let parsed: ClaudeResponse = match resp.json().await {
-        Ok(v) => v, Err(e) => { tracing::warn!("Claude parse failed: {e}"); return String::new(); }
+    let bytes = match resp.bytes().await {
+        Ok(b) => b, Err(e) => { tracing::warn!("Claude body read failed: {e}"); return String::new(); }
+    };
+    let parsed: ClaudeResponse = match serde_json::from_slice(&bytes) {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!("Claude parse failed: {e} — body: {}", String::from_utf8_lossy(&bytes).chars().take(300).collect::<String>());
+            return String::new();
+        }
     };
     parsed.content.into_iter().next().map(|c| c.text).unwrap_or_default()
 }
 
 async fn morning_pulse(headlines: &[String], memory: &ProfessorMemory) -> String {
+    let today = Utc::now().date_naive();
+    {
+        let cache = PULSE_CACHE.read().await;
+        if let Some((date, ref result)) = *cache {
+            if date == today {
+                tracing::info!("[Professor] morning_pulse: using cached result from today");
+                return result.clone();
+            }
+        }
+    }
     if headlines.is_empty() { return String::new(); }
     let headlines_str = headlines.join("\n");
     let user_prompt = format!(
@@ -3545,7 +3570,11 @@ async fn morning_pulse(headlines: &[String], memory: &ProfessorMemory) -> String
          SENTIMENT: risk-on | risk-off | neutral\n\n\
          Headlines:\n{headlines_str}"
     );
-    call_claude(&memory.core_behavior, &user_prompt).await
+    let result = call_claude(&memory.core_behavior, &user_prompt).await;
+    if !result.is_empty() {
+        *PULSE_CACHE.write().await = Some((today, result.clone()));
+    }
+    result
 }
 
 fn parse_watch_tickers(pulse: &str) -> Vec<String> {
@@ -3568,13 +3597,29 @@ fn parse_sentiment(pulse: &str) -> String {
 }
 
 async fn midday_check(pulse: &str, positions_str: &str, memory: &ProfessorMemory) -> String {
+    let today = Utc::now().date_naive();
+    {
+        let cache = MIDDAY_CACHE.read().await;
+        if let Some((date, ref result)) = *cache {
+            if date == today {
+                tracing::info!("[Professor] midday_check: using cached result from today");
+                return result.clone();
+            }
+        }
+    }
     if pulse.is_empty() && positions_str.is_empty() { return String::new(); }
     let user_prompt = format!(
         "Today's market:\n{pulse}\n\n\
          Your current positions (live prices):\n{positions_str}\n\n\
          Score each position: HOLD | ADD | REDUCE — one line each with a brief reason."
     );
-    call_claude(&memory.core_behavior, &user_prompt).await
+    let result = call_claude(&memory.core_behavior, &user_prompt).await;
+    // Only cache midday if there were positions to score — an empty positions_str produces a
+    // meaningless result that would incorrectly persist for subsequent runs with actual holdings.
+    if !result.is_empty() && !positions_str.is_empty() {
+        *MIDDAY_CACHE.write().await = Some((today, result.clone()));
+    }
+    result
 }
 
 async fn trading_session(
@@ -3602,11 +3647,17 @@ async fn trading_session(
     );
     let raw = call_claude(&memory.core_behavior, &user_prompt).await;
     if raw.is_empty() { return None; }
-    let json_str = raw.trim()
-        .trim_start_matches("```json").trim_start_matches("```").trim_end_matches("```").trim();
+    // Extract JSON object robustly — Claude sometimes wraps response in prose or fences
+    let json_str = match (raw.find('{'), raw.rfind('}')) {
+        (Some(start), Some(end)) if end > start => &raw[start..=end],
+        _ => {
+            tracing::warn!("Professor parse failed: no JSON object found (response length: {} chars) — body: {}", raw.len(), raw.chars().take(300).collect::<String>());
+            return None;
+        }
+    };
     match serde_json::from_str::<ProfessorResponse>(json_str) {
         Ok(r) => Some(r),
-        Err(e) => { tracing::warn!("Professor parse failed: {e} (response length: {} chars)", raw.len()); None }
+        Err(e) => { tracing::warn!("Professor parse failed: {e} — json: {}", json_str.chars().take(300).collect::<String>()); None }
     }
 }
 
@@ -3733,20 +3784,64 @@ pub async fn professor_daily_session(
 
     let response = trading_session(&entries_str, &pulse, &sentiment, &midday_scores, &portfolio_snapshot, cash_usd, &memory).await;
 
+    // Fetch prices for any trade tickers Claude returned that weren't already in the watch list
+    if let Some(ref resp) = response {
+        let missing: Vec<String> = resp.trades.iter()
+            .map(|t| t.ticker.clone())
+            .filter(|t| !prices.contains_key(t))
+            .collect();
+        if !missing.is_empty() {
+            tracing::info!("[Professor] fetching prices for {} unlisted trade ticker(s): {:?}", missing.len(), missing);
+            let extra = futures::future::join_all(
+                missing.iter().map(|t| { let t = t.clone(); async move { (t.clone(), fetch_quote_detail(&t).await) } })
+            ).await;
+            for (ticker, q) in extra {
+                if let Some(q) = q {
+                    if let Some(price) = q.regular_market_price {
+                        prices.insert(ticker, (price, q.display_name(), q.asset_type()));
+                    }
+                }
+            }
+        }
+    }
+
     // Re-acquire write lock to execute trades and persist memory entry
     struct ExecutedTrade { action: String, ticker: String, amount_usd: f64, price_usd: f64, pnl: Option<f64> }
     let mut executed: Vec<ExecutedTrade> = vec![];
     let reason = response.as_ref().map(|r| r.reason.clone()).unwrap_or_else(|| "No data from Claude today.".to_string());
 
+    // Debug: log Claude's full response
+    tracing::info!("[Professor] ───────────────────────────────────────");
+    match &response {
+        None => tracing::warn!("[Professor] Claude returned no parseable response"),
+        Some(r) => {
+            tracing::info!("[Professor] Claude reason: {}", r.reason);
+            if r.trades.is_empty() {
+                tracing::info!("[Professor] Claude trades: [] (hold)");
+            } else {
+                for (i, t) in r.trades.iter().enumerate() {
+                    tracing::info!(
+                        "[Professor] trade[{}]: fn={} ticker={} amount_usd={:?} sell_pct={:?}",
+                        i, t.func, t.ticker, t.amount_usd, t.sell_pct
+                    );
+                }
+            }
+        }
+    }
+
     if let Some(ref resp) = response {
         let cash_limit_creds = price_to_creds(cash_usd * 0.30);
+        tracing::info!("[Professor] cash_usd={:.2} cash_limit_creds={:.0}", cash_usd, cash_limit_creds);
         let mut ud = u.write().await;
         let port_idx = match ud.stock.portfolios.iter().position(|p| p.name == PROFESSOR_PORT) {
             Some(i) => i,
             None => { tracing::warn!("Professor: ProfessorPort missing at trade execution — skipping trades"); return; }
         };
         for trade in resp.trades.iter().take(3) {
-            let Some((price_usd, asset_name, asset_type)) = prices.get(&trade.ticker).map(|(p,n,at)| (*p, n.clone(), at.clone())) else { continue; };
+            let Some((price_usd, asset_name, asset_type)) = prices.get(&trade.ticker).map(|(p,n,at)| (*p, n.clone(), at.clone())) else {
+                tracing::warn!("[Professor] trade skipped — no price data for {}", trade.ticker);
+                continue;
+            };
             let price_creds = price_to_creds(price_usd);
             // Split disjoint borrows each iteration — portfolios and trade_history are separate fields
             let stock = &mut ud.stock;
@@ -3755,23 +3850,41 @@ pub async fn professor_daily_session(
             match trade.func.as_str() {
                 "apply_buy" => {
                     let amount_usd = trade.amount_usd.unwrap_or(0.0);
-                    if amount_usd < 50.0 { continue; }
+                    if amount_usd < 50.0 {
+                        tracing::warn!("[Professor] BUY {} skipped — amount_usd {:.2} < 50", trade.ticker, amount_usd);
+                        continue;
+                    }
                     let cost_creds = price_to_creds(amount_usd);
-                    if port.cash < cost_creds || cost_creds > cash_limit_creds { continue; }
+                    if port.cash < cost_creds || cost_creds > cash_limit_creds {
+                        tracing::warn!("[Professor] BUY {} skipped — cost_creds={:.0} cash={:.0} limit={:.0}", trade.ticker, cost_creds, port.cash, cash_limit_creds);
+                        continue;
+                    }
                     let quantity = amount_usd / price_usd;
                     apply_buy(port, history, &trade.ticker, &asset_name, asset_type, quantity, price_creds, PROFESSOR_PORT);
+                    tracing::info!("[Professor] BUY {} executed — {:.4}sh @ ${:.2}", trade.ticker, quantity, price_usd);
                     executed.push(ExecutedTrade { action: "BUY".to_string(), ticker: trade.ticker.clone(), amount_usd, price_usd, pnl: None });
                 }
                 "apply_sell" => {
                     let sell_pct = trade.sell_pct.unwrap_or(0.0).clamp(0.0, 1.0);
-                    if sell_pct == 0.0 { continue; }
+                    if sell_pct == 0.0 {
+                        tracing::warn!("[Professor] SELL {} skipped — sell_pct is 0", trade.ticker);
+                        continue;
+                    }
                     let qty = match port.positions.iter().find(|p| p.ticker == trade.ticker && !matches!(&p.asset_type, AssetType::Option(_))) {
-                        Some(p) => p.quantity * sell_pct, None => continue,
+                        Some(p) => p.quantity * sell_pct,
+                        None => {
+                            tracing::warn!("[Professor] SELL {} skipped — position not found", trade.ticker);
+                            continue;
+                        }
                     };
-                    let Some(pnl) = apply_sell(port, history, &trade.ticker, &asset_name, qty, price_creds, PROFESSOR_PORT) else { continue; };
+                    let Some(pnl) = apply_sell(port, history, &trade.ticker, &asset_name, qty, price_creds, PROFESSOR_PORT) else {
+                        tracing::warn!("[Professor] SELL {} skipped — apply_sell returned None", trade.ticker);
+                        continue;
+                    };
+                    tracing::info!("[Professor] SELL {} executed — {:.4}sh @ ${:.2}", trade.ticker, qty, price_usd);
                     executed.push(ExecutedTrade { action: "SELL".to_string(), ticker: trade.ticker.clone(), amount_usd: price_usd * qty, price_usd, pnl: Some(pnl) });
                 }
-                _ => {}
+                _ => { tracing::warn!("[Professor] unknown trade func: {}", trade.func); }
             }
         }
 
@@ -3827,6 +3940,7 @@ pub async fn professor_daily_session(
     let embed = serenity::CreateEmbed::new()
         .title(format!("Professor's Daily Report — {}", Utc::now().format("%b %d, %Y")))
         .description(desc)
+        .thumbnail("https://cdn.discordapp.com/attachments/1260223476766343188/1490778995980243105/Koro-sensei_goes_gangster.png?ex=69d54ba1&is=69d3fa21&hm=9a3bb34d8d2dfc5f3a478128ab59051c940f4bf68e393db7260f03682c2ed01b")
         .color(data::EMBED_CYAN)
         .footer(serenity::CreateEmbedFooter::new("@~ powered by UwUntu & RustyBamboo"));
 

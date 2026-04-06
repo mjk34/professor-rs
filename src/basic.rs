@@ -237,15 +237,12 @@ pub async fn claim_bonus(ctx: Context<'_>) -> Result<(), Error> {
 
     let bonus = user_data.get_bonus();
     if user_data.check_claim() {
-        let d20 = thread_rng().gen_range(1..21);
-        let proficiency = 2 + user_data.get_level() / 8;
+        let d20: i32 = thread_rng().gen_range(1..21);
+        let check: i32 = thread_rng().gen_range(6..15);
         let base_ref = ctx.data().d20f.get(28);
 
         // temporary message to roll the dice
-        let desc = format!(
-            "Rolling for Bonus loot, you get a **+{}** fortune modifier.\n---\n",
-            proficiency
-        );
+        let desc = "Rolling for Bonus loot...\n---\n".to_string();
         let reply = ctx
             .send(
                 poise::CreateReply::default().embed(
@@ -263,16 +260,23 @@ pub async fn claim_bonus(ctx: Context<'_>) -> Result<(), Error> {
             .await?;
 
         tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-        let low = (d20 + proficiency - 1) * 40;
-        let high = (d20 + proficiency) * 40;
-        let fortune = thread_rng().gen_range(low..high);
-        let roll_ref = ctx.data().d20f.get((d20 + proficiency - 1) as usize); // make more dice face
 
-        // final message with updated dice roll and creds
+        let fortune: i32 = if d20 == 20 {
+            thread_rng().gen_range(35_000..120_000)
+        } else if d20 == 1 {
+            1
+        } else {
+            let low  = 3_000 + (check - 1) * 900;
+            let high = 3_000 + check * 900;
+            if d20 >= check { thread_rng().gen_range(low..high) } else { thread_rng().gen_range(low..high) / 2 }
+        };
+
+        let roll_ref = ctx.data().d20f.get((d20 - 1) as usize);
+        let roll_color = if d20 == 20 { data::EMBED_GOLD } else if d20 == 1 { data::EMBED_ERROR } else if d20 >= check { data::EMBED_SUCCESS } else { data::EMBED_FAIL };
+
         let desc = format!(
-            "You rolled a **{}** and obtained **+{}** creds.",
-            d20 + proficiency,
-            fortune
+            "You rolled a **{}** and obtained **+{}** creds.\nYou needed a **{}** to pass.",
+            d20, fortune, check
         );
 
         reply
@@ -283,7 +287,7 @@ pub async fn claim_bonus(ctx: Context<'_>) -> Result<(), Error> {
                         .title("Claim Bonus")
                         .description(&desc)
                         .thumbnail(roll_ref.unwrap().to_string())
-                        .color(data::EMBED_GOLD)
+                        .color(roll_color)
                         .image("https://cdn.discordapp.com/attachments/1260223476766343188/1262191655323308053/19c237178769d1c1fe6cd44b3399afb61d2840b9_hq.gif?ex=6695b315&is=66946195&hm=43de96a5e0aac7f571a537420608f6a3b893831b5ccbc5bcdd3b74c9378bcaa8&")
                         .footer(serenity::CreateEmbedFooter::new(
                             "@~ powered by UwUntu & RustyBamboo",
@@ -1050,10 +1054,16 @@ pub fn simulate_claim(user_data: &mut data::UserData) -> i32 {
         return 0;
     }
     let d20: i32 = thread_rng().gen_range(1..21);
-    let proficiency = 2 + user_data.get_level() / 8;
-    let low = (d20 + proficiency - 1) * 40;
-    let high = (d20 + proficiency) * 40;
-    let fortune: i32 = thread_rng().gen_range(low..high);
+    let check: i32 = thread_rng().gen_range(6..15);
+    let fortune: i32 = if d20 == 20 {
+        thread_rng().gen_range(35_000..120_000)
+    } else if d20 == 1 {
+        1
+    } else {
+        let low  = 3_000 + (check - 1) * 900;
+        let high = 3_000 + check * 900;
+        if d20 >= check { thread_rng().gen_range(low..high) } else { thread_rng().gen_range(low..high) / 2 }
+    };
     user_data.add_creds(fortune);
     user_data.update_xp(150);
     user_data.reset_bonus();
