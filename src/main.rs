@@ -289,20 +289,25 @@ fn professor_task(
                 continue;
             }
 
-            // Fire at 15:00 UTC on weekdays — session handles all 3 Claude calls internally
-            let secs_to_fire = secs_until_hm(now.hour(), now.minute(), 15, 0);
-            if secs_to_fire > 0 {
-                tokio::time::sleep(std::time::Duration::from_secs(secs_to_fire)).await;
+            // Fire at 17:00 UTC on weekdays (1:00 PM EDT)
+            let secs_to_fire = secs_until_hm(now.hour(), now.minute(), 17, 0);
+            if secs_to_fire == 0 {
+                // Already past 17:00 today — sleep until tomorrow 17:00 and loop
+                let elapsed = now.hour() as u64 * 3600 + now.minute() as u64 * 60 + now.second() as u64;
+                let secs_to_next = 86_400 - elapsed + 17 * 3600;
+                tokio::time::sleep(std::time::Duration::from_secs(secs_to_next)).await;
+                continue;
             }
+            tokio::time::sleep(std::time::Duration::from_secs(secs_to_fire)).await;
 
             if stock::is_market_open().await {
                 stock::professor_daily_session(&users, &http, &bot_chat, bot_user_id).await;
             }
 
-            // Sleep until tomorrow 15:00 UTC
+            // Sleep until tomorrow 17:00 UTC (1:00 PM EDT)
             let now2 = chrono::Utc::now();
             let elapsed = now2.hour() as u64 * 3600 + now2.minute() as u64 * 60 + now2.second() as u64;
-            let secs_to_next = 86_400 - elapsed + 15 * 3600;
+            let secs_to_next = 86_400 - elapsed + 17 * 3600;
             tokio::time::sleep(std::time::Duration::from_secs(secs_to_next)).await;
         }
     });

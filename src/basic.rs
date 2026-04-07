@@ -80,11 +80,8 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
     let user = ctx.author();
     let data = &ctx.data().users;
     let u = data.get(&user.id).unwrap();
-    let mut user_data = u.write().await;
 
-    // [TEST] daily cooldown disabled
-    // if !user_data.check_daily() { ... }
-
+    // Compute everything before acquiring the write lock
     let d20 = thread_rng().gen_range(1..21);
     let check = thread_rng().gen_range(6..15);
 
@@ -138,7 +135,13 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
         ctx.data().meme.choose(&mut thread_rng()).unwrap()
     };
 
-    // temporary message to roll the dice
+    let reading = if d20 == 1 {
+        ctx.data().bad_fortune.choose(&mut thread_rng()).unwrap().clone()
+    } else {
+        ctx.data().good_fortune.choose(&mut thread_rng()).unwrap().clone()
+    };
+
+    // Send rolling embed, sleep, then edit with result — lock not held during I/O
     let desc = format!("---\nYou needed a **{}** to pass...\n\n---\n---", check);
     let reply = ctx
         .send(
@@ -156,13 +159,8 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
         )
         .await?;
 
-    let reading = if d20 == 1 {
-        ctx.data().bad_fortune.choose(&mut thread_rng()).unwrap().clone()
-    } else {
-        ctx.data().good_fortune.choose(&mut thread_rng()).unwrap().clone()
-    };
+    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
-    // final message with updated dice roll, creds earned and fortune reading
     let desc = format!(
         "{} **{}{}** creds.\nYou needed a **{}** to pass, you rolled a **{}**.\n\n{}",
         roll_str, roll_context, total, check, d20, reading,
@@ -184,6 +182,9 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
             ),
         )
         .await?;
+
+    // Acquire write lock only for the data mutation, after all Discord I/O is done
+    let mut user_data = u.write().await;
 
     if d20 == 1 {
         user_data.sub_creds(total);
@@ -233,10 +234,13 @@ pub async fn claim_bonus(ctx: Context<'_>) -> Result<(), Error> {
     let user = ctx.author();
     let data = &ctx.data().users;
     let u = data.get_mut(&user.id).unwrap();
-    let mut user_data = u.write().await;
 
-    let bonus = user_data.get_bonus();
-    if user_data.check_claim() {
+    let (bonus, can_claim) = {
+        let user_data = u.read().await;
+        (user_data.get_bonus(), user_data.check_claim())
+    };
+
+    if can_claim {
         let d20: i32 = thread_rng().gen_range(1..21);
         let check: i32 = thread_rng().gen_range(6..15);
         let base_ref = ctx.data().d20f.get(28);
@@ -296,6 +300,8 @@ pub async fn claim_bonus(ctx: Context<'_>) -> Result<(), Error> {
             )
             .await?;
 
+        // Acquire write lock only after all Discord I/O is done
+        let mut user_data = u.write().await;
         user_data.add_creds(fortune);
         user_data.reset_bonus();
 

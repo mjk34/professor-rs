@@ -26,6 +26,56 @@ use tokio::sync::RwLock;
 
 type UsersMap = Arc<DashMap<serenity::UserId, Arc<RwLock<UserData>>>>;
 
+// ── Trade modals (used by /search buy/sell buttons) ───────────────────────────
+
+#[derive(poise::Modal)]
+#[name = "Buy"]
+struct BuyModal {
+    #[name = "Amount (shares e.g. 10, or dollars e.g. $500)"]
+    #[placeholder = "e.g. 10 or $500"]
+    amount: String,
+}
+
+#[derive(poise::Modal)]
+#[name = "Sell"]
+struct SellModal {
+    #[name = "Amount (shares e.g. 10, or dollars e.g. $500)"]
+    #[placeholder = "e.g. 10 or $500"]
+    amount: String,
+}
+
+#[derive(poise::Modal)]
+#[name = "Create Portfolio"]
+struct CreatePortfolioModal {
+    #[name = "Portfolio name (max 32 characters)"]
+    #[placeholder = "e.g. Tech Stocks"]
+    name: String,
+}
+
+#[derive(poise::Modal)]
+#[name = "Delete Portfolio"]
+struct DeletePortfolioModal {
+    #[name = "Portfolio name"]
+    #[placeholder = "Enter the exact portfolio name"]
+    name: String,
+}
+
+#[derive(poise::Modal)]
+#[name = "Fund Portfolio"]
+struct FundModal {
+    #[name = "Dollar amount to deposit (e.g. $100)"]
+    #[placeholder = "e.g. 100"]
+    dollars: String,
+}
+
+#[derive(poise::Modal)]
+#[name = "Withdraw from Portfolio"]
+struct WithdrawModal {
+    #[name = "Dollar amount to withdraw (e.g. $100)"]
+    #[placeholder = "e.g. 100"]
+    dollars: String,
+}
+
 // ── Pricing helpers ──────────────────────────────────────────────────────────
 
 fn price_to_creds(usd: f64) -> f64 {
@@ -865,227 +915,605 @@ pub async fn sweep_expired_options(
 
 // ── Portfolio commands ─────────────────────────────────────────────────────────
 
-/// Manage your investment portfolios
-#[poise::command(
-    slash_command,
-    subcommands(
-        "portfolio_create",
-        "portfolio_list",
-        "portfolio_view",
-        "portfolio_fund",
-        "portfolio_withdraw",
-        "portfolio_delete"
-    )
-)]
-pub async fn portfolio(_ctx: Context<'_>) -> Result<(), Error> {
-    Ok(())
-}
+const NUM_EMOJI: [&str; 4] = ["1️⃣", "2️⃣", "3️⃣", "4️⃣"];
 
-/// Create a new portfolio
-#[poise::command(slash_command, rename = "create")]
-async fn portfolio_create(
-    ctx: Context<'_>,
-    #[description = "Name for the new portfolio (max 32 chars)"] name: String,
-) -> Result<(), Error> {
-    if name.len() > 32 {
-        ctx.send(
-            poise::CreateReply::default().embed(
-                serenity::CreateEmbed::new()
-                    .title("Portfolio — Create")
-                    .description("Portfolio name must be 32 characters or fewer.")
-                    .color(data::EMBED_ERROR),
-            ),
-        )
-        .await?;
-        return Ok(());
-    }
-
-    let data = &ctx.data().users;
-    let u = data.get(&ctx.author().id).unwrap();
-
-    // Validate under read lock, mutate under write lock, then send — no lock held across await.
-    let err = {
-        let user_data = u.read().await;
-        if user_data
-            .stock
-            .portfolios
-            .iter()
-            .any(|p| p.name.eq_ignore_ascii_case(&name))
-        {
-            Some(format!("A portfolio named **{}** already exists.", name))
-        } else if user_data.stock.portfolios.len() >= 5 {
-            Some("You can have at most **5** portfolios.".to_string())
-        } else {
-            None
-        }
-        // read lock released here
-    };
-
-    if let Some(msg) = err {
-        ctx.send(
-            poise::CreateReply::default().embed(
-                serenity::CreateEmbed::new()
-                    .title("Portfolio — Create")
-                    .description(msg)
-                    .color(data::EMBED_ERROR),
-            ),
-        )
-        .await?;
-        return Ok(());
-    }
-
-    {
-        let mut user_data = u.write().await;
-        user_data.stock.portfolios.push(Portfolio::new(name.clone()));
-        // write lock released here
-    }
-
-    ctx.send(
-        poise::CreateReply::default().embed(
-            serenity::CreateEmbed::new()
-                .title("Portfolio — Create")
-                .description(format!(
-                    "Portfolio **{}** created!\n\nFund it with `/portfolio fund {} <amount>`.",
-                    name, name
-                ))
-                .color(data::EMBED_SUCCESS)
-                .footer(serenity::CreateEmbedFooter::new(
-                    "@~ powered by UwUntu & RustyBamboo",
-                )),
-        ),
-    )
-    .await?;
-    Ok(())
-}
-
-/// List all your portfolios
-#[poise::command(slash_command, rename = "list")]
-async fn portfolio_list(ctx: Context<'_>) -> Result<(), Error> {
-    // Read hysa_fed_rate first so we never await while holding user_data lock.
+/// View and manage your investment portfolios
+#[poise::command(slash_command)]
+pub async fn portfolio(ctx: Context<'_>) -> Result<(), Error> {
     let fed_rate_val = *ctx.data().hysa_fed_rate.read().await;
-
     let data = &ctx.data().users;
     let u = data.get(&ctx.author().id).unwrap();
 
-    // Collect portfolios and rate label under the read lock, then drop it.
-    let (portfolios, rate_label) = {
+    let annual_rate = {
         let user_data = u.read().await;
-
-        if user_data.stock.portfolios.is_empty() {
-            ctx.send(
-                poise::CreateReply::default().embed(
-                    serenity::CreateEmbed::new()
-                        .title("Portfolio — List")
-                        .description(
-                            "You have no portfolios. Create one with `/portfolio create <name>`.",
-                        )
-                        .color(data::EMBED_ERROR),
-                ),
-            )
-            .await?;
-            return Ok(());
-        }
-
-        let rate_label = if is_gold(&user_data) {
-            format!("Gold HYSA: {:.2}% APY", gold_hysa_rate(fed_rate_val))
-        } else {
-            format!("Base HYSA: {:.2}% APY", data::BASE_HYSA_RATE)
-        };
-
-        (user_data.stock.portfolios.clone(), rate_label)
-        // read lock released here
+        if is_gold(&user_data) { gold_hysa_rate(fed_rate_val) } else { data::BASE_HYSA_RATE }
     };
 
-    // Fetch live prices and build description outside the lock.
-    let mut desc = String::new();
-    for p in &portfolios {
-        let mut positions_value: f64 = 0.0;
-        let mut cost_basis: f64 = 0.0;
-        for pos in &p.positions {
-            if let Some(price) = fetch_price(&pos.ticker).await {
-                positions_value += price_to_creds(price) * pos.quantity;
-            }
-            cost_basis += pos.avg_cost * pos.quantity;
-        }
-        let total_creds = p.cash + positions_value;
-        let pnl_str = if cost_basis > 0.0 {
-            let pct = (positions_value - cost_basis) / cost_basis * 100.0;
-            format!("{:+.2}%", pct)
-        } else {
-            "—".to_string()
+    // Send the initial picker message (outside the loop — only sent once)
+    let init_portfolios = { u.read().await.stock.portfolios.clone() };
+    let (init_pe, init_pc) = build_portfolio_picker(&init_portfolios).await;
+    let reply = ctx.send(poise::CreateReply::default().embed(init_pe).components(init_pc)).await?;
+
+    'picker: loop {
+        // Refresh and show the picker on each iteration
+        let portfolios = { u.read().await.stock.portfolios.clone() };
+        let (pe, pc) = build_portfolio_picker(&portfolios).await;
+        reply.edit(ctx, poise::CreateReply::default().embed(pe.clone()).components(pc)).await?;
+
+        let msg = reply.message().await?;
+        let Some(press) = msg
+            .await_component_interaction(ctx.serenity_context())
+            .author_id(ctx.author().id)
+            .timeout(Duration::from_secs(60))
+            .await
+        else {
+            reply.edit(ctx, poise::CreateReply::default().embed(pe).components(vec![])).await?;
+            return Ok(());
         };
-        desc += &format!(
-            "**{}** — **${:.2}** (total value) | {} | {} positions\n",
-            p.name,
-            creds_to_price(total_creds),
-            pnl_str,
-            p.positions.len(),
+
+        // ── Create ────────────────────────────────────────────────────────────
+        if press.data.custom_id == "port_create" {
+            let Some(modal) = poise::execute_modal_on_component_interaction::<CreatePortfolioModal>(
+                ctx, press, None, Some(Duration::from_secs(120)),
+            ).await? else { continue 'picker; };
+
+            let name = modal.name.trim().to_string();
+
+            let err = if name.is_empty() {
+                Some("Portfolio name cannot be empty.".to_string())
+            } else if name.len() > 32 {
+                Some("Portfolio name must be 32 characters or fewer.".to_string())
+            } else {
+                let ud = u.read().await;
+                if ud.stock.portfolios.len() >= 4 {
+                    Some("You have reached the maximum of **4** portfolios.".to_string())
+                } else if ud.stock.portfolios.iter().any(|p| p.name.eq_ignore_ascii_case(&name)) {
+                    Some(format!("A portfolio named **{}** already exists.", name))
+                } else { None }
+            };
+
+            if let Some(err_msg) = err {
+                reply.edit(ctx, poise::CreateReply::default().embed(
+                    serenity::CreateEmbed::new()
+                        .title("Portfolio — Create")
+                        .description(err_msg)
+                        .color(data::EMBED_ERROR),
+                ).components(vec![])).await?;
+                tokio::time::sleep(Duration::from_secs(3)).await;
+                continue 'picker;
+            }
+
+            { let mut ud = u.write().await; ud.stock.portfolios.push(Portfolio::new(name.clone())); }
+
+            let success_embed = serenity::CreateEmbed::new()
+                .title("Portfolio — Create")
+                .description(format!("Portfolio **{}** created!", name))
+                .color(data::EMBED_SUCCESS)
+                .footer(serenity::CreateEmbedFooter::new("@~ powered by UwUntu & RustyBamboo"));
+            let create_btns = vec![serenity::CreateActionRow::Buttons(vec![
+                serenity::CreateButton::new("new_port_back").label("↩ Back").style(serenity::ButtonStyle::Secondary),
+                serenity::CreateButton::new("new_port_fund").label("Fund").style(serenity::ButtonStyle::Success),
+            ])];
+            reply.edit(ctx, poise::CreateReply::default()
+                .embed(success_embed.clone())
+                .components(create_btns)
+            ).await?;
+
+            let msg2 = reply.message().await?;
+            let Some(press2) = msg2
+                .await_component_interaction(ctx.serenity_context())
+                .author_id(ctx.author().id)
+                .timeout(Duration::from_secs(60))
+                .await
+            else {
+                // Timeout on Back/Fund — strip buttons, go back to picker
+                reply.edit(ctx, poise::CreateReply::default().embed(success_embed).components(vec![])).await?;
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                continue 'picker;
+            };
+
+            if press2.data.custom_id == "new_port_back" {
+                press2.defer(ctx.http()).await?;
+                continue 'picker;
+            }
+
+            // new_port_fund
+            let Some(fund_modal) = poise::execute_modal_on_component_interaction::<FundModal>(
+                ctx, press2, None, Some(Duration::from_secs(120)),
+            ).await? else { continue 'picker; };
+
+            let dollars: f64 = match fund_modal.dollars.trim().replace(',', "").parse() {
+                Ok(v) if v > 0.0 && v <= 100_000.0 => v,
+                _ => {
+                    reply.edit(ctx, poise::CreateReply::default().embed(
+                        serenity::CreateEmbed::new()
+                            .title("Portfolio — Fund")
+                            .description("Amount must be between $0.01 and $100,000.00.")
+                            .color(data::EMBED_ERROR),
+                    ).components(vec![])).await?;
+                    return Ok(());
+                }
+            };
+
+            let amount = price_to_creds(dollars) as i32;
+            let fund_result: Result<f64, String> = {
+                let mut user_data = u.write().await;
+                if user_data.get_creds() < amount {
+                    Err(format!("Insufficient creds. You have **{}** but need **{}**.", user_data.get_creds(), amount))
+                } else {
+                    match user_data.stock.portfolios.iter_mut().find(|p| p.name == name) {
+                        None => Err(format!("Portfolio **{}** no longer exists.", name)),
+                        Some(p) => {
+                            p.cash += amount as f64;
+                            let new_cash = p.cash;
+                            user_data.sub_creds(amount);
+                            Ok(new_cash)
+                        }
+                    }
+                }
+            };
+
+            match fund_result {
+                Err(msg) => {
+                    reply.edit(ctx, poise::CreateReply::default().embed(
+                        serenity::CreateEmbed::new()
+                            .title("Portfolio — Fund")
+                            .description(msg)
+                            .color(data::EMBED_ERROR),
+                    ).components(vec![])).await?;
+                }
+                Ok(new_cash) => {
+                    reply.edit(ctx, poise::CreateReply::default().embed(
+                        serenity::CreateEmbed::new()
+                            .title("Portfolio — Fund")
+                            .description(format!(
+                                "Deposited **${:.2}** into **{}**.\nNew cash balance: **${:.2}**.",
+                                dollars, name, creds_to_price(new_cash)
+                            ))
+                            .color(data::EMBED_SUCCESS)
+                            .footer(serenity::CreateEmbedFooter::new("@~ powered by UwUntu & RustyBamboo")),
+                    ).components(vec![])).await?;
+                }
+            }
+            return Ok(());
+
+        // ── Delete (from picker) ───────────────────────────────────────────────
+        } else if press.data.custom_id == "port_delete" {
+            let Some(del_modal) = poise::execute_modal_on_component_interaction::<DeletePortfolioModal>(
+                ctx, press, None, Some(Duration::from_secs(120)),
+            ).await? else { continue 'picker; };
+
+            let del_name = del_modal.name.trim().to_string();
+
+            let lookup = {
+                let ud = u.read().await;
+                ud.stock.portfolios.iter()
+                    .find(|p| p.name.eq_ignore_ascii_case(&del_name))
+                    .map(|p| (p.cash > 0.0, !p.positions.is_empty(), p.cash, p.positions.len()))
+            };
+
+            let (has_cash, has_positions, cash, positions_count) = match lookup {
+                None => {
+                    reply.edit(ctx, poise::CreateReply::default().embed(
+                        serenity::CreateEmbed::new()
+                            .title("Portfolio — Delete")
+                            .description(format!("No portfolio named **{}** found.", del_name))
+                            .color(data::EMBED_ERROR),
+                    ).components(vec![])).await?;
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                    continue 'picker;
+                }
+                Some(v) => v,
+            };
+
+            if !has_cash && !has_positions {
+                { let mut ud = u.write().await; ud.stock.portfolios.retain(|p| !p.name.eq_ignore_ascii_case(&del_name)); }
+                continue 'picker;
+            }
+
+            let detail = if has_cash && has_positions {
+                format!("**{}** has **{:.0}** creds cash and **{}** open positions.", del_name, cash, positions_count)
+            } else if has_cash {
+                format!("**{}** has **{:.0}** creds cash.", del_name, cash)
+            } else {
+                format!("**{}** has **{}** open positions.", del_name, positions_count)
+            };
+
+            let confirm_btns = vec![serenity::CreateActionRow::Buttons(vec![
+                serenity::CreateButton::new("pdel_yes").label("Liquidate & Delete").style(serenity::ButtonStyle::Danger),
+                serenity::CreateButton::new("pdel_no").label("Cancel").style(serenity::ButtonStyle::Secondary),
+            ])];
+            reply.edit(ctx, poise::CreateReply::default().embed(
+                serenity::CreateEmbed::new()
+                    .title("Portfolio — Delete")
+                    .description(format!("{}\n\nLiquidate all positions at market price and return cash to wallet?", detail))
+                    .color(data::EMBED_FAIL)
+                    .footer(serenity::CreateEmbedFooter::new("@~ powered by UwUntu & RustyBamboo")),
+            ).components(confirm_btns)).await?;
+
+            let msg2 = reply.message().await?;
+            let conf = msg2
+                .await_component_interaction(ctx.serenity_context())
+                .author_id(ctx.author().id)
+                .timeout(Duration::from_secs(30))
+                .await;
+
+            match conf {
+                None => { continue 'picker; }
+                Some(c) => {
+                    c.defer(ctx.http()).await?;
+                    if c.data.custom_id != "pdel_yes" {
+                        continue 'picker;
+                    }
+                    let (portfolio_cash, positions_for_fetch) = {
+                        let ud = u.read().await;
+                        match ud.stock.portfolios.iter().find(|p| p.name.eq_ignore_ascii_case(&del_name)) {
+                            None => (0.0, vec![]),
+                            Some(p) => (p.cash, p.positions.clone()),
+                        }
+                    };
+                    let mut total_proceeds = portfolio_cash;
+                    for pos in &positions_for_fetch {
+                        let price_usd = fetch_price(&pos.ticker).await.unwrap_or(0.0);
+                        let value = match &pos.asset_type {
+                            AssetType::Option(contract) => {
+                                let intrinsic = match contract.option_type {
+                                    OptionType::Call => (price_usd - contract.strike).max(0.0),
+                                    OptionType::Put => (contract.strike - price_usd).max(0.0),
+                                };
+                                price_to_creds(intrinsic * 100.0) * contract.contracts as f64
+                            }
+                            _ => price_to_creds(price_usd) * pos.quantity,
+                        };
+                        total_proceeds += value;
+                    }
+                    {
+                        let mut ud = u.write().await;
+                        ud.stock.portfolios.retain(|p| !p.name.eq_ignore_ascii_case(&del_name));
+                        ud.add_creds(total_proceeds as i32);
+                    }
+                    continue 'picker;
+                }
+            }
+
+        // ── Numbered portfolio ────────────────────────────────────────────────
+        } else {
+            press.defer(ctx.http()).await?;
+            let idx: usize = press.data.custom_id
+                .strip_prefix("port_")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0);
+
+            let port_name = {
+                let ud = u.read().await;
+                match ud.stock.portfolios.get(idx) {
+                    Some(p) => p.name.clone(),
+                    None => continue 'picker,
+                }
+            };
+
+            'view: loop {
+                let port_opt = { u.read().await.stock.portfolios.iter().find(|p| p.name == port_name).cloned() };
+                let Some(port) = port_opt else { continue 'picker; };
+
+                let embed = build_portfolio_view_embed(&port, annual_rate).await;
+                let mut view_btns = vec![
+                    serenity::CreateButton::new("pv_back").label("↩ Back").style(serenity::ButtonStyle::Secondary),
+                    serenity::CreateButton::new("pv_fund").label("Fund").style(serenity::ButtonStyle::Success),
+                ];
+                if port.cash > 0.0 {
+                    view_btns.push(serenity::CreateButton::new("pv_withdraw").label("Withdraw").style(serenity::ButtonStyle::Primary));
+                }
+                view_btns.push(serenity::CreateButton::new("pv_delete").label("Delete").style(serenity::ButtonStyle::Danger));
+                let action_buttons = vec![serenity::CreateActionRow::Buttons(view_btns)];
+                reply.edit(ctx, poise::CreateReply::default().embed(embed.clone()).components(action_buttons)).await?;
+
+                let msg2 = reply.message().await?;
+                let Some(action) = msg2
+                    .await_component_interaction(ctx.serenity_context())
+                    .author_id(ctx.author().id)
+                    .timeout(Duration::from_secs(60))
+                    .await
+                else {
+                    reply.edit(ctx, poise::CreateReply::default().embed(embed).components(vec![])).await?;
+                    return Ok(());
+                };
+
+                match action.data.custom_id.as_str() {
+                    "pv_back" => {
+                        action.defer(ctx.http()).await?;
+                        continue 'picker;
+                    }
+
+                    "pv_fund" => {
+                        let Some(modal) = poise::execute_modal_on_component_interaction::<FundModal>(
+                            ctx, action, None, Some(Duration::from_secs(120)),
+                        ).await? else { return Ok(()); };
+
+                        let dollars: f64 = match modal.dollars.trim().replace(',', "").parse() {
+                            Ok(v) if v > 0.0 && v <= 100_000.0 => v,
+                            _ => {
+                                reply.edit(ctx, poise::CreateReply::default().embed(
+                                    serenity::CreateEmbed::new()
+                                        .title("Portfolio — Fund")
+                                        .description("Amount must be between $0.01 and $100,000.00.")
+                                        .color(data::EMBED_ERROR),
+                                ).components(vec![])).await?;
+                                return Ok(());
+                            }
+                        };
+
+                        let amount = price_to_creds(dollars) as i32;
+                        let fund_result: Result<f64, String> = {
+                            let mut user_data = u.write().await;
+                            if user_data.get_creds() < amount {
+                                Err(format!(
+                                    "Insufficient wallet balance. You have **{:.0}** creds but need **{:.0}**.",
+                                    user_data.get_creds(), amount
+                                ))
+                            } else {
+                                match user_data.stock.portfolios.iter_mut().find(|p| p.name == port_name) {
+                                    None => Err(format!("Portfolio **{}** no longer exists.", port_name)),
+                                    Some(p) => {
+                                        p.cash += amount as f64;
+                                        let new_cash = p.cash;
+                                        user_data.sub_creds(amount);
+                                        Ok(new_cash)
+                                    }
+                                }
+                            }
+                        };
+
+                        match fund_result {
+                            Err(msg) => {
+                                reply.edit(ctx, poise::CreateReply::default().embed(
+                                    serenity::CreateEmbed::new()
+                                        .title("Portfolio — Fund")
+                                        .description(msg)
+                                        .color(data::EMBED_ERROR),
+                                ).components(vec![])).await?;
+                            }
+                            Ok(new_cash) => {
+                                reply.edit(ctx, poise::CreateReply::default().embed(
+                                    serenity::CreateEmbed::new()
+                                        .title("Portfolio — Fund")
+                                        .description(format!(
+                                            "Deposited **${:.2}** into **{}**.\nNew cash balance: **${:.2}**.",
+                                            dollars, port_name, creds_to_price(new_cash)
+                                        ))
+                                        .color(data::EMBED_SUCCESS)
+                                        .footer(serenity::CreateEmbedFooter::new("@~ powered by UwUntu & RustyBamboo")),
+                                ).components(vec![])).await?;
+                            }
+                        }
+                        return Ok(());
+                    }
+
+                    "pv_withdraw" => {
+                        let Some(modal) = poise::execute_modal_on_component_interaction::<WithdrawModal>(
+                            ctx, action, None, Some(Duration::from_secs(120)),
+                        ).await? else { return Ok(()); };
+
+                        let dollars: f64 = match modal.dollars.trim().replace(',', "").parse() {
+                            Ok(v) if v > 0.0 && v <= 100_000.0 => v,
+                            _ => {
+                                reply.edit(ctx, poise::CreateReply::default().embed(
+                                    serenity::CreateEmbed::new()
+                                        .title("Portfolio — Withdraw")
+                                        .description("Amount must be between $0.01 and $100,000.00.")
+                                        .color(data::EMBED_ERROR),
+                                ).components(vec![])).await?;
+                                return Ok(());
+                            }
+                        };
+
+                        let amount = price_to_creds(dollars) as i32;
+                        let withdraw_result: Result<f64, String> = {
+                            let mut user_data = u.write().await;
+                            match user_data.stock.portfolios.iter_mut().find(|p| p.name == port_name) {
+                                None => Err(format!("Portfolio **{}** no longer exists.", port_name)),
+                                Some(p) if p.cash < amount as f64 => Err(format!(
+                                    "Insufficient cash. **{}** has **${:.2}** but tried to withdraw **${:.2}**.",
+                                    port_name, creds_to_price(p.cash), dollars
+                                )),
+                                Some(p) => {
+                                    p.cash -= amount as f64;
+                                    let remaining = p.cash;
+                                    user_data.add_creds(amount);
+                                    Ok(remaining)
+                                }
+                            }
+                        };
+
+                        match withdraw_result {
+                            Err(msg) => {
+                                reply.edit(ctx, poise::CreateReply::default().embed(
+                                    serenity::CreateEmbed::new()
+                                        .title("Portfolio — Withdraw")
+                                        .description(msg)
+                                        .color(data::EMBED_ERROR),
+                                ).components(vec![])).await?;
+                            }
+                            Ok(remaining) => {
+                                reply.edit(ctx, poise::CreateReply::default().embed(
+                                    serenity::CreateEmbed::new()
+                                        .title("Portfolio — Withdraw")
+                                        .description(format!(
+                                            "Withdrew **${:.2}** from **{}** to your wallet.\nRemaining cash: **${:.2}**.",
+                                            dollars, port_name, creds_to_price(remaining)
+                                        ))
+                                        .color(data::EMBED_SUCCESS)
+                                        .footer(serenity::CreateEmbedFooter::new("@~ powered by UwUntu & RustyBamboo")),
+                                ).components(vec![])).await?;
+                            }
+                        }
+                        return Ok(());
+                    }
+
+                    "pv_delete" => {
+                        action.defer(ctx.http()).await?;
+
+                        let port_info = {
+                            let ud = u.read().await;
+                            ud.stock.portfolios.iter()
+                                .find(|p| p.name == port_name)
+                                .map(|p| (p.cash > 0.0, !p.positions.is_empty(), p.cash, p.positions.len()))
+                        };
+
+                        let (has_cash, has_positions, cash, positions_count) = match port_info {
+                            None => continue 'picker,
+                            Some(v) => v,
+                        };
+
+                        if !has_cash && !has_positions {
+                            { let mut ud = u.write().await; ud.stock.portfolios.retain(|p| p.name != port_name); }
+                            continue 'picker;
+                        }
+
+                        let detail = if has_cash && has_positions {
+                            format!("**{}** has **{:.0}** creds cash and **{}** open positions.", port_name, cash, positions_count)
+                        } else if has_cash {
+                            format!("**{}** has **{:.0}** creds cash.", port_name, cash)
+                        } else {
+                            format!("**{}** has **{}** open positions.", port_name, positions_count)
+                        };
+
+                        let confirm_buttons = vec![serenity::CreateActionRow::Buttons(vec![
+                            serenity::CreateButton::new("del_yes").label("Liquidate & Delete").style(serenity::ButtonStyle::Danger),
+                            serenity::CreateButton::new("del_no").label("Cancel").style(serenity::ButtonStyle::Secondary),
+                        ])];
+                        reply.edit(ctx, poise::CreateReply::default().embed(
+                            serenity::CreateEmbed::new()
+                                .title("Portfolio — Delete")
+                                .description(format!("{}\n\nLiquidate all positions at market price and return cash to wallet?", detail))
+                                .color(data::EMBED_FAIL)
+                                .footer(serenity::CreateEmbedFooter::new("@~ powered by UwUntu & RustyBamboo")),
+                        ).components(confirm_buttons)).await?;
+
+                        let msg3 = reply.message().await?;
+                        let conf = msg3
+                            .await_component_interaction(ctx.serenity_context())
+                            .author_id(ctx.author().id)
+                            .timeout(Duration::from_secs(30))
+                            .await;
+
+                        match conf {
+                            None => continue 'picker,
+                            Some(c) => {
+                                c.defer(ctx.http()).await?;
+                                if c.data.custom_id == "del_yes" {
+                                    let (portfolio_cash, positions_for_fetch) = {
+                                        let ud = u.read().await;
+                                        match ud.stock.portfolios.iter().find(|p| p.name == port_name) {
+                                            None => (0.0, vec![]),
+                                            Some(p) => (p.cash, p.positions.clone()),
+                                        }
+                                    };
+                                    let mut total_proceeds = portfolio_cash;
+                                    for pos in &positions_for_fetch {
+                                        let price_usd = fetch_price(&pos.ticker).await.unwrap_or(0.0);
+                                        let value = match &pos.asset_type {
+                                            AssetType::Option(contract) => {
+                                                let intrinsic = match contract.option_type {
+                                                    OptionType::Call => (price_usd - contract.strike).max(0.0),
+                                                    OptionType::Put => (contract.strike - price_usd).max(0.0),
+                                                };
+                                                price_to_creds(intrinsic * 100.0) * contract.contracts as f64
+                                            }
+                                            _ => price_to_creds(price_usd) * pos.quantity,
+                                        };
+                                        total_proceeds += value;
+                                    }
+                                    {
+                                        let mut ud = u.write().await;
+                                        ud.stock.portfolios.retain(|p| p.name != port_name);
+                                        ud.add_creds(total_proceeds as i32);
+                                    }
+                                    continue 'picker;
+                                } else {
+                                    // Cancelled — stay in view
+                                    continue 'view;
+                                }
+                            }
+                        }
+                    }
+
+                    _ => {}
+                }
+                break 'view;
+            } // end 'view loop
+            continue 'picker;
+        } // end else (numbered portfolio)
+    } // end 'picker loop
+}
+
+
+/// Build the portfolio picker embed + buttons (fetches live prices).
+async fn build_portfolio_picker(
+    portfolios: &[data::Portfolio],
+) -> (serenity::CreateEmbed, Vec<serenity::CreateActionRow>) {
+    let at_cap = portfolios.len() >= 4;
+    let list = if portfolios.is_empty() {
+        "*No portfolios yet. Press **+ Create** to get started.*".to_string()
+    } else {
+        let mut rows = Vec::new();
+        for (i, p) in portfolios.iter().take(4).enumerate() {
+            let mut positions_value: f64 = 0.0;
+            let mut cost_basis: f64 = 0.0;
+            for pos in &p.positions {
+                if let Some(price) = fetch_price(&pos.ticker).await {
+                    positions_value += price_to_creds(price) * pos.quantity;
+                }
+                cost_basis += pos.avg_cost * pos.quantity;
+            }
+            let total = creds_to_price(p.cash + positions_value);
+            let pnl_str = if cost_basis > 0.0 {
+                format!("{:+.2}%", (positions_value - cost_basis) / cost_basis * 100.0)
+            } else {
+                "0.00%".to_string()
+            };
+            rows.push(format!(
+                "{} **{}** — **${:.2}** | {} | {} positions",
+                NUM_EMOJI[i], p.name, total, pnl_str, p.positions.len()
+            ));
+        }
+        rows.join("\n")
+    };
+    let mut buttons: Vec<serenity::CreateButton> = portfolios
+        .iter()
+        .take(4)
+        .enumerate()
+        .map(|(i, _)| {
+            serenity::CreateButton::new(format!("port_{}", i))
+                .label(format!("{}", i + 1))
+                .style(serenity::ButtonStyle::Primary)
+        })
+        .collect();
+    if !at_cap {
+        buttons.push(
+            serenity::CreateButton::new("port_create")
+                .label("Create")
+                .style(serenity::ButtonStyle::Success),
         );
     }
-
-    ctx.send(
-        poise::CreateReply::default().embed(
-            serenity::CreateEmbed::new()
-                .title("Portfolio — List")
-                .description(desc)
-                .color(data::EMBED_CYAN)
-                .footer(serenity::CreateEmbedFooter::new(format!(
-                    "{} | @~ powered by UwUntu & RustyBamboo",
-                    rate_label
-                ))),
-        ),
-    )
-    .await?;
-    Ok(())
+    if !portfolios.is_empty() {
+        buttons.push(
+            serenity::CreateButton::new("port_delete")
+                .label("Delete")
+                .style(serenity::ButtonStyle::Danger),
+        );
+    }
+    let components = vec![serenity::CreateActionRow::Buttons(buttons)];
+    let embed = serenity::CreateEmbed::new()
+        .title("Portfolio — Select")
+        .description(list)
+        .color(data::EMBED_CYAN)
+        .footer(serenity::CreateEmbedFooter::new("@~ powered by UwUntu & RustyBamboo"));
+    (embed, components)
 }
 
-/// View a portfolio's positions and current P&L
-#[poise::command(slash_command, rename = "view")]
-async fn portfolio_view(
-    ctx: Context<'_>,
-    #[description = "Portfolio name"] name: String,
-) -> Result<(), Error> {
-    // Read hysa_fed_rate first so we never await while holding user_data lock.
-    let fed_rate_val = *ctx.data().hysa_fed_rate.read().await;
-
-    let data = &ctx.data().users;
-    let u = data.get(&ctx.author().id).unwrap();
-
-    // Collect everything under the read lock, then drop it before price fetches.
-    let (portfolio, annual_rate) = {
-        let user_data = u.read().await;
-
-        let portfolio = match user_data
-            .stock
-            .portfolios
-            .iter()
-            .find(|p| p.name.eq_ignore_ascii_case(&name))
-        {
-            Some(p) => p.clone(),
-            None => {
-                ctx.send(
-                    poise::CreateReply::default().embed(
-                        serenity::CreateEmbed::new()
-                            .title("Portfolio — View")
-                            .description(format!("No portfolio named **{}** found.", name))
-                            .color(data::EMBED_ERROR),
-                    ),
-                )
-                .await?;
-                return Ok(());
-            }
-        };
-
-        let annual_rate = if is_gold(&user_data) {
-            gold_hysa_rate(fed_rate_val)
-        } else {
-            data::BASE_HYSA_RATE
-        };
-
-        (portfolio, annual_rate)
-        // read lock released here
-    };
-
+/// Build the view embed for a single portfolio (fetches live prices).
+async fn build_portfolio_view_embed(portfolio: &data::Portfolio, annual_rate: f64) -> serenity::CreateEmbed {
     let daily_accrual = (annual_rate / 100.0 / 365.0) * portfolio.cash;
 
     let mut price_cache: HashMap<String, f64> = HashMap::new();
@@ -1127,7 +1555,6 @@ async fn portfolio_view(
                         option_premium_creds(intrinsic, &contract.expiry, contract.contracts);
                     let type_str = option_type_str(&contract.option_type);
                     if contract.side == OptionSide::Short {
-                        // Short position: cost_basis = premium received; current_premium = cost to close
                         let pnl = cost_basis - current_premium;
                         desc += &format!(
                             "SHORT **{} {} ${:.2}** exp {} — {} contracts\nPremium rcvd: **${:.2}** | Obligation: **${:.2}** | P&L: **${:+.2}**{}\n\n",
@@ -1176,405 +1603,13 @@ async fn portfolio_view(
         }
     }
 
-    ctx.send(
-        poise::CreateReply::default().embed(
-            serenity::CreateEmbed::new()
-                .title(format!("Portfolio — {}", portfolio.name))
-                .description(desc)
-                .color(data::EMBED_CYAN)
-                .footer(serenity::CreateEmbedFooter::new(
-                    "@~ powered by UwUntu & RustyBamboo",
-                )),
-        ),
-    )
-    .await?;
-    Ok(())
-}
-
-/// Move creds from your wallet into a portfolio
-#[poise::command(slash_command, rename = "fund")]
-async fn portfolio_fund(
-    ctx: Context<'_>,
-    #[description = "Portfolio name"] name: String,
-    #[description = "Dollar amount to deposit (e.g. $1.00 = 100 creds)"] dollars: f64,
-) -> Result<(), Error> {
-    if dollars <= 0.0 || dollars > 100_000.0 {
-        ctx.send(
-            poise::CreateReply::default().embed(
-                serenity::CreateEmbed::new()
-                    .title("Portfolio — Fund")
-                    .description("Amount must be between $0.01 and $100,000.00.")
-                    .color(data::EMBED_ERROR),
-            ),
-        )
-        .await?;
-        return Ok(());
-    }
-
-    let amount = price_to_creds(dollars) as i32;
-
-    let data = &ctx.data().users;
-    let u = data.get(&ctx.author().id).unwrap();
-
-    let fund_result: Result<f64, String> = {
-        let mut user_data = u.write().await;
-        if user_data.get_creds() < amount {
-            Err(format!(
-                "Insufficient creds. You have **${:.2}** ({} creds) but tried to deposit **${:.2}** ({} creds).",
-                creds_to_price(user_data.get_creds() as f64), user_data.get_creds(),
-                dollars, amount
-            ))
-        } else {
-            match user_data
-                .stock
-                .portfolios
-                .iter_mut()
-                .find(|p| p.name.eq_ignore_ascii_case(&name))
-            {
-                None => Err(format!("No portfolio named **{}** found.", name)),
-                Some(p) => {
-                    p.cash += amount as f64;
-                    let new_cash = p.cash;
-                    user_data.sub_creds(amount);
-                    Ok(new_cash)
-                }
-            }
-        }
-        // write lock released here
-    };
-
-    match fund_result {
-        Err(msg) => {
-            ctx.send(
-                poise::CreateReply::default().embed(
-                    serenity::CreateEmbed::new()
-                        .title("Portfolio — Fund")
-                        .description(msg)
-                        .color(data::EMBED_ERROR),
-                ),
-            )
-            .await?;
-        }
-        Ok(new_cash) => {
-            ctx.send(
-                poise::CreateReply::default().embed(
-                    serenity::CreateEmbed::new()
-                        .title("Portfolio — Fund")
-                        .description(format!(
-                            "Deposited **${:.2}** into **{}**.\nNew cash balance: **${:.2}**.",
-                            creds_to_price(price_to_creds(dollars).floor()), name, creds_to_price(new_cash)
-                        ))
-                        .color(data::EMBED_SUCCESS)
-                        .footer(serenity::CreateEmbedFooter::new(
-                            "@~ powered by UwUntu & RustyBamboo",
-                        )),
-                ),
-            )
-            .await?;
-        }
-    }
-    Ok(())
-}
-
-/// Withdraw uninvested cash from a portfolio to your wallet
-#[poise::command(slash_command, rename = "withdraw")]
-async fn portfolio_withdraw(
-    ctx: Context<'_>,
-    #[description = "Portfolio name"] name: String,
-    #[description = "Dollar amount to withdraw (e.g. $1.00 = 100 creds)"] dollars: f64,
-) -> Result<(), Error> {
-    if dollars <= 0.0 || dollars > 100_000.0 {
-        ctx.send(
-            poise::CreateReply::default().embed(
-                serenity::CreateEmbed::new()
-                    .title("Portfolio — Withdraw")
-                    .description("Amount must be between $0.01 and $100,000.00.")
-                    .color(data::EMBED_ERROR),
-            ),
-        )
-        .await?;
-        return Ok(());
-    }
-
-    let amount = price_to_creds(dollars) as i32;
-
-    let data = &ctx.data().users;
-    let u = data.get(&ctx.author().id).unwrap();
-
-    let withdraw_result: Result<f64, String> = {
-        let mut user_data = u.write().await;
-        match user_data
-            .stock
-            .portfolios
-            .iter_mut()
-            .find(|p| p.name.eq_ignore_ascii_case(&name))
-        {
-            None => Err(format!("No portfolio named **{}** found.", name)),
-            Some(p) if p.cash < amount as f64 => Err(format!(
-                "Insufficient cash. **{}** has **${:.2}** but tried to withdraw **${:.2}**.",
-                name, creds_to_price(p.cash), dollars
-            )),
-            Some(p) => {
-                p.cash -= amount as f64;
-                let remaining = p.cash;
-                user_data.add_creds(amount);
-                Ok(remaining)
-            }
-        }
-        // write lock released here
-    };
-
-    match withdraw_result {
-        Err(msg) => {
-            ctx.send(
-                poise::CreateReply::default().embed(
-                    serenity::CreateEmbed::new()
-                        .title("Portfolio — Withdraw")
-                        .description(msg)
-                        .color(data::EMBED_ERROR),
-                ),
-            )
-            .await?;
-        }
-        Ok(remaining_cash) => {
-            ctx.send(
-                poise::CreateReply::default().embed(
-                    serenity::CreateEmbed::new()
-                        .title("Portfolio — Withdraw")
-                        .description(format!(
-                            "Withdrew **${:.2}** from **{}** to your wallet.\nRemaining cash: **${:.2}**.",
-                            dollars, name, creds_to_price(remaining_cash)
-                        ))
-                        .color(data::EMBED_SUCCESS)
-                        .footer(serenity::CreateEmbedFooter::new(
-                            "@~ powered by UwUntu & RustyBamboo",
-                        )),
-                ),
-            )
-            .await?;
-        }
-    }
-    Ok(())
-}
-
-/// Delete a portfolio (prompts to liquidate if non-empty)
-#[poise::command(slash_command, rename = "delete")]
-async fn portfolio_delete(
-    ctx: Context<'_>,
-    #[description = "Portfolio name"] name: String,
-) -> Result<(), Error> {
-    // Phase 1: gather info under read lock
-    let (has_cash, has_positions, cash, positions_count) = {
-        let data = &ctx.data().users;
-        let u = data.get(&ctx.author().id).unwrap();
-        let user_data = u.read().await;
-
-        match user_data
-            .stock
-            .portfolios
-            .iter()
-            .find(|p| p.name.eq_ignore_ascii_case(&name))
-        {
-            None => {
-                ctx.send(
-                    poise::CreateReply::default().embed(
-                        serenity::CreateEmbed::new()
-                            .title("Portfolio — Delete")
-                            .description(format!("No portfolio named **{}** found.", name))
-                            .color(data::EMBED_ERROR),
-                    ),
-                )
-                .await?;
-                return Ok(());
-            }
-            Some(p) => (p.cash > 0.0, !p.positions.is_empty(), p.cash, p.positions.len()),
-        }
-        // read lock released
-    };
-
-    // Empty portfolio: delete immediately
-    if !has_cash && !has_positions {
-        let data = &ctx.data().users;
-        let u = data.get(&ctx.author().id).unwrap();
-        {
-            let mut user_data = u.write().await;
-            user_data
-                .stock
-                .portfolios
-                .retain(|p| !p.name.eq_ignore_ascii_case(&name));
-            // write lock released here
-        }
-        ctx.send(
-            poise::CreateReply::default().embed(
-                serenity::CreateEmbed::new()
-                    .title("Portfolio — Delete")
-                    .description(format!("Portfolio **{}** deleted.", name))
-                    .color(data::EMBED_SUCCESS)
-                    .footer(serenity::CreateEmbedFooter::new(
-                        "@~ powered by UwUntu & RustyBamboo",
-                    )),
-            ),
-        )
-        .await?;
-        return Ok(());
-    }
-
-    // Non-empty: prompt to liquidate
-    let detail = if has_cash && has_positions {
-        format!(
-            "**{}** has **{:.0}** creds cash and **{}** open positions.",
-            name, cash, positions_count
-        )
-    } else if has_cash {
-        format!("**{}** has **{:.0}** creds cash.", name, cash)
-    } else {
-        format!("**{}** has **{}** open positions.", name, positions_count)
-    };
-
-    let buttons = vec![
-        serenity::CreateButton::new("liquidate-yes")
-            .label("Liquidate & Delete")
-            .style(poise::serenity_prelude::ButtonStyle::Danger),
-        serenity::CreateButton::new("liquidate-no")
-            .label("Cancel")
-            .style(poise::serenity_prelude::ButtonStyle::Secondary),
-    ];
-
-    let reply = ctx
-        .send(
-            poise::CreateReply::default()
-                .embed(
-                    serenity::CreateEmbed::new()
-                        .title("Portfolio — Delete")
-                        .description(format!(
-                            "{}\n\nLiquidate all positions at market price and return cash to wallet?",
-                            detail
-                        ))
-                        .color(data::EMBED_FAIL)
-                        .footer(serenity::CreateEmbedFooter::new(
-                            "@~ powered by UwUntu & RustyBamboo",
-                        )),
-                )
-                .components(vec![serenity::CreateActionRow::Buttons(buttons)]),
-        )
-        .await?;
-
-    let mut msg = reply.into_message().await?;
-    let interaction = msg
-        .await_component_interactions(ctx)
-        .author_id(ctx.author().id)
-        .timeout(Duration::from_secs(30))
-        .await;
-
-    match interaction {
-        None => {
-            msg.edit(
-                ctx.serenity_context(),
-                EditMessage::default()
-                    .embed(
-                        serenity::CreateEmbed::new()
-                            .title("Portfolio — Delete")
-                            .description(format!("{}\n\nTimed out. Portfolio not deleted.", detail))
-                            .color(data::EMBED_ERROR)
-                            .footer(serenity::CreateEmbedFooter::new("@~ powered by UwUntu & RustyBamboo")),
-                    )
-                    .components(vec![]),
-            )
-            .await?;
-        }
-        Some(i) => {
-            i.create_response(
-                ctx.serenity_context(),
-                serenity::CreateInteractionResponse::Acknowledge,
-            )
-            .await?;
-
-            if i.data.custom_id == "liquidate-yes" {
-                // Collect position info under read lock
-                let data = &ctx.data().users;
-                let u = data.get(&ctx.author().id).unwrap();
-                let (portfolio_cash, positions_for_fetch) = {
-                    let user_data = u.read().await;
-                    match user_data
-                        .stock
-                        .portfolios
-                        .iter()
-                        .find(|p| p.name.eq_ignore_ascii_case(&name))
-                    {
-                        None => {
-                            ctx.send(
-                                poise::CreateReply::default().embed(
-                                    serenity::CreateEmbed::new()
-                                        .title("Portfolio — Delete")
-                                        .description("Portfolio no longer exists.")
-                                        .color(data::EMBED_ERROR),
-                                ),
-                            )
-                            .await?;
-                            return Ok(());
-                        }
-                        Some(p) => (p.cash, p.positions.clone()),
-                    }
-                    // read lock released
-                };
-
-                // Fetch prices (no locks held)
-                let mut total_proceeds = portfolio_cash;
-                for pos in &positions_for_fetch {
-                    let price_usd = fetch_price(&pos.ticker).await.unwrap_or(0.0);
-                    let value = match &pos.asset_type {
-                        AssetType::Option(contract) => {
-                            let intrinsic = match contract.option_type {
-                                OptionType::Call => (price_usd - contract.strike).max(0.0),
-                                OptionType::Put => (contract.strike - price_usd).max(0.0),
-                            };
-                            price_to_creds(intrinsic * 100.0) * contract.contracts as f64
-                        }
-                        _ => price_to_creds(price_usd) * pos.quantity,
-                    };
-                    total_proceeds += value;
-                }
-
-                // Apply under write lock
-                {
-                    let mut user_data = u.write().await;
-                    user_data
-                        .stock
-                        .portfolios
-                        .retain(|p| !p.name.eq_ignore_ascii_case(&name));
-                    user_data.add_creds(total_proceeds as i32);
-                }
-
-                ctx.send(
-                    poise::CreateReply::default().embed(
-                        serenity::CreateEmbed::new()
-                            .title("Portfolio — Delete")
-                            .description(format!(
-                                "Portfolio **{}** liquidated and deleted.\n**{:.0}** creds returned to your wallet.",
-                                name, total_proceeds
-                            ))
-                            .color(data::EMBED_SUCCESS)
-                            .footer(serenity::CreateEmbedFooter::new(
-                                "@~ powered by UwUntu & RustyBamboo",
-                            )),
-                    ),
-                )
-                .await?;
-            } else {
-                ctx.send(
-                    poise::CreateReply::default().embed(
-                        serenity::CreateEmbed::new()
-                            .title("Portfolio — Delete")
-                            .description("Cancelled. Portfolio not deleted.")
-                            .color(data::EMBED_ERROR),
-                    ),
-                )
-                .await?;
-            }
-        }
-    }
-
-    Ok(())
+    serenity::CreateEmbed::new()
+        .title(format!("Portfolio — {}", portfolio.name))
+        .description(desc)
+        .color(data::EMBED_CYAN)
+        .footer(serenity::CreateEmbedFooter::new(
+            "@~ powered by UwUntu & RustyBamboo",
+        ))
 }
 
 // ── Search ─────────────────────────────────────────────────────────────────────
@@ -1672,7 +1707,214 @@ pub async fn search(
                 )),
             &ticker,
         );
-        ctx.send(poise::CreateReply::default().embed(embed)).await?;
+
+        let buttons = vec![serenity::CreateActionRow::Buttons(vec![
+            serenity::CreateButton::new("search_buy")
+                .label("Buy")
+                .style(serenity::ButtonStyle::Success),
+            serenity::CreateButton::new("search_sell")
+                .label("Sell")
+                .style(serenity::ButtonStyle::Danger),
+        ])];
+        let reply = ctx.send(
+            poise::CreateReply::default().embed(embed.clone()).components(buttons),
+        ).await?;
+
+        // Wait for button press (author only, 60s)
+        let msg = reply.message().await?;
+        let Some(press) = msg
+            .await_component_interaction(ctx.serenity_context())
+            .author_id(ctx.author().id)
+            .timeout(Duration::from_secs(60))
+            .await
+        else {
+            // Timeout: disable buttons
+            let disabled = vec![serenity::CreateActionRow::Buttons(vec![
+                serenity::CreateButton::new("search_buy").label("Buy").style(serenity::ButtonStyle::Success).disabled(true),
+                serenity::CreateButton::new("search_sell").label("Sell").style(serenity::ButtonStyle::Danger).disabled(true),
+            ])];
+            reply.edit(ctx, poise::CreateReply::default().embed(embed).components(disabled)).await?;
+            return Ok(());
+        };
+
+        let is_buy = press.data.custom_id == "search_buy";
+
+        // Open the appropriate modal
+        let modal_amount = if is_buy {
+            let Some(data) = poise::execute_modal_on_component_interaction::<BuyModal>(
+                ctx, press, None, Some(Duration::from_secs(120)),
+            ).await? else {
+                return Ok(());
+            };
+            data.amount
+        } else {
+            let Some(data) = poise::execute_modal_on_component_interaction::<SellModal>(
+                ctx, press, None, Some(Duration::from_secs(120)),
+            ).await? else {
+                return Ok(());
+            };
+            data.amount
+        };
+
+        // Modal submitted — remove buttons from the search embed
+        reply.edit(ctx, poise::CreateReply::default().embed(embed).components(vec![])).await?;
+
+        // Parse input: "$500" → dollar amount, "10" → shares
+        let input = modal_amount.trim();
+        let (quantity_opt, amount_opt): (Option<f64>, Option<f64>) = if input.starts_with('$') {
+            match input[1..].replace(',', "").parse::<f64>().ok().filter(|&v| v > 0.0) {
+                Some(a) => (None, Some(a)),
+                None => {
+                    ctx.send(poise::CreateReply::default().ephemeral(true).embed(
+                        serenity::CreateEmbed::new()
+                            .title(if is_buy { "Buy" } else { "Sell" })
+                            .description("Invalid dollar amount — use e.g. `$500`.")
+                            .color(data::EMBED_ERROR),
+                    )).await?;
+                    return Ok(());
+                }
+            }
+        } else {
+            match input.replace(',', "").parse::<f64>().ok().filter(|&v| v > 0.0) {
+                Some(q) => (Some(q), None),
+                None => {
+                    ctx.send(poise::CreateReply::default().ephemeral(true).embed(
+                        serenity::CreateEmbed::new()
+                            .title(if is_buy { "Buy" } else { "Sell" })
+                            .description("Invalid share count — use e.g. `10`, or `$500` for a dollar amount.")
+                            .color(data::EMBED_ERROR),
+                    )).await?;
+                    return Ok(());
+                }
+            }
+        };
+
+        let asset_type = quote.asset_type();
+        let asset_name = display_name.clone();
+        let price_per_unit = price_to_creds(price_usd);
+        let qty = quantity_opt.unwrap_or_else(|| amount_opt.unwrap() / price_usd);
+
+        // Get user's first portfolio
+        let data_ref = &ctx.data().users;
+        let u = data_ref.get(&ctx.author().id).unwrap();
+        let port_name = {
+            let user_data = u.read().await;
+            match user_data.stock.portfolios.first() {
+                Some(p) => p.name.clone(),
+                None => {
+                    ctx.send(poise::CreateReply::default().ephemeral(true).embed(
+                        serenity::CreateEmbed::new()
+                            .title(if is_buy { "Buy" } else { "Sell" })
+                            .description("You have no portfolios. Create one with `/portfolio create`.")
+                            .color(data::EMBED_ERROR),
+                    )).await?;
+                    return Ok(());
+                }
+            }
+        };
+
+        if is_buy {
+            let total_cost = price_per_unit * qty;
+            let mut user_data = u.write().await;
+            let port_idx = user_data.stock.portfolios.iter().position(|p| p.name == port_name).unwrap();
+
+            if user_data.stock.portfolios[port_idx].cash < total_cost {
+                ctx.send(poise::CreateReply::default().ephemeral(true).embed(
+                    serenity::CreateEmbed::new()
+                        .title("Buy")
+                        .description(format!(
+                            "Insufficient cash. Need **${:.2}** ({:.0} creds) but **{}** has **${:.2}** ({:.0} creds).",
+                            creds_to_price(total_cost), total_cost, port_name,
+                            creds_to_price(user_data.stock.portfolios[port_idx].cash),
+                            user_data.stock.portfolios[port_idx].cash,
+                        ))
+                        .color(data::EMBED_ERROR),
+                )).await?;
+                return Ok(());
+            }
+
+            {
+                let stock = &mut user_data.stock;
+                apply_buy(&mut stock.portfolios[port_idx], &mut stock.trade_history, &ticker, &asset_name, asset_type, qty, price_per_unit, &port_name);
+            }
+            drop(user_data);
+
+            ctx.send(poise::CreateReply::default().ephemeral(true).embed(
+                with_logo(
+                    serenity::CreateEmbed::new()
+                        .title("Buy")
+                        .description(format!(
+                            "Bought **{} {}** ({}) for **${:.2}** ({:.0} creds)\n${:.2}/unit | Portfolio: **{}**",
+                            fmt_qty(qty), ticker, asset_name, creds_to_price(total_cost), total_cost, price_usd, port_name,
+                        ))
+                        .color(data::EMBED_SUCCESS)
+                        .footer(serenity::CreateEmbedFooter::new("@~ powered by UwUntu & RustyBamboo")),
+                    &ticker,
+                )
+            )).await?;
+        } else {
+            let mut user_data = u.write().await;
+            let port_idx = user_data.stock.portfolios.iter().position(|p| p.name == port_name).unwrap();
+
+            let pos_idx = match user_data.stock.portfolios[port_idx]
+                .positions
+                .iter()
+                .position(|p| p.ticker == ticker && !matches!(&p.asset_type, AssetType::Option(_)))
+            {
+                Some(i) => i,
+                None => {
+                    ctx.send(poise::CreateReply::default().ephemeral(true).embed(
+                        serenity::CreateEmbed::new()
+                            .title("Sell")
+                            .description(format!("No **{}** position in portfolio **{}**.", ticker, port_name))
+                            .color(data::EMBED_ERROR),
+                    )).await?;
+                    return Ok(());
+                }
+            };
+
+            if user_data.stock.portfolios[port_idx].positions[pos_idx].quantity < qty - 1e-9 {
+                ctx.send(poise::CreateReply::default().ephemeral(true).embed(
+                    serenity::CreateEmbed::new()
+                        .title("Sell")
+                        .description(format!(
+                            "You only hold **{}** of **{}** but tried to sell **{}**.",
+                            fmt_qty(user_data.stock.portfolios[port_idx].positions[pos_idx].quantity),
+                            ticker, fmt_qty(qty),
+                        ))
+                        .color(data::EMBED_ERROR),
+                )).await?;
+                return Ok(());
+            }
+
+            let (proceeds, pnl) = {
+                let stock = &mut user_data.stock;
+                let pnl = apply_sell(&mut stock.portfolios[port_idx], &mut stock.trade_history, &ticker, &asset_name, qty, price_per_unit, &port_name).unwrap_or(0.0);
+                (price_per_unit * qty, pnl)
+            };
+
+            let pnl_str = if pnl >= 0.0 {
+                format!("▲ +${:.2} ({:.0} creds)", creds_to_price(pnl), pnl)
+            } else {
+                format!("▼ -${:.2} ({:.0} creds)", creds_to_price(pnl.abs()), pnl)
+            };
+            let pnl_color = if pnl >= 0.0 { data::EMBED_SUCCESS } else { data::EMBED_FAIL };
+            drop(user_data);
+
+            ctx.send(poise::CreateReply::default().ephemeral(true).embed(
+                with_logo(
+                    serenity::CreateEmbed::new()
+                        .title("Sell")
+                        .description(format!(
+                            "Sold **{} {}** for **${:.2}** ({:.0} creds)\n${:.2}/unit | Realized P&L: **{}**",
+                            fmt_qty(qty), ticker, creds_to_price(proceeds), proceeds, price_usd, pnl_str,
+                        ))
+                        .color(pnl_color)
+                        .footer(serenity::CreateEmbedFooter::new("@~ powered by UwUntu & RustyBamboo")),
+                    &ticker,
+                )
+            )).await?;
+        }
     } else {
         // Compact multi-asset view (max 10)
         let mut rows = Vec::new();
@@ -1686,11 +1928,10 @@ pub async fn search(
             let change_pct = quote.regular_market_change_percent.unwrap_or(0.0);
             let arrow = if change_pct >= 0.0 { "▲" } else { "▼" };
             rows.push(format!(
-                "**{}** — {} | ${:.2} / {:.0}¢ | {} {:.2}%",
+                "**{}** — {} | ${:.2} | {} {:.2}%",
                 ticker,
                 quote.display_name(),
                 price_usd,
-                price_to_creds(price_usd),
                 arrow,
                 change_pct.abs()
             ));
