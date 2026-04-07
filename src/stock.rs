@@ -28,20 +28,124 @@ type UsersMap = Arc<DashMap<serenity::UserId, Arc<RwLock<UserData>>>>;
 
 // ── Trade modals (used by /search buy/sell buttons) ───────────────────────────
 
-#[derive(poise::Modal)]
-#[name = "Buy"]
 struct BuyModal {
-    #[name = "Amount (shares e.g. 10, or dollars e.g. $500)"]
-    #[placeholder = "e.g. 10 or $500"]
+    portfolio: String,
     amount: String,
+    /// Per-portfolio cash breakdown shown in the read-only display field.
+    /// Not an input — only used by `create`; `parse` ignores it.
+    portfolio_info: String,
 }
 
-#[derive(poise::Modal)]
-#[name = "Sell"]
+impl poise::Modal for BuyModal {
+    fn create(defaults: Option<Self>, custom_id: String) -> serenity::CreateInteractionResponse {
+        let portfolio_val  = defaults.as_ref().map(|d| d.portfolio.as_str()).unwrap_or("");
+        let amount_val     = defaults.as_ref().map(|d| d.amount.as_str()).unwrap_or("");
+        let portfolio_info = defaults.as_ref().map(|d| d.portfolio_info.as_str()).unwrap_or("");
+
+        let mut components = vec![
+            serenity::CreateActionRow::InputText(
+                serenity::CreateInputText::new(
+                    serenity::InputTextStyle::Short, "Portfolio", "portfolio",
+                ).value(portfolio_val)
+            ),
+        ];
+
+        if !portfolio_info.is_empty() {
+            components.push(serenity::CreateActionRow::InputText(
+                serenity::CreateInputText::new(
+                    serenity::InputTextStyle::Paragraph, "Available Cash", "portfolio_info",
+                )
+                .value(portfolio_info)
+                .required(false)
+            ));
+        }
+
+        components.push(serenity::CreateActionRow::InputText(
+            serenity::CreateInputText::new(
+                serenity::InputTextStyle::Short, "Amount (shares e.g. 10, or dollars e.g. $500)", "amount",
+            )
+            .placeholder("e.g. 10 or $500")
+            .value(amount_val)
+        ));
+
+        serenity::CreateInteractionResponse::Modal(
+            serenity::CreateModal::new(custom_id, "Buy").components(components)
+        )
+    }
+
+    fn parse(data: serenity::ModalInteractionData) -> Result<Self, &'static str> {
+        let mut portfolio = String::new();
+        let mut amount    = String::new();
+        for row in &data.components {
+            for comp in &row.components {
+                if let serenity::ActionRowComponent::InputText(t) = comp {
+                    match t.custom_id.as_str() {
+                        "portfolio" => portfolio = t.value.clone().unwrap_or_default(),
+                        "amount"    => amount    = t.value.clone().unwrap_or_default(),
+                        _ => {}
+                    }
+                }
+            }
+        }
+        Ok(BuyModal { portfolio, amount, portfolio_info: String::new() })
+    }
+}
+
 struct SellModal {
-    #[name = "Amount (shares e.g. 10, or dollars e.g. $500)"]
-    #[placeholder = "e.g. 10 or $500"]
+    portfolio: String,
     amount: String,
+    /// Dynamic label injected into the Amount field (e.g. "10.5 shares ($1,234.56)").
+    /// Not an input — only used by `create`; `parse` leaves it empty.
+    holdings_info: String,
+}
+
+impl poise::Modal for SellModal {
+    fn create(defaults: Option<Self>, custom_id: String) -> serenity::CreateInteractionResponse {
+        let portfolio_val = defaults.as_ref().map(|d| d.portfolio.as_str()).unwrap_or("");
+        let amount_val    = defaults.as_ref().map(|d| d.amount.as_str()).unwrap_or("");
+        let amount_label  = defaults.as_ref().and_then(|d| {
+            if d.holdings_info.is_empty() { None }
+            else {
+                let s = format!("Amount — {}", d.holdings_info);
+                Some(s.chars().take(45).collect::<String>())
+            }
+        }).unwrap_or_else(|| "Amount (shares, dollars, or 'all')".to_string());
+
+        serenity::CreateInteractionResponse::Modal(
+            serenity::CreateModal::new(custom_id, "Sell")
+                .components(vec![
+                    serenity::CreateActionRow::InputText(
+                        serenity::CreateInputText::new(
+                            serenity::InputTextStyle::Short, "Portfolio", "portfolio",
+                        ).value(portfolio_val)
+                    ),
+                    serenity::CreateActionRow::InputText(
+                        serenity::CreateInputText::new(
+                            serenity::InputTextStyle::Short, amount_label, "amount",
+                        )
+                        .placeholder("e.g. 10, $500, 50%, or all")
+                        .value(amount_val)
+                    ),
+                ])
+        )
+    }
+
+    fn parse(data: serenity::ModalInteractionData) -> Result<Self, &'static str> {
+        let mut portfolio = String::new();
+        let mut amount    = String::new();
+        for row in &data.components {
+            for comp in &row.components {
+                if let serenity::ActionRowComponent::InputText(t) = comp {
+                    match t.custom_id.as_str() {
+                        "portfolio" => portfolio = t.value.clone().unwrap_or_default(),
+                        "amount"    => amount    = t.value.clone().unwrap_or_default(),
+                        _ => {}
+                    }
+                }
+            }
+        }
+        Ok(SellModal { portfolio, amount, holdings_info: String::new() })
+    }
 }
 
 #[derive(poise::Modal)]
@@ -251,7 +355,7 @@ fn is_market_hours() -> bool {
     matches!(
         now_eastern.weekday(),
         Weekday::Mon | Weekday::Tue | Weekday::Wed | Weekday::Thu | Weekday::Fri
-    ) && hour >= 9 && hour < 17
+    ) && hour >= 9 && hour < 16
 }
 
 fn fmt_pct_change(value: f64, basis: f64) -> String {
@@ -945,7 +1049,7 @@ pub async fn portfolio(ctx: Context<'_>) -> Result<(), Error> {
         let Some(press) = msg
             .await_component_interaction(ctx.serenity_context())
             .author_id(ctx.author().id)
-            .timeout(Duration::from_secs(60))
+            .timeout(Duration::from_secs(45))
             .await
         else {
             reply.edit(ctx, poise::CreateReply::default().embed(pe).components(vec![])).await?;
@@ -955,7 +1059,7 @@ pub async fn portfolio(ctx: Context<'_>) -> Result<(), Error> {
         // ── Create ────────────────────────────────────────────────────────────
         if press.data.custom_id == "port_create" {
             let Some(modal) = poise::execute_modal_on_component_interaction::<CreatePortfolioModal>(
-                ctx, press, None, Some(Duration::from_secs(120)),
+                ctx, press, None, Some(Duration::from_secs(30)),
             ).await? else { continue 'picker; };
 
             let name = modal.name.trim().to_string();
@@ -1004,7 +1108,7 @@ pub async fn portfolio(ctx: Context<'_>) -> Result<(), Error> {
             let Some(press2) = msg2
                 .await_component_interaction(ctx.serenity_context())
                 .author_id(ctx.author().id)
-                .timeout(Duration::from_secs(60))
+                .timeout(Duration::from_secs(45))
                 .await
             else {
                 // Timeout on Back/Fund — strip buttons, go back to picker
@@ -1020,10 +1124,10 @@ pub async fn portfolio(ctx: Context<'_>) -> Result<(), Error> {
 
             // new_port_fund
             let Some(fund_modal) = poise::execute_modal_on_component_interaction::<FundModal>(
-                ctx, press2, None, Some(Duration::from_secs(120)),
+                ctx, press2, None, Some(Duration::from_secs(30)),
             ).await? else { continue 'picker; };
 
-            let dollars: f64 = match fund_modal.dollars.trim().replace(',', "").parse() {
+            let dollars: f64 = match fund_modal.dollars.trim().trim_start_matches('$').replace(',', "").parse() {
                 Ok(v) if v > 0.0 && v <= 100_000.0 => v,
                 _ => {
                     reply.edit(ctx, poise::CreateReply::default().embed(
@@ -1081,7 +1185,7 @@ pub async fn portfolio(ctx: Context<'_>) -> Result<(), Error> {
         // ── Delete (from picker) ───────────────────────────────────────────────
         } else if press.data.custom_id == "port_delete" {
             let Some(del_modal) = poise::execute_modal_on_component_interaction::<DeletePortfolioModal>(
-                ctx, press, None, Some(Duration::from_secs(120)),
+                ctx, press, None, Some(Duration::from_secs(30)),
             ).await? else { continue 'picker; };
 
             let del_name = del_modal.name.trim().to_string();
@@ -1136,7 +1240,7 @@ pub async fn portfolio(ctx: Context<'_>) -> Result<(), Error> {
             let conf = msg2
                 .await_component_interaction(ctx.serenity_context())
                 .author_id(ctx.author().id)
-                .timeout(Duration::from_secs(30))
+                .timeout(Duration::from_secs(45))
                 .await;
 
             match conf {
@@ -1213,7 +1317,7 @@ pub async fn portfolio(ctx: Context<'_>) -> Result<(), Error> {
                 let Some(action) = msg2
                     .await_component_interaction(ctx.serenity_context())
                     .author_id(ctx.author().id)
-                    .timeout(Duration::from_secs(60))
+                    .timeout(Duration::from_secs(45))
                     .await
                 else {
                     reply.edit(ctx, poise::CreateReply::default().embed(embed).components(vec![])).await?;
@@ -1228,10 +1332,10 @@ pub async fn portfolio(ctx: Context<'_>) -> Result<(), Error> {
 
                     "pv_fund" => {
                         let Some(modal) = poise::execute_modal_on_component_interaction::<FundModal>(
-                            ctx, action, None, Some(Duration::from_secs(120)),
+                            ctx, action, None, Some(Duration::from_secs(30)),
                         ).await? else { return Ok(()); };
 
-                        let dollars: f64 = match modal.dollars.trim().replace(',', "").parse() {
+                        let dollars: f64 = match modal.dollars.trim().trim_start_matches('$').replace(',', "").parse() {
                             Ok(v) if v > 0.0 && v <= 100_000.0 => v,
                             _ => {
                                 reply.edit(ctx, poise::CreateReply::default().embed(
@@ -1292,10 +1396,10 @@ pub async fn portfolio(ctx: Context<'_>) -> Result<(), Error> {
 
                     "pv_withdraw" => {
                         let Some(modal) = poise::execute_modal_on_component_interaction::<WithdrawModal>(
-                            ctx, action, None, Some(Duration::from_secs(120)),
+                            ctx, action, None, Some(Duration::from_secs(30)),
                         ).await? else { return Ok(()); };
 
-                        let dollars: f64 = match modal.dollars.trim().replace(',', "").parse() {
+                        let dollars: f64 = match modal.dollars.trim().trim_start_matches('$').replace(',', "").parse() {
                             Ok(v) if v > 0.0 && v <= 100_000.0 => v,
                             _ => {
                                 reply.edit(ctx, poise::CreateReply::default().embed(
@@ -1395,7 +1499,7 @@ pub async fn portfolio(ctx: Context<'_>) -> Result<(), Error> {
                         let conf = msg3
                             .await_component_interaction(ctx.serenity_context())
                             .author_id(ctx.author().id)
-                            .timeout(Duration::from_secs(30))
+                            .timeout(Duration::from_secs(45))
                             .await;
 
                         match conf {
@@ -1709,28 +1813,42 @@ pub async fn search(
             &ticker,
         );
 
-        let buttons = vec![serenity::CreateActionRow::Buttons(vec![
-            serenity::CreateButton::new("search_buy")
-                .label("Buy")
-                .style(serenity::ButtonStyle::Success),
-            serenity::CreateButton::new("search_sell")
-                .label("Sell")
-                .style(serenity::ButtonStyle::Danger),
-        ])];
-        let reply = ctx.send(
-            poise::CreateReply::default().embed(embed.clone()).components(buttons),
-        ).await?;
-
-        let msg = reply.message().await?;
         let data_ref = &ctx.data().users;
         let u = data_ref.get(&ctx.author().id).unwrap();
 
-        let (is_buy, port_name, modal_amount): (bool, String, String) = 'interact: loop {
+        let has_position = {
+            let user_data = u.read().await;
+            user_data.stock.portfolios.iter().any(|p| {
+                p.positions.iter().any(|pos| {
+                    pos.ticker == ticker && !matches!(&pos.asset_type, AssetType::Option(_))
+                })
+            })
+        };
+
+        let mut btn_row = vec![
+            serenity::CreateButton::new("search_buy")
+                .label("Buy")
+                .style(serenity::ButtonStyle::Success),
+        ];
+        if has_position {
+            btn_row.push(
+                serenity::CreateButton::new("search_sell")
+                    .label("Sell")
+                    .style(serenity::ButtonStyle::Danger),
+            );
+        }
+        let buttons = vec![serenity::CreateActionRow::Buttons(btn_row)];
+        let reply = ctx.send(
+            poise::CreateReply::default().embed(embed.clone()).components(buttons),
+        ).await?;
+        let msg = reply.message().await?;
+
+        let (is_buy, port_name, modal_amount) = loop {
             // Wait for Buy/Sell button press (60s)
             let Some(press) = msg
                 .await_component_interaction(ctx.serenity_context())
                 .author_id(ctx.author().id)
-                .timeout(Duration::from_secs(60))
+                .timeout(Duration::from_secs(45))
                 .await
             else {
                 reply.edit(ctx, poise::CreateReply::default().embed(embed).components(vec![])).await?;
@@ -1739,13 +1857,29 @@ pub async fn search(
 
             let is_buy = press.data.custom_id == "search_buy";
 
-            // Read portfolios fresh each attempt
-            let portfolio_names: Vec<String> = {
+            // Determine pre-fill portfolio name
+            let (default_port, has_portfolios) = {
                 let user_data = u.read().await;
-                user_data.stock.portfolios.iter().map(|p| p.name.clone()).collect()
+                let ports = &user_data.stock.portfolios;
+                if ports.is_empty() {
+                    (String::new(), false)
+                } else if is_buy {
+                    (ports[0].name.clone(), true)
+                } else {
+                    let default = ports
+                        .iter()
+                        .find(|p| p.positions.iter().any(|pos| {
+                            pos.ticker == ticker
+                                && !matches!(&pos.asset_type, AssetType::Option(_))
+                        }))
+                        .or_else(|| ports.first())
+                        .map(|p| p.name.clone())
+                        .unwrap_or_default();
+                    (default, true)
+                }
             };
 
-            if portfolio_names.is_empty() {
+            if !has_portfolios {
                 press.create_response(ctx.http(), serenity::CreateInteractionResponse::Message(
                     serenity::CreateInteractionResponseMessage::new()
                         .ephemeral(true)
@@ -1754,89 +1888,88 @@ pub async fn search(
                             .description("You have no portfolios. Create one with `/portfolio create`.")
                             .color(data::EMBED_ERROR))
                 )).await?;
-                return Ok(());
+                continue;
             }
 
-            // Swap buttons for portfolio select + Cancel
-            let options: Vec<serenity::CreateSelectMenuOption> = portfolio_names.iter()
-                .map(|name| serenity::CreateSelectMenuOption::new(name, name))
-                .collect();
-            let select = serenity::CreateSelectMenu::new(
-                "portfolio_select",
-                serenity::CreateSelectMenuKind::String { options },
-            ).placeholder("Select a portfolio");
-            let cancel_btn = serenity::CreateButton::new("cancel_portfolio")
-                .label("Cancel")
-                .style(serenity::ButtonStyle::Secondary);
-            press.create_response(
-                ctx.http(),
-                serenity::CreateInteractionResponse::UpdateMessage(
-                    serenity::CreateInteractionResponseMessage::new()
-                        .embed(embed.clone())
-                        .components(vec![
-                            serenity::CreateActionRow::SelectMenu(select),
-                            serenity::CreateActionRow::Buttons(vec![cancel_btn]),
-                        ])
-                ),
-            ).await?;
+            // Disable buttons while the modal is open so there's nothing to
+            // accidentally click (avoids "Interaction failed" on re-click)
+            reply.edit(ctx, poise::CreateReply::default().embed(embed.clone()).components(vec![
+                serenity::CreateActionRow::Buttons(vec![
+                    serenity::CreateButton::new("search_buy").label("Buy").style(serenity::ButtonStyle::Success).disabled(true),
+                    serenity::CreateButton::new("search_sell").label("Sell").style(serenity::ButtonStyle::Danger).disabled(true),
+                ])
+            ])).await?;
 
-            // Inner loop: portfolio selection or cancel, re-try on modal dismiss
-            let (port_name, modal_amount) = 'select: loop {
-                let Some(sel) = msg
-                    .await_component_interaction(ctx.serenity_context())
-                    .author_id(ctx.author().id)
-                    .timeout(Duration::from_secs(60))
-                    .await
-                else {
-                    reply.edit(ctx, poise::CreateReply::default().embed(embed).components(vec![])).await?;
-                    return Ok(());
+            let modal_result = if is_buy {
+                let portfolio_info = {
+                    let user_data = u.read().await;
+                    let lines: Vec<String> = user_data.stock.portfolios.iter()
+                        .map(|p| {
+                            let max_shares = if price_usd > 0.0 {
+                                p.cash / price_to_creds(price_usd)
+                            } else {
+                                0.0
+                            };
+                            format!("{} (${:.2}) - max {} shares", p.name, creds_to_price(p.cash), fmt_qty(max_shares))
+                        })
+                        .collect();
+                    lines.join("\n")
                 };
-
-                if sel.data.custom_id == "cancel_portfolio" {
-                    // Restore Buy/Sell buttons and re-arm the outer loop
-                    sel.create_response(
-                        ctx.http(),
-                        serenity::CreateInteractionResponse::UpdateMessage(
-                            serenity::CreateInteractionResponseMessage::new()
-                                .embed(embed.clone())
-                                .components(vec![serenity::CreateActionRow::Buttons(vec![
-                                    serenity::CreateButton::new("search_buy").label("Buy").style(serenity::ButtonStyle::Success),
-                                    serenity::CreateButton::new("search_sell").label("Sell").style(serenity::ButtonStyle::Danger),
-                                ])])
-                        ),
-                    ).await?;
-                    continue 'interact;
-                }
-
-                let serenity::ComponentInteractionDataKind::StringSelect { values } = &sel.data.kind else {
-                    continue 'select;
+                poise::execute_modal_on_component_interaction::<BuyModal>(
+                    ctx,
+                    press,
+                    Some(BuyModal { portfolio: String::new(), amount: String::new(), portfolio_info }),
+                    Some(Duration::from_secs(30)),
+                ).await?.map(|m| (m.portfolio, m.amount))
+            } else {
+                let holdings_info = {
+                    let user_data = u.read().await;
+                    user_data.stock.portfolios.iter()
+                        .find(|p| p.name == default_port)
+                        .and_then(|p| p.positions.iter().find(|pos| {
+                            pos.ticker == ticker && !matches!(&pos.asset_type, AssetType::Option(_))
+                        }))
+                        .map(|pos| format!("{} shares (${:.2})", fmt_qty(pos.quantity), pos.quantity * price_usd))
+                        .unwrap_or_default()
                 };
-                let selected_port = values.first().cloned().unwrap_or_default();
-
-                // Open amount modal — if user dismisses it, loop back to select
-                let amount = if is_buy {
-                    let Some(data) = poise::execute_modal_on_component_interaction::<BuyModal>(
-                        ctx, sel, None, Some(Duration::from_secs(120)),
-                    ).await? else { continue 'select; };
-                    data.amount
-                } else {
-                    let Some(data) = poise::execute_modal_on_component_interaction::<SellModal>(
-                        ctx, sel, None, Some(Duration::from_secs(120)),
-                    ).await? else { continue 'select; };
-                    data.amount
-                };
-
-                break 'select (selected_port, amount);
+                poise::execute_modal_on_component_interaction::<SellModal>(
+                    ctx,
+                    press,
+                    Some(SellModal { portfolio: default_port, amount: String::new(), holdings_info }),
+                    Some(Duration::from_secs(30)),
+                ).await?.map(|m| (m.portfolio, m.amount))
             };
 
-            // Remove all components from the search embed
-            reply.edit(ctx, poise::CreateReply::default().embed(embed).components(vec![])).await?;
-            break 'interact (is_buy, port_name, modal_amount);
+            let Some((port_name, modal_amount)) = modal_result else {
+                // Modal dismissed — re-enable buttons
+                reply.edit(ctx, poise::CreateReply::default().embed(embed.clone()).components(vec![
+                    serenity::CreateActionRow::Buttons(vec![
+                        serenity::CreateButton::new("search_buy").label("Buy").style(serenity::ButtonStyle::Success),
+                        serenity::CreateButton::new("search_sell").label("Sell").style(serenity::ButtonStyle::Danger),
+                    ])
+                ])).await?;
+                continue;
+            };
+
+            reply.edit(ctx, poise::CreateReply::default().embed(embed.clone()).components(vec![])).await?;
+            break (is_buy, port_name, modal_amount);
         };
 
         // Parse input: "$500" → dollar amount, "10" → shares
+        // Sell also accepts "all" and "50%" — these are resolved after position lookup
         let input = modal_amount.trim();
-        let (quantity_opt, amount_opt): (Option<f64>, Option<f64>) = if input.starts_with('$') {
+        let sell_all = !is_buy && input.to_lowercase() == "all";
+        let sell_pct: Option<f64> = if !is_buy && !sell_all {
+            input.strip_suffix('%')
+                .and_then(|s| s.trim().parse::<f64>().ok())
+                .filter(|&v| v > 0.0 && v <= 100.0)
+        } else {
+            None
+        };
+
+        let (quantity_opt, amount_opt): (Option<f64>, Option<f64>) = if sell_all || sell_pct.is_some() {
+            (None, None)
+        } else if input.starts_with('$') {
             match input[1..].replace(',', "").parse::<f64>().ok().filter(|&v| v > 0.0) {
                 Some(a) => (None, Some(a)),
                 None => {
@@ -1856,7 +1989,11 @@ pub async fn search(
                     ctx.send(poise::CreateReply::default().ephemeral(true).embed(
                         serenity::CreateEmbed::new()
                             .title(if is_buy { "Buy" } else { "Sell" })
-                            .description("Invalid share count — use e.g. `10`, or `$500` for a dollar amount.")
+                            .description(if is_buy {
+                                "Invalid share count — use e.g. `10`, or `$500` for a dollar amount."
+                            } else {
+                                "Invalid amount — use e.g. `10`, `$500`, `50%`, or `all`."
+                            })
                             .color(data::EMBED_ERROR),
                     )).await?;
                     return Ok(());
@@ -1867,16 +2004,22 @@ pub async fn search(
         let asset_type = quote.asset_type();
         let asset_name = display_name.clone();
         let price_per_unit = price_to_creds(price_usd);
-        let qty = quantity_opt.unwrap_or_else(|| amount_opt.unwrap() / price_usd);
 
 
         if is_buy {
+            let qty = quantity_opt.unwrap_or_else(|| amount_opt.unwrap() / price_usd);
             let total_cost = match amount_opt {
                 Some(amt) => price_to_creds(amt),
                 None => price_per_unit * qty,
             };
             let mut user_data = u.write().await;
             let Some(port_idx) = user_data.stock.portfolios.iter().position(|p| p.name == port_name) else {
+                ctx.send(poise::CreateReply::default().ephemeral(true).embed(
+                    serenity::CreateEmbed::new()
+                        .title("Buy")
+                        .description(format!("Portfolio **{}** not found.", port_name))
+                        .color(data::EMBED_ERROR),
+                )).await?;
                 return Ok(());
             };
 
@@ -1917,6 +2060,12 @@ pub async fn search(
         } else {
             let mut user_data = u.write().await;
             let Some(port_idx) = user_data.stock.portfolios.iter().position(|p| p.name == port_name) else {
+                ctx.send(poise::CreateReply::default().ephemeral(true).embed(
+                    serenity::CreateEmbed::new()
+                        .title("Sell")
+                        .description(format!("Portfolio **{}** not found.", port_name))
+                        .color(data::EMBED_ERROR),
+                )).await?;
                 return Ok(());
             };
 
@@ -1937,14 +2086,22 @@ pub async fn search(
                 }
             };
 
-            if user_data.stock.portfolios[port_idx].positions[pos_idx].quantity < qty - 1e-9 {
+            let held = user_data.stock.portfolios[port_idx].positions[pos_idx].quantity;
+            let qty = if sell_all {
+                held
+            } else if let Some(pct) = sell_pct {
+                held * (pct / 100.0)
+            } else {
+                quantity_opt.unwrap_or_else(|| amount_opt.unwrap() / price_usd)
+            };
+
+            if qty > held + 1e-9 {
                 ctx.send(poise::CreateReply::default().ephemeral(true).embed(
                     serenity::CreateEmbed::new()
                         .title("Sell")
                         .description(format!(
                             "You only hold **{}** of **{}** but tried to sell **{}**.",
-                            fmt_qty(user_data.stock.portfolios[port_idx].positions[pos_idx].quantity),
-                            ticker, fmt_qty(qty),
+                            fmt_qty(held), ticker, fmt_qty(qty),
                         ))
                         .color(data::EMBED_ERROR),
                 )).await?;
