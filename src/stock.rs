@@ -3985,7 +3985,7 @@ async fn morning_pulse(headlines: &[String], memory: &ProfessorMemory) -> String
     let headlines_str = headlines.join("\n");
     let user_prompt = format!(
         "Split these headlines into macro events and individual stock news.\n\
-         For each, write one bullet. Then list tickers to watch.\n\n\
+         Max 3 bullets per section. Be concise.\n\n\
          MACRO (rates, geopolitics, commodities, indices):\n- ...\n\n\
          STOCKS (individual company news):\n- ...\n\n\
          WATCH: [comma-separated tickers relevant to today's news]\n\
@@ -4065,7 +4065,8 @@ async fn trading_session(
          CONSTRAINTS: cash={cash_usd:.2}, max_per_trade={max_per_trade:.2}, max_trades=3, min_position=50\n\n\
          Only HIGH conviction trades — default to hold.\n\
          Return ONLY JSON: {{\"reason\":\"...\",\"trades\":[{{\"fn\":\"apply_buy\",\"ticker\":\"XOM\",\"asset_type\":\"Stock\",\"amount_usd\":120.0}}]}}\n\
-         No trades: {{\"reason\":\"...\",\"trades\":[]}}"
+         No trades: {{\"reason\":\"...\",\"trades\":[]}}\n\
+         Keep \"reason\" under 350 characters, plain text, no markdown."
     );
     let raw = call_claude(&memory.core_behavior, &user_prompt).await;
     if raw.is_empty() { return None; }
@@ -4418,9 +4419,34 @@ pub async fn professor(ctx: Context<'_>) -> Result<(), Error> {
         .map(|e| format!("_{}_\n{}", e.date.format("%b %d, %Y"), e.content))
         .unwrap_or_else(|| "_No entries yet._".to_string());
 
+    let recent_trades: Vec<String> = user_data.stock.trade_history.iter().rev()
+        .filter(|t| t.portfolio == PROFESSOR_PORT && !matches!(t.action, data::TradeAction::Sell if t.realized_pnl.is_none()))
+        .take(5)
+        .map(|t| {
+            let qty = fmt_qty(t.quantity);
+            let value = creds_to_price(t.total_creds);
+            match t.action {
+                data::TradeAction::Buy => format!("Bought **{}** shares of **{}** worth **${:.2}**", qty, t.ticker, value),
+                data::TradeAction::Sell => {
+                    let pnl = t.realized_pnl.unwrap_or(0.0);
+                    let cost_basis = t.total_creds - pnl;
+                    let pct = if cost_basis > 0.0 { pnl / cost_basis * 100.0 } else { 0.0 };
+                    format!("Sold **{}** shares of **{}** worth **${:.2}** ({:+.1}%)", qty, t.ticker, value, pct)
+                }
+            }
+        })
+        .collect();
+
+    let trades_section = if recent_trades.is_empty() {
+        "_No trades yet._".to_string()
+    } else {
+        recent_trades.join("\n")
+    };
+
     let desc = format!(
         "**Cash:** ${:.2}\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n\
          **Positions:**\n{pos_lines}\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n\
+         **Recent Activity:**\n{trades_section}\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n\
          **Latest Thoughts:**\n{memory_str}",
         creds_to_price(port.cash)
     );
