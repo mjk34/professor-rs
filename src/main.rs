@@ -6,7 +6,7 @@ mod mods;
 mod reminder;
 mod stock;
 
-use chrono::{Datelike, Timelike, Weekday};
+use chrono::{Datelike, Timelike, Utc, Weekday};
 use dashmap::DashMap;
 use data::{UserData, VoiceUser};
 use std::{env, sync::Arc};
@@ -167,7 +167,16 @@ async fn event_handler(
 
     match event {
         serenity::FullEvent::Ready { data_about_bot, .. } => {
-            tracing::info!("Logged in as {}", data_about_bot.user.name);
+            let now = chrono::Utc::now();
+            let next_run = next_professor_run(now);
+            tracing::info!(
+                "Logged in as {} | startup UTC: {} ({:?}) | professor next run: {} ({:?})",
+                data_about_bot.user.name,
+                now.format("%Y-%m-%d %H:%M:%S"),
+                now.weekday(),
+                next_run.format("%Y-%m-%d %H:%M:%S"),
+                next_run.weekday(),
+            );
         }
 
         serenity::FullEvent::Message { new_message } => {
@@ -284,17 +293,17 @@ fn professor_task(
             // Skip weekends
             if matches!(now.weekday(), Weekday::Sat | Weekday::Sun) {
                 let days_until_mon: u64 = if now.weekday() == Weekday::Sat { 2 } else { 1 };
-                let secs = days_until_mon * 86_400 + secs_until_hm(now.hour(), now.minute(), 15, 0);
+                let secs = days_until_mon * 86_400 + secs_until_hm(now.hour(), now.minute(), 19, 0);
                 tokio::time::sleep(std::time::Duration::from_secs(secs)).await;
                 continue;
             }
 
-            // Fire at 17:00 UTC on weekdays (1:00 PM EDT)
-            let secs_to_fire = secs_until_hm(now.hour(), now.minute(), 17, 0);
+            // Fire at 19:00 UTC on weekdays (3:00 PM EDT)
+            let secs_to_fire = secs_until_hm(now.hour(), now.minute(), 19, 0);
             if secs_to_fire == 0 {
                 // Already past 17:00 today — sleep until tomorrow 17:00 and loop
                 let elapsed = now.hour() as u64 * 3600 + now.minute() as u64 * 60 + now.second() as u64;
-                let secs_to_next = 86_400 - elapsed + 17 * 3600;
+                let secs_to_next = 86_400 - elapsed + 19 * 3600;
                 tokio::time::sleep(std::time::Duration::from_secs(secs_to_next)).await;
                 continue;
             }
@@ -304,13 +313,28 @@ fn professor_task(
                 stock::professor_daily_session(&users, &http, &bot_chat, bot_user_id).await;
             }
 
-            // Sleep until tomorrow 17:00 UTC (1:00 PM EDT)
+            // Sleep until tomorrow 19:00 UTC (3:00 PM EDT)
             let now2 = chrono::Utc::now();
             let elapsed = now2.hour() as u64 * 3600 + now2.minute() as u64 * 60 + now2.second() as u64;
-            let secs_to_next = 86_400 - elapsed + 17 * 3600;
+            let secs_to_next = 86_400 - elapsed + 19 * 3600;
             tokio::time::sleep(std::time::Duration::from_secs(secs_to_next)).await;
         }
     });
+}
+
+/// Next weekday (Mon–Fri) at 17:00 UTC after `now`.
+fn next_professor_run(now: chrono::DateTime<Utc>) -> chrono::DateTime<Utc> {
+    let mut day = now.date_naive();
+    if now.hour() >= 19 {
+        day += chrono::Duration::days(1);
+    }
+    loop {
+        if !matches!(day.weekday(), Weekday::Sat | Weekday::Sun) {
+            break;
+        }
+        day += chrono::Duration::days(1);
+    }
+    day.and_hms_opt(19, 0, 0).unwrap().and_utc()
 }
 
 /// Seconds until the next occurrence of hour:minute UTC (0 if already past).
