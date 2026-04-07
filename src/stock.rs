@@ -1725,7 +1725,7 @@ pub async fn search(
         let data_ref = &ctx.data().users;
         let u = data_ref.get(&ctx.author().id).unwrap();
 
-        let (is_buy, port_name, modal_amount) = 'interact: loop {
+        let (is_buy, port_name, modal_amount): (bool, String, String) = 'interact: loop {
             // Wait for Buy/Sell button press (60s)
             let Some(press) = msg
                 .await_component_interaction(ctx.serenity_context())
@@ -1814,18 +1814,19 @@ pub async fn search(
                 let selected_port = values.first().cloned().unwrap_or_default();
 
                 // Open amount modal — if user dismisses it, loop back to select
-                let modal_data = if is_buy {
-                    poise::execute_modal_on_component_interaction::<BuyModal>(
+                let amount = if is_buy {
+                    let Some(data) = poise::execute_modal_on_component_interaction::<BuyModal>(
                         ctx, sel, None, Some(Duration::from_secs(120)),
-                    ).await?
+                    ).await? else { continue 'select; };
+                    data.amount
                 } else {
-                    poise::execute_modal_on_component_interaction::<SellModal>(
+                    let Some(data) = poise::execute_modal_on_component_interaction::<SellModal>(
                         ctx, sel, None, Some(Duration::from_secs(120)),
-                    ).await?
+                    ).await? else { continue 'select; };
+                    data.amount
                 };
 
-                let Some(data) = modal_data else { continue 'select; };
-                break 'select (selected_port, data.amount);
+                break 'select (selected_port, amount);
             };
 
             // Remove all components from the search embed
