@@ -14,6 +14,10 @@ use crate::data::{
     self, AssetType, MemoryEntry, OptionContract, OptionSide, OptionType, Portfolio, Position,
     ProfessorMemory, TradeAction, TradeRecord, UserData, GOLD_LEVEL_THRESHOLD, TRADE_HISTORY_LIMIT,
 };
+use crate::helper::{
+    creds_to_price, default_footer, fmt_qty, format_large_num, option_intrinsic,
+    option_type_str, parse_option_type, price_to_creds,
+};
 use crate::{serenity, Context, Error};
 use chrono::{DateTime, Datelike, NaiveDate, TimeZone, Timelike, Utc, Weekday};
 use dashmap::DashMap;
@@ -182,40 +186,12 @@ struct WithdrawModal {
 
 // ── Pricing helpers ──────────────────────────────────────────────────────────
 
-fn price_to_creds(usd: f64) -> f64 {
-    usd * 100.0
-}
-
-fn creds_to_price(creds: f64) -> f64 {
-    creds / 100.0
-}
-
 fn gold_hysa_rate(fed_rate: f64) -> f64 {
     (fed_rate * 0.92).max(0.5)
 }
 
 fn is_gold(user_data: &UserData) -> bool {
     user_data.get_level() >= GOLD_LEVEL_THRESHOLD
-}
-
-fn fmt_qty(q: f64) -> String {
-    if q.fract() == 0.0 {
-        format!("{:.0}", q)
-    } else {
-        format!("{:.4}", q)
-    }
-}
-
-fn format_large_num(n: f64) -> String {
-    if n >= 1e12 {
-        format!("${:.2}T", n / 1e12)
-    } else if n >= 1e9 {
-        format!("${:.2}B", n / 1e9)
-    } else if n >= 1e6 {
-        format!("${:.2}M", n / 1e6)
-    } else {
-        format!("${:.2}", n)
-    }
 }
 
 // ── FMP API structs ───────────────────────────────────────────────────────────
@@ -363,13 +339,6 @@ fn fmt_pct_change(value: f64, basis: f64) -> String {
         format!(" ({:+.1}%)", value / basis * 100.0)
     } else {
         String::new()
-    }
-}
-
-fn option_intrinsic(opt_type: &OptionType, price_usd: f64, strike: f64) -> f64 {
-    match opt_type {
-        OptionType::Call => (price_usd - strike).max(0.0),
-        OptionType::Put => (strike - price_usd).max(0.0),
     }
 }
 
@@ -710,26 +679,28 @@ async fn fetch_fmp_ratios(ticker: &str) -> Option<FmpRatios> {
     Some(ratios)
 }
 
+/// CBOE naked option margin requirement in USD.
+fn naked_margin_usd(opt_type: &OptionType, price_usd: f64, strike: f64, contracts: u32, premium_usd: f64) -> f64 {
+    let notional = 100.0 * contracts as f64;
+    let otm_usd = match opt_type {
+        OptionType::Call => (strike - price_usd).max(0.0),
+        OptionType::Put  => (price_usd - strike).max(0.0),
+    } * notional;
+    let min_basis = match opt_type {
+        OptionType::Call => price_usd,
+        OptionType::Put  => strike,
+    };
+    f64::max(
+        0.20 * price_usd * notional + premium_usd - otm_usd,
+        0.10 * min_basis * notional + premium_usd,
+    )
+}
+
 fn parse_expiry(date_str: &str) -> Option<chrono::DateTime<Utc>> {
     NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
         .ok()
-        .and_then(|d| d.and_hms_opt(0, 0, 0))
+        .and_then(|d| d.and_hms_opt(23, 59, 59))
         .map(|dt| Utc.from_utc_datetime(&dt))
-}
-
-fn parse_option_type(s: &str) -> Option<OptionType> {
-    match s.to_lowercase().as_str() {
-        "call" | "c" => Some(OptionType::Call),
-        "put" | "p" => Some(OptionType::Put),
-        _ => None,
-    }
-}
-
-fn option_type_str(ot: &OptionType) -> &'static str {
-    match ot {
-        OptionType::Call => "CALL",
-        OptionType::Put => "PUT",
-    }
 }
 
 // ── FRED API ──────────────────────────────────────────────────────────────────
@@ -1094,7 +1065,7 @@ pub async fn portfolio(ctx: Context<'_>) -> Result<(), Error> {
                 .title("Portfolio — Create")
                 .description(format!("Portfolio **{}** created!", name))
                 .color(data::EMBED_SUCCESS)
-                .footer(serenity::CreateEmbedFooter::new("@~ powered by UwUntu & RustyBamboo"));
+                .footer(default_footer());
             let create_btns = vec![serenity::CreateActionRow::Buttons(vec![
                 serenity::CreateButton::new("new_port_back").label("↩ Back").style(serenity::ButtonStyle::Secondary),
                 serenity::CreateButton::new("new_port_fund").label("Fund").style(serenity::ButtonStyle::Success),
@@ -1176,7 +1147,7 @@ pub async fn portfolio(ctx: Context<'_>) -> Result<(), Error> {
                                 dollars, name, creds_to_price(new_cash)
                             ))
                             .color(data::EMBED_SUCCESS)
-                            .footer(serenity::CreateEmbedFooter::new("@~ powered by UwUntu & RustyBamboo")),
+                            .footer(default_footer()),
                     ).components(vec![])).await?;
                 }
             }
@@ -1233,7 +1204,7 @@ pub async fn portfolio(ctx: Context<'_>) -> Result<(), Error> {
                     .title("Portfolio — Delete")
                     .description(format!("{}\n\nLiquidate all positions at market price and return cash to wallet?", detail))
                     .color(data::EMBED_FAIL)
-                    .footer(serenity::CreateEmbedFooter::new("@~ powered by UwUntu & RustyBamboo")),
+                    .footer(default_footer()),
             ).components(confirm_btns)).await?;
 
             let msg2 = reply.message().await?;
@@ -1387,7 +1358,7 @@ pub async fn portfolio(ctx: Context<'_>) -> Result<(), Error> {
                                             dollars, port_name, creds_to_price(new_cash)
                                         ))
                                         .color(data::EMBED_SUCCESS)
-                                        .footer(serenity::CreateEmbedFooter::new("@~ powered by UwUntu & RustyBamboo")),
+                                        .footer(default_footer()),
                                 ).components(vec![])).await?;
                             }
                         }
@@ -1448,7 +1419,7 @@ pub async fn portfolio(ctx: Context<'_>) -> Result<(), Error> {
                                             dollars, port_name, creds_to_price(remaining)
                                         ))
                                         .color(data::EMBED_SUCCESS)
-                                        .footer(serenity::CreateEmbedFooter::new("@~ powered by UwUntu & RustyBamboo")),
+                                        .footer(default_footer()),
                                 ).components(vec![])).await?;
                             }
                         }
@@ -1492,7 +1463,7 @@ pub async fn portfolio(ctx: Context<'_>) -> Result<(), Error> {
                                 .title("Portfolio — Delete")
                                 .description(format!("{}\n\nLiquidate all positions at market price and return cash to wallet?", detail))
                                 .color(data::EMBED_FAIL)
-                                .footer(serenity::CreateEmbedFooter::new("@~ powered by UwUntu & RustyBamboo")),
+                                .footer(default_footer()),
                         ).components(confirm_buttons)).await?;
 
                         let msg3 = reply.message().await?;
@@ -1613,7 +1584,7 @@ async fn build_portfolio_picker(
         .title("Portfolio — Select")
         .description(list)
         .color(data::EMBED_CYAN)
-        .footer(serenity::CreateEmbedFooter::new("@~ powered by UwUntu & RustyBamboo"));
+        .footer(default_footer());
     (embed, components)
 }
 
@@ -2053,7 +2024,7 @@ pub async fn search(
                             fmt_qty(qty), ticker, asset_name, creds_to_price(total_cost), total_cost, price_usd, port_name,
                         ))
                         .color(data::EMBED_SUCCESS)
-                        .footer(serenity::CreateEmbedFooter::new("@~ powered by UwUntu & RustyBamboo")),
+                        .footer(default_footer()),
                     &ticker,
                 )
             )).await?;
@@ -2131,7 +2102,7 @@ pub async fn search(
                             fmt_qty(qty), ticker, creds_to_price(proceeds), proceeds, price_usd, pnl_str,
                         ))
                         .color(pnl_color)
-                        .footer(serenity::CreateEmbedFooter::new("@~ powered by UwUntu & RustyBamboo")),
+                        .footer(default_footer()),
                     &ticker,
                 )
             )).await?;
@@ -2500,212 +2471,173 @@ pub async fn sell(
 
 // ── Watchlist ─────────────────────────────────────────────────────────────────
 
-/// Manage your watchlist
-#[poise::command(
-    slash_command,
-    subcommands("watchlist_add", "watchlist_remove", "watchlist_list", "watchlist_clear")
-)]
-pub async fn watchlist(_ctx: Context<'_>) -> Result<(), Error> {
-    Ok(())
+#[derive(poise::Modal)]
+#[name = "Add to Watchlist"]
+struct WatchlistAddModal {
+    #[name = "Ticker symbol (e.g. AAPL, BTC-USD)"]
+    #[placeholder = "AAPL"]
+    ticker: String,
 }
 
-/// Add a ticker or name to your watchlist
-#[poise::command(slash_command, rename = "add")]
-async fn watchlist_add(
-    ctx: Context<'_>,
-    #[description = "Ticker symbol to add"] query: String,
-) -> Result<(), Error> {
-    let quote = match resolve_ticker(&query).await {
-        Some(q) => q,
-        None => {
-            ctx.send(
-                poise::CreateReply::default().embed(
-                    serenity::CreateEmbed::new()
-                        .title("Watchlist — Add")
-                        .description(market_data_err(&query))
-                        .color(data::EMBED_ERROR),
-                ),
-            )
-            .await?;
-            return Ok(());
-        }
-    };
-    let ticker = quote.symbol.clone();
-    let name = quote.display_name();
-
-    let data_ref = &ctx.data().users;
-    let u = data_ref.get(&ctx.author().id).unwrap();
-
-    let add_result: Result<(), String> = {
-        let mut user_data = u.write().await;
-        if user_data.stock.watchlist.contains(&ticker) {
-            Err(format!("**{}** is already on your watchlist.", ticker))
-        } else if user_data.stock.watchlist.len() >= 20 {
-            Err("Watchlist is full (max 20 tickers).".to_string())
-        } else {
-            user_data.stock.watchlist.push(ticker.clone());
-            Ok(())
-        }
-        // write lock released here
-    };
-
-    match add_result {
-        Err(msg) => {
-            ctx.send(
-                poise::CreateReply::default().embed(
-                    serenity::CreateEmbed::new()
-                        .title("Watchlist — Add")
-                        .description(msg)
-                        .color(data::EMBED_ERROR),
-                ),
-            )
-            .await?;
-        }
-        Ok(()) => {
-            ctx.send(
-                poise::CreateReply::default().embed(
-                    serenity::CreateEmbed::new()
-                        .title("Watchlist — Add")
-                        .description(format!("Added **{} — {}** to your watchlist.", ticker, name))
-                        .color(data::EMBED_SUCCESS)
-                        .footer(serenity::CreateEmbedFooter::new(
-                            "@~ powered by UwUntu & RustyBamboo",
-                        )),
-                ),
-            )
-            .await?;
-        }
-    }
-    Ok(())
+#[derive(poise::Modal)]
+#[name = "Remove from Watchlist"]
+struct WatchlistRemoveModal {
+    #[name = "Ticker symbol to remove"]
+    #[placeholder = "AAPL"]
+    ticker: String,
 }
 
-/// Remove a ticker from your watchlist
-#[poise::command(slash_command, rename = "remove")]
-async fn watchlist_remove(
-    ctx: Context<'_>,
-    #[description = "Ticker symbol to remove"] query: String,
-) -> Result<(), Error> {
-    // Try to resolve; fall back to uppercased input if resolution fails
-    let ticker = resolve_ticker(&query)
-        .await
-        .map(|q| q.symbol)
-        .unwrap_or_else(|| query.to_uppercase());
-
-    let data_ref = &ctx.data().users;
-    let u = data_ref.get(&ctx.author().id).unwrap();
-
-    let removed = {
-        let mut user_data = u.write().await;
-        let before = user_data.stock.watchlist.len();
-        user_data.stock.watchlist.retain(|t| t != &ticker);
-        user_data.stock.watchlist.len() < before
-        // write lock released here
-    };
-
-    if removed {
-        ctx.send(
-            poise::CreateReply::default().embed(
-                serenity::CreateEmbed::new()
-                    .title("Watchlist — Remove")
-                    .description(format!("Removed **{}** from your watchlist.", ticker))
-                    .color(data::EMBED_SUCCESS)
-                    .footer(serenity::CreateEmbedFooter::new(
-                        "@~ powered by UwUntu & RustyBamboo",
-                    )),
-            ),
-        )
-        .await?;
+async fn build_watchlist_embed(
+    tickers: &[String],
+) -> (serenity::CreateEmbed, Vec<serenity::CreateActionRow>) {
+    let description = if tickers.is_empty() {
+        "*Your watchlist is empty. Press **Add** to track an asset.*".to_string()
     } else {
-        ctx.send(
-            poise::CreateReply::default().embed(
-                serenity::CreateEmbed::new()
-                    .title("Watchlist — Remove")
-                    .description(format!("**{}** is not on your watchlist.", ticker))
-                    .color(data::EMBED_ERROR),
-            ),
-        )
-        .await?;
-    }
-    Ok(())
-}
-
-/// View your watchlist with current prices
-#[poise::command(slash_command, rename = "list")]
-async fn watchlist_list(ctx: Context<'_>) -> Result<(), Error> {
-    let data_ref = &ctx.data().users;
-    let u = data_ref.get(&ctx.author().id).unwrap();
-    let tickers = {
-        let user_data = u.read().await;
-        if user_data.stock.watchlist.is_empty() {
-            ctx.send(
-                poise::CreateReply::default().embed(
-                    serenity::CreateEmbed::new()
-                        .title("Watchlist")
-                        .description("Your watchlist is empty. Add assets with `/watchlist add <ticker>`.")
-                        .color(data::EMBED_ERROR),
-                ),
-            )
-            .await?;
-            return Ok(());
-        }
-        user_data.stock.watchlist.clone()
-        // read lock released
+        let results = futures::future::join_all(
+            tickers.iter().map(|t| { let t = t.clone(); async move { (t.clone(), fetch_quote_detail(&t).await) } })
+        ).await;
+        let rows: Vec<String> = results.into_iter().map(|(ticker, quote)| {
+            match quote {
+                None => format!("`{}` — fetch failed", ticker),
+                Some(q) => {
+                    let price_usd = q.regular_market_price.unwrap_or(0.0);
+                    let change_pct = q.regular_market_change_percent.unwrap_or(0.0);
+                    let arrow = if change_pct >= 0.0 { "▲" } else { "▼" };
+                    format!("**{}** — {} | ${:.2} | {} **{:.2}%**", ticker, q.display_name(), price_usd, arrow, change_pct.abs())
+                }
+            }
+        }).collect();
+        rows.join("\n")
     };
 
-    let mut rows = Vec::new();
-    for ticker in &tickers {
-        let Some(quote) = fetch_quote_detail(ticker).await else {
-            rows.push(format!("`{}` — fetch failed", ticker));
-            continue;
-        };
-        let price_usd = quote.regular_market_price.unwrap_or(0.0);
-        let change_pct = quote.regular_market_change_percent.unwrap_or(0.0);
-        let arrow = if change_pct >= 0.0 { "▲" } else { "▼" };
-        rows.push(format!(
-            "**{}** — {} | ${:.2} | {} **{:.2}%**",
-            ticker,
-            quote.display_name(),
-            price_usd,
-            arrow,
-            change_pct.abs()
-        ));
+    let embed = serenity::CreateEmbed::new()
+        .title("Watchlist")
+        .description(description)
+        .color(data::EMBED_CYAN)
+        .footer(default_footer());
+
+    let mut buttons = vec![
+        serenity::CreateButton::new("wl_add")
+            .label("Add")
+            .style(serenity::ButtonStyle::Success),
+    ];
+    if !tickers.is_empty() {
+        buttons.push(
+            serenity::CreateButton::new("wl_remove")
+                .label("Remove")
+                .style(serenity::ButtonStyle::Primary),
+        );
+        buttons.push(
+            serenity::CreateButton::new("wl_clear")
+                .label("Clear")
+                .style(serenity::ButtonStyle::Danger),
+        );
     }
 
-    ctx.send(
-        poise::CreateReply::default().embed(
-            serenity::CreateEmbed::new()
-                .title("Watchlist")
-                .description(rows.join("\n"))
-                .color(data::EMBED_CYAN)
-                .footer(serenity::CreateEmbedFooter::new(
-                    "@~ powered by UwUntu & RustyBamboo",
-                )),
-        ),
-    )
-    .await?;
-    Ok(())
+    let components = vec![serenity::CreateActionRow::Buttons(buttons)];
+    (embed, components)
 }
 
-/// Clear all tickers from your watchlist
-#[poise::command(slash_command, rename = "clear")]
-async fn watchlist_clear(ctx: Context<'_>) -> Result<(), Error> {
+/// View and manage your watchlist
+#[poise::command(slash_command)]
+pub async fn watchlist(ctx: Context<'_>) -> Result<(), Error> {
     let data_ref = &ctx.data().users;
     let u = data_ref.get(&ctx.author().id).unwrap();
-    let mut user_data = u.write().await;
-    let count = user_data.stock.watchlist.len();
-    user_data.stock.watchlist.clear();
-    drop(user_data);
 
-    ctx.send(
-        poise::CreateReply::default().embed(
-            serenity::CreateEmbed::new()
-                .title("Watchlist")
-                .description(format!("Cleared **{}** ticker(s) from your watchlist.", count))
-                .color(data::EMBED_SUCCESS),
-        ),
-    )
-    .await?;
-    Ok(())
+    let tickers = { u.read().await.stock.watchlist.clone() };
+    let (mut embed, mut components) = build_watchlist_embed(&tickers).await;
+    let reply = ctx.send(poise::CreateReply::default().embed(embed.clone()).components(components.clone())).await?;
+
+    loop {
+        let msg = reply.message().await?;
+        let Some(press) = msg
+            .await_component_interaction(ctx.serenity_context())
+            .author_id(ctx.author().id)
+            .timeout(Duration::from_secs(60))
+            .await
+        else {
+            reply.edit(ctx, poise::CreateReply::default().embed(embed).components(vec![])).await?;
+            return Ok(());
+        };
+
+        match press.data.custom_id.as_str() {
+            "wl_add" => {
+                let Some(modal) = poise::execute_modal_on_component_interaction::<WatchlistAddModal>(
+                    ctx, press, None, Some(Duration::from_secs(30)),
+                ).await? else { continue; };
+
+                let query = modal.ticker.trim().to_string();
+                match resolve_ticker(&query).await {
+                    None => {
+                        reply.edit(ctx, poise::CreateReply::default().embed(
+                            serenity::CreateEmbed::new()
+                                .title("Watchlist — Add")
+                                .description(market_data_err(&query))
+                                .color(data::EMBED_ERROR),
+                        ).components(vec![])).await?;
+                        tokio::time::sleep(Duration::from_secs(3)).await;
+                    }
+                    Some(quote) => {
+                        let ticker = quote.symbol.clone();
+                        let result: Result<(), String> = {
+                            let mut ud = u.write().await;
+                            if ud.stock.watchlist.contains(&ticker) {
+                                Err(format!("**{}** is already on your watchlist.", ticker))
+                            } else if ud.stock.watchlist.len() >= 20 {
+                                Err("Watchlist is full (max 20 tickers).".to_string())
+                            } else {
+                                ud.stock.watchlist.push(ticker.clone());
+                                Ok(())
+                            }
+                        };
+                        if let Err(msg) = result {
+                            reply.edit(ctx, poise::CreateReply::default().embed(
+                                serenity::CreateEmbed::new()
+                                    .title("Watchlist — Add")
+                                    .description(msg)
+                                    .color(data::EMBED_ERROR),
+                            ).components(vec![])).await?;
+                            tokio::time::sleep(Duration::from_secs(3)).await;
+                        }
+                    }
+                }
+            }
+
+            "wl_remove" => {
+                let Some(modal) = poise::execute_modal_on_component_interaction::<WatchlistRemoveModal>(
+                    ctx, press, None, Some(Duration::from_secs(30)),
+                ).await? else { continue; };
+
+                let ticker = modal.ticker.trim().to_uppercase();
+                let removed = {
+                    let mut ud = u.write().await;
+                    let before = ud.stock.watchlist.len();
+                    ud.stock.watchlist.retain(|t| t != &ticker);
+                    ud.stock.watchlist.len() < before
+                };
+                if !removed {
+                    reply.edit(ctx, poise::CreateReply::default().embed(
+                        serenity::CreateEmbed::new()
+                            .title("Watchlist — Remove")
+                            .description(format!("**{}** is not on your watchlist.", ticker))
+                            .color(data::EMBED_ERROR),
+                    ).components(vec![])).await?;
+                    tokio::time::sleep(Duration::from_secs(3)).await;
+                }
+            }
+
+            "wl_clear" => {
+                press.defer(ctx.http()).await?;
+                { let mut ud = u.write().await; ud.stock.watchlist.clear(); }
+            }
+
+            _ => continue,
+        }
+
+        let tickers = { u.read().await.stock.watchlist.clone() };
+        (embed, components) = build_watchlist_embed(&tickers).await;
+        reply.edit(ctx, poise::CreateReply::default().embed(embed.clone()).components(components.clone())).await?;
+    }
 }
 
 // ── Trade History ─────────────────────────────────────────────────────────────
@@ -3203,6 +3135,7 @@ pub async fn options_buy(
                     option_type: opt_type.clone(),
                     contracts,
                     side: OptionSide::Long,
+                    collateral: 0.0,
                 }),
                 quantity,
                 avg_cost: cost_per_contract,
@@ -3565,6 +3498,9 @@ pub async fn options_write(
             }
         };
 
+        let premium_usd = creds_to_price(premium);
+        let mut collateral_locked = 0.0f64;
+
         match opt_type {
             OptionType::Call => {
                 let shares_held = port
@@ -3577,38 +3513,53 @@ pub async fn options_write(
                     .sum::<f64>();
                 let required = contracts as f64 * 100.0;
                 if shares_held < required {
-                    ctx.send(
-                        poise::CreateReply::default().embed(
-                            serenity::CreateEmbed::new()
-                                .title("Options Write")
-                                .description(format!(
-                                    "Covered call requires **{:.0} shares** of **{}** but **{}** only holds **{:.0} shares**.",
-                                    required, ticker, portfolio, shares_held
-                                ))
-                                .color(data::EMBED_ERROR),
-                        ),
-                    )
-                    .await?;
-                    return Ok(());
+                    let margin_usd = naked_margin_usd(&opt_type, price_usd, strike, contracts, premium_usd);
+                    let margin_creds = price_to_creds(margin_usd);
+                    let available = port.cash - port.locked_cash();
+                    if available < margin_creds {
+                        ctx.send(
+                            poise::CreateReply::default().embed(
+                                serenity::CreateEmbed::new()
+                                    .title("Options Write — Naked Call")
+                                    .description(format!(
+                                        "Naked call requires **${:.2}** margin ({:.0} creds) in **{}** but only **${:.2}** ({:.0} creds) is free.\n\n*Alternatively, hold **{:.0} shares** of **{}** to write a covered call.*",
+                                        margin_usd, margin_creds, portfolio,
+                                        creds_to_price(available), available,
+                                        required, ticker,
+                                    ))
+                                    .color(data::EMBED_ERROR),
+                            ),
+                        )
+                        .await?;
+                        return Ok(());
+                    }
+                    collateral_locked = margin_creds;
                 }
             }
             OptionType::Put => {
                 let required_cash = price_to_creds(strike * contracts as f64 * 100.0);
-                if port.cash < required_cash {
-                    ctx.send(
-                        poise::CreateReply::default().embed(
-                            serenity::CreateEmbed::new()
-                                .title("Options Write")
-                                .description(format!(
-                                    "Cash-secured put requires **${:.2}** ({:.0} creds) in **{}** but only **${:.2}** ({:.0} creds) available.",
-                                    creds_to_price(required_cash), required_cash, portfolio,
-                                    creds_to_price(port.cash), port.cash
-                                ))
-                                .color(data::EMBED_ERROR),
-                        ),
-                    )
-                    .await?;
-                    return Ok(());
+                let available = port.cash - port.locked_cash();
+                if available < required_cash {
+                    let margin_usd = naked_margin_usd(&opt_type, price_usd, strike, contracts, premium_usd);
+                    let margin_creds = price_to_creds(margin_usd);
+                    if available < margin_creds {
+                        ctx.send(
+                            poise::CreateReply::default().embed(
+                                serenity::CreateEmbed::new()
+                                    .title("Options Write — Naked Put")
+                                    .description(format!(
+                                        "Naked put requires **${:.2}** margin ({:.0} creds) in **{}** but only **${:.2}** ({:.0} creds) is free.\n\n*Alternatively, hold **${:.2}** ({:.0} creds) to write a cash-secured put.*",
+                                        margin_usd, margin_creds, portfolio,
+                                        creds_to_price(available), available,
+                                        creds_to_price(required_cash), required_cash,
+                                    ))
+                                    .color(data::EMBED_ERROR),
+                            ),
+                        )
+                        .await?;
+                        return Ok(());
+                    }
+                    collateral_locked = margin_creds;
                 }
             }
         }
@@ -3626,6 +3577,7 @@ pub async fn options_write(
             pos.quantity = total_q;
             if let AssetType::Option(c) = &mut pos.asset_type {
                 c.contracts += contracts;
+                c.collateral += collateral_locked;
             }
         } else {
             port.positions.push(Position {
@@ -3636,6 +3588,7 @@ pub async fn options_write(
                     option_type: opt_type.clone(),
                     contracts,
                     side: OptionSide::Short,
+                    collateral: collateral_locked,
                 }),
                 quantity: contracts as f64,
                 avg_cost: premium_per_contract,
@@ -3803,10 +3756,10 @@ pub async fn options_cover(
             }
         };
 
-        let held = if let AssetType::Option(c) = &port.positions[pos_idx].asset_type {
-            c.contracts
+        let (held, collateral_total) = if let AssetType::Option(c) = &port.positions[pos_idx].asset_type {
+            (c.contracts, c.collateral)
         } else {
-            0
+            (0, 0.0)
         };
 
         if contracts > held {
@@ -3825,15 +3778,18 @@ pub async fn options_cover(
             return Ok(());
         }
 
-        if port.cash < cost_to_close {
+        let collateral_to_release = collateral_total * (contracts as f64 / held as f64);
+        let available = port.cash - port.locked_cash() + collateral_to_release;
+
+        if available < cost_to_close {
             ctx.send(
                 poise::CreateReply::default().embed(
                     serenity::CreateEmbed::new()
                         .title("Options Cover")
                         .description(format!(
-                            "Insufficient cash. Need **${:.2}** ({:.0} creds) but **{}** has **${:.2}** ({:.0} creds).",
+                            "Insufficient cash. Need **${:.2}** ({:.0} creds) but **{}** only has **${:.2}** ({:.0} creds) available.",
                             creds_to_price(cost_to_close), cost_to_close,
-                            portfolio, creds_to_price(port.cash), port.cash
+                            portfolio, creds_to_price(available), available,
                         ))
                         .color(data::EMBED_ERROR),
                 ),
@@ -3854,6 +3810,7 @@ pub async fn options_cover(
             pos.quantity -= contracts as f64;
             if let AssetType::Option(c) = &mut pos.asset_type {
                 c.contracts -= contracts;
+                c.collateral -= collateral_to_release;
             }
         }
 
@@ -4424,7 +4381,7 @@ pub async fn professor_daily_session(
         .description(desc)
         .thumbnail("https://cdn.discordapp.com/attachments/1260223476766343188/1490778995980243105/Koro-sensei_goes_gangster.png?ex=69d54ba1&is=69d3fa21&hm=9a3bb34d8d2dfc5f3a478128ab59051c940f4bf68e393db7260f03682c2ed01b")
         .color(data::EMBED_CYAN)
-        .footer(serenity::CreateEmbedFooter::new("@~ powered by UwUntu & RustyBamboo"));
+        .footer(default_footer());
 
     let channel_id: u64 = match bot_chat.parse() {
         Ok(id) => id,
@@ -4473,7 +4430,7 @@ pub async fn professor(ctx: Context<'_>) -> Result<(), Error> {
             .title("Professor's Portfolio")
             .description(desc)
             .color(data::EMBED_CYAN)
-            .footer(serenity::CreateEmbedFooter::new("@~ powered by UwUntu & RustyBamboo")),
+            .footer(default_footer()),
     )).await?;
     Ok(())
 }

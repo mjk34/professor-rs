@@ -535,6 +535,16 @@ impl Portfolio {
             created_at: Utc::now(),
         }
     }
+
+    /// Sum of collateral locked across all naked short option positions.
+    pub fn locked_cash(&self) -> f64 {
+        self.positions.iter().filter_map(|p| {
+            if let AssetType::Option(c) = &p.asset_type {
+                if c.side == OptionSide::Short { return Some(c.collateral); }
+            }
+            None
+        }).sum()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -572,6 +582,9 @@ pub struct OptionContract {
     pub contracts: u32,
     #[serde(default = "default_long")]
     pub side: OptionSide,
+    /// Total creds locked as margin collateral for naked short positions. 0 for covered/cash-secured.
+    #[serde(default)]
+    pub collateral: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

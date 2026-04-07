@@ -11,7 +11,7 @@
 
 use crate::clips::check_mod;
 use crate::data::{self, Portfolio, StockProfile, TradeAction, TradeRecord, UserData};
-use crate::helper::parse_user_mention;
+use crate::helper::{default_footer, parse_user_mention};
 use crate::{serenity, Context, Error};
 use chrono::Utc;
 use poise::serenity_prelude::UserId;
@@ -305,7 +305,7 @@ pub async fn test_seed_data(
             .title("Test Data Seeded")
             .description(format!("Seeded **{}** guild members with randomized data.", inserted))
             .color(data::EMBED_MOD)
-            .footer(serenity::CreateEmbedFooter::new("@~ powered by UwUntu & RustyBamboo")),
+            .footer(default_footer()),
     )).await?;
 
     Ok(())

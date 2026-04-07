@@ -14,6 +14,7 @@
 //!---------------------------------------------------------------------!
 
 use crate::data::{self, VoiceUser};
+use crate::helper::default_footer;
 use crate::{serenity, Context, Error};
 use chrono::prelude::Utc;
 use poise::serenity_prelude::futures::StreamExt;
@@ -558,7 +559,7 @@ pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
             .description("Here lists the most accomplished in UwUversity!")
             .field("Rankings", text, false)
             .field("Page", format!("{}/{}", page + 1, total_pages.max(1)), false)
-            .footer(serenity::CreateEmbedFooter::new("@~ powered by UwUntu & RustyBamboo"))
+            .footer(default_footer())
     }
 
     let initial_embed = make_embed(&creds_info, Sort::Creds, 0, &creds_thumb);
@@ -621,7 +622,7 @@ pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
                     })
                     .color(data::EMBED_ERROR)
                     .description(empty_msg.unwrap_or("No data."))
-                    .footer(serenity::CreateEmbedFooter::new("@~ powered by UwUntu & RustyBamboo"))
+                    .footer(default_footer())
             } else {
                 let thumb = match current_sort {
                     Sort::Creds   => &creds_thumb,

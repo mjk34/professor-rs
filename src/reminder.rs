@@ -1,4 +1,5 @@
 use crate::data;
+use crate::helper::default_footer;
 use crate::serenity;
 use chrono::{Datelike, NaiveDate, TimeDelta, Utc};
 use poise::serenity_prelude::{ChannelId, CreateMessage};
@@ -124,9 +125,7 @@ pub async fn check_birthday(http: &serenity::Http) {
                             .title("Reminder")
                             .description(&desc)
                             .color(data::EMBED_CYAN)
-                            .footer(serenity::CreateEmbedFooter::new(
-                                "@~ powered by UwUntu & RustyBamboo",
-                            )),
+                            .footer(default_footer()),
                     ),
                 )
                 .await
@@ -154,9 +153,7 @@ pub async fn check_birthday(http: &serenity::Http) {
                             .title("Reminder")
                             .description(&desc)
                             .color(data::EMBED_CYAN)
-                            .footer(serenity::CreateEmbedFooter::new(
-                                "@~ powered by UwUntu & RustyBamboo",
-                            )),
+                            .footer(default_footer()),
                     ),
                 )
                 .await
