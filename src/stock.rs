@@ -7,9 +7,27 @@ use crate::data::{self, AssetType};
 use crate::helper::{creds_to_price, default_footer, fmt_qty, price_to_creds};
 use crate::trader::{apply_buy, apply_sell};
 use crate::{serenity, Context, Error};
+use poise::serenity_prelude::futures;
 use std::time::Duration;
 
 // ── Trade modals (used by /search buy/sell buttons) ───────────────────────────
+
+fn parse_trade_fields(data: &serenity::ModalInteractionData) -> (String, String) {
+    let mut portfolio = String::new();
+    let mut amount    = String::new();
+    for row in &data.components {
+        for comp in &row.components {
+            if let serenity::ActionRowComponent::InputText(t) = comp {
+                match t.custom_id.as_str() {
+                    "portfolio" => portfolio = t.value.clone().unwrap_or_default(),
+                    "amount"    => amount    = t.value.clone().unwrap_or_default(),
+                    _ => {}
+                }
+            }
+        }
+    }
+    (portfolio, amount)
+}
 
 struct BuyModal {
     portfolio: String,
@@ -57,19 +75,7 @@ impl poise::Modal for BuyModal {
     }
 
     fn parse(data: serenity::ModalInteractionData) -> Result<Self, &'static str> {
-        let mut portfolio = String::new();
-        let mut amount    = String::new();
-        for row in &data.components {
-            for comp in &row.components {
-                if let serenity::ActionRowComponent::InputText(t) = comp {
-                    match t.custom_id.as_str() {
-                        "portfolio" => portfolio = t.value.clone().unwrap_or_default(),
-                        "amount"    => amount    = t.value.clone().unwrap_or_default(),
-                        _ => {}
-                    }
-                }
-            }
-        }
+        let (portfolio, amount) = parse_trade_fields(&data);
         Ok(BuyModal { portfolio, amount, portfolio_info: String::new() })
     }
 }
@@ -114,19 +120,7 @@ impl poise::Modal for SellModal {
     }
 
     fn parse(data: serenity::ModalInteractionData) -> Result<Self, &'static str> {
-        let mut portfolio = String::new();
-        let mut amount    = String::new();
-        for row in &data.components {
-            for comp in &row.components {
-                if let serenity::ActionRowComponent::InputText(t) = comp {
-                    match t.custom_id.as_str() {
-                        "portfolio" => portfolio = t.value.clone().unwrap_or_default(),
-                        "amount"    => amount    = t.value.clone().unwrap_or_default(),
-                        _ => {}
-                    }
-                }
-            }
-        }
+        let (portfolio, amount) = parse_trade_fields(&data);
         Ok(SellModal { portfolio, amount, holdings_info: String::new() })
     }
 }
@@ -140,6 +134,7 @@ pub async fn search(
     #[description = "Ticker symbol — comma-separated for multiple (e.g. NVDA, AAPL, BTC-USD)"]
     query: String,
 ) -> Result<(), Error> {
+    ctx.defer().await?;
     let items: Vec<&str> = query.split(',').map(str::trim).filter(|s| !s.is_empty()).collect();
 
     if items.len() == 1 {
@@ -237,21 +232,17 @@ pub async fn search(
             })
         };
 
-        let mut btn_row = vec![
-            serenity::CreateButton::new("search_buy")
-                .label("Buy")
-                .style(serenity::ButtonStyle::Success),
-        ];
-        if has_position {
-            btn_row.push(
-                serenity::CreateButton::new("search_sell")
-                    .label("Sell")
-                    .style(serenity::ButtonStyle::Danger),
-            );
-        }
-        let buttons = vec![serenity::CreateActionRow::Buttons(btn_row)];
+        let make_buttons = |disabled: bool| {
+            let mut btns = vec![
+                serenity::CreateButton::new("search_buy").label("Buy").style(serenity::ButtonStyle::Success).disabled(disabled),
+            ];
+            if has_position {
+                btns.push(serenity::CreateButton::new("search_sell").label("Sell").style(serenity::ButtonStyle::Danger).disabled(disabled));
+            }
+            vec![serenity::CreateActionRow::Buttons(btns)]
+        };
         let reply = ctx.send(
-            poise::CreateReply::default().embed(embed.clone()).components(buttons),
+            poise::CreateReply::default().embed(embed.clone()).components(make_buttons(false)),
         ).await?;
         let msg = reply.message().await?;
 
@@ -305,12 +296,7 @@ pub async fn search(
 
             // Disable buttons while the modal is open so there's nothing to
             // accidentally click (avoids "Interaction failed" on re-click)
-            reply.edit(ctx, poise::CreateReply::default().embed(embed.clone()).components(vec![
-                serenity::CreateActionRow::Buttons(vec![
-                    serenity::CreateButton::new("search_buy").label("Buy").style(serenity::ButtonStyle::Success).disabled(true),
-                    serenity::CreateButton::new("search_sell").label("Sell").style(serenity::ButtonStyle::Danger).disabled(true),
-                ])
-            ])).await?;
+            reply.edit(ctx, poise::CreateReply::default().embed(embed.clone()).components(make_buttons(true))).await?;
 
             let modal_result = if is_buy {
                 let portfolio_info = {
@@ -354,12 +340,7 @@ pub async fn search(
 
             let Some((port_name, modal_amount)) = modal_result else {
                 // Modal dismissed — re-enable buttons
-                reply.edit(ctx, poise::CreateReply::default().embed(embed.clone()).components(vec![
-                    serenity::CreateActionRow::Buttons(vec![
-                        serenity::CreateButton::new("search_buy").label("Buy").style(serenity::ButtonStyle::Success),
-                        serenity::CreateButton::new("search_sell").label("Sell").style(serenity::ButtonStyle::Danger),
-                    ])
-                ])).await?;
+                reply.edit(ctx, poise::CreateReply::default().embed(embed.clone()).components(make_buttons(false))).await?;
                 continue;
             };
 
@@ -414,9 +395,7 @@ pub async fn search(
         };
 
         let asset_type = quote.asset_type();
-        let asset_name = display_name.clone();
         let price_per_unit = price_to_creds(price_usd);
-
 
         if is_buy {
             let qty = quantity_opt.unwrap_or_else(|| amount_opt.unwrap() / price_usd);
@@ -452,7 +431,7 @@ pub async fn search(
 
             {
                 let stock = &mut user_data.stock;
-                apply_buy(&mut stock.portfolios[port_idx], &mut stock.trade_history, &ticker, &asset_name, asset_type, qty, price_per_unit, total_cost, &port_name);
+                apply_buy(&mut stock.portfolios[port_idx], &mut stock.trade_history, &ticker, &display_name, asset_type, qty, price_per_unit, total_cost, &port_name);
             }
             drop(user_data);
 
@@ -462,7 +441,7 @@ pub async fn search(
                         .title("Buy")
                         .description(format!(
                             "Bought **{} {}** ({}) for **${:.2}** ({:.0} creds)\n${:.2}/unit | Portfolio: **{}**",
-                            fmt_qty(qty), ticker, asset_name, creds_to_price(total_cost), total_cost, price_usd, port_name,
+                            fmt_qty(qty), ticker, display_name, creds_to_price(total_cost), total_cost, price_usd, port_name,
                         ))
                         .color(data::EMBED_SUCCESS)
                         .footer(default_footer()),
@@ -504,7 +483,9 @@ pub async fn search(
             } else if let Some(pct) = sell_pct {
                 held * (pct / 100.0)
             } else {
-                quantity_opt.unwrap_or_else(|| amount_opt.unwrap() / price_usd)
+                let raw = quantity_opt.unwrap_or_else(|| amount_opt.unwrap() / price_usd);
+                // Snap to held if within fmt_qty display rounding (4 decimal places → 5e-5)
+                if (raw - held).abs() < 5e-5 { held } else { raw }
             };
 
             if qty > held + 1e-9 {
@@ -522,7 +503,7 @@ pub async fn search(
 
             let (proceeds, pnl) = {
                 let stock = &mut user_data.stock;
-                let pnl = apply_sell(&mut stock.portfolios[port_idx], &mut stock.trade_history, &ticker, &asset_name, qty, price_per_unit, &port_name).unwrap_or(0.0);
+                let pnl = apply_sell(&mut stock.portfolios[port_idx], &mut stock.trade_history, &ticker, &display_name, qty, price_per_unit, &port_name).unwrap_or(0.0);
                 (price_per_unit * qty, pnl)
             };
 
@@ -550,9 +531,12 @@ pub async fn search(
         }
     } else {
         // Compact multi-asset view (max 10)
+        let results = futures::future::join_all(
+            items.iter().take(10).map(|&q| async move { (q, resolve_ticker(q).await) })
+        ).await;
         let mut rows = Vec::new();
-        for q in items.into_iter().take(10) {
-            let Some(quote) = resolve_ticker(q).await else {
+        for (q, quote_opt) in results {
+            let Some(quote) = quote_opt else {
                 rows.push(format!("`{}` — could not resolve", q));
                 continue;
             };
@@ -659,11 +643,7 @@ pub async fn buy(
         }
     };
 
-    let asset_type = match quote.quote_type.as_deref() {
-        Some("ETF") => AssetType::ETF,
-        Some("CRYPTOCURRENCY") => AssetType::Crypto,
-        _ => AssetType::Stock,
-    };
+    let asset_type = quote.asset_type();
 
     let price_per_unit = price_to_creds(price_usd);
     let quantity = quantity.unwrap_or_else(|| amount.unwrap() / price_usd);
@@ -847,15 +827,17 @@ pub async fn sell(
         }
     };
 
+    let held = user_data.stock.portfolios[port_idx].positions[pos_idx].quantity;
     let quantity = if let Some(q) = quantity {
-        q
+        if (q - held).abs() < 5e-5 { held } else { q }
     } else if let Some(a) = amount {
-        a / price_usd
+        let raw = a / price_usd;
+        if (raw - held).abs() < 5e-5 { held } else { raw }
     } else {
-        user_data.stock.portfolios[port_idx].positions[pos_idx].quantity
+        held
     };
 
-    if user_data.stock.portfolios[port_idx].positions[pos_idx].quantity < quantity - 1e-9 {
+    if held < quantity - 1e-9 {
         ctx.send(
             poise::CreateReply::default().embed(
                 serenity::CreateEmbed::new()

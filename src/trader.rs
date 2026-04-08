@@ -308,6 +308,7 @@ pub async fn build_portfolio_view_embed(portfolio: &data::Portfolio, annual_rate
 /// View and manage your investment portfolios
 #[poise::command(slash_command)]
 pub async fn portfolio(ctx: Context<'_>) -> Result<(), Error> {
+    ctx.defer().await?;
     let fed_rate_val = *ctx.data().hysa_fed_rate.read().await;
     let data = &ctx.data().users;
     let u = data.get(&ctx.author().id).unwrap();

@@ -697,7 +697,7 @@ pub async fn options_write(
                     .map(|p| p.quantity)
                     .sum::<f64>();
                 let required = contracts as f64 * 100.0;
-                if shares_held < required {
+                if shares_held + 5e-5 < required {
                     let margin_usd = naked_margin_usd(&opt_type, price_usd, strike, contracts, premium_usd);
                     let margin_creds = price_to_creds(margin_usd);
                     let available = port.cash - port.locked_cash();

@@ -164,6 +164,7 @@ pub fn is_market_hours() -> bool {
 pub static HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
     reqwest::Client::builder()
         .user_agent("Mozilla/5.0 (compatible; professor-rs/1.0)")
+        .timeout(std::time::Duration::from_secs(10))
         .build()
         .unwrap_or_else(|_| reqwest::Client::new())
 });
