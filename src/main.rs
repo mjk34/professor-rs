@@ -1,10 +1,14 @@
+mod api;
 mod basic;
 mod clips;
 mod data;
 mod helper;
 mod mods;
+mod options;
+mod professor;
 mod reminder;
 mod stock;
+mod trader;
 
 use chrono::{Datelike, Timelike, Utc, Weekday};
 use dashmap::DashMap;
@@ -69,19 +73,19 @@ async fn main() {
                 mods::take_creds(),
                 mods::test_seed_data(),
                 mods::test_set_level(),
-                stock::portfolio(),
+                trader::portfolio(),
                 stock::search(),
                 stock::buy(),
                 stock::sell(),
-                stock::watchlist(),
-                stock::trades(),
-                stock::options_quote(),
-                stock::options_buy(),
-                stock::options_sell(),
-                stock::options_write(),
-                stock::options_cover(),
-                stock::professor(),
-                stock::test_professor(),
+                trader::watchlist(),
+                trader::trades(),
+                options::options_quote(),
+                options::options_buy(),
+                options::options_sell(),
+                options::options_write(),
+                options::options_cover(),
+                professor::professor(),
+                professor::test_professor(),
             ],
             prefix_options: poise::PrefixFrameworkOptions {
                 prefix: Some("~".into()),
@@ -100,8 +104,8 @@ async fn main() {
                 let hysa_rate = data.hysa_fed_rate.clone();
                 let bot_chat = data.bot_chat.clone();
                 background_task(users.clone(), voice_users);
-                stock::refresh_market_rate(&data.hysa_fed_rate).await;
-                stock::api_health_check().await;
+                api::refresh_market_rate(&data.hysa_fed_rate).await;
+                api::api_health_check().await;
                 maintenance_task(users.clone(), http.clone(), hysa_rate, bot_chat.clone());
 
                 // Seed Professor's UserData and start the daily AI trading task
@@ -271,10 +275,10 @@ fn maintenance_task(
             data::save_users(&users).await;
             let today = chrono::Utc::now().day();
             if today == 1 || today == 16 {
-                stock::refresh_market_rate(&hysa_rate).await;
+                api::refresh_market_rate(&hysa_rate).await;
             }
-            stock::apply_monthly_interest(&users, &hysa_rate).await;
-            stock::sweep_expired_options(&users, &http, &bot_chat).await;
+            api::apply_monthly_interest(&users, &hysa_rate).await;
+            api::sweep_expired_options(&users, &http, &bot_chat).await;
             tokio::time::sleep(std::time::Duration::from_secs(60 * 60 * 12)).await;
         }
     });
@@ -309,8 +313,8 @@ fn professor_task(
             }
             tokio::time::sleep(std::time::Duration::from_secs(secs_to_fire)).await;
 
-            if stock::is_market_open().await {
-                stock::professor_daily_session(&users, &http, &bot_chat, bot_user_id).await;
+            if api::is_market_open().await {
+                professor::professor_daily_session(&users, &http, &bot_chat, bot_user_id).await;
             }
 
             // Sleep until tomorrow 19:00 UTC (3:00 PM EDT)

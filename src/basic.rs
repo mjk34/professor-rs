@@ -14,7 +14,7 @@
 //!---------------------------------------------------------------------!
 
 use crate::data::{self, VoiceUser};
-use crate::helper::default_footer;
+use crate::helper::{creds_to_price, default_footer};
 use crate::{serenity, Context, Error};
 use chrono::prelude::Utc;
 use poise::serenity_prelude::futures::StreamExt;
@@ -44,9 +44,7 @@ pub async fn ping(ctx: Context<'_>) -> Result<(), Error> {
                 ))
                 .color(data::EMBED_CYAN)
                 .image(pong_image)
-                .footer(serenity::CreateEmbedFooter::new(
-                    "@~ powered by UwUntu & RustyBamboo",
-                )),
+                .footer(default_footer()),
         ),
     )
     .await?;
@@ -66,9 +64,7 @@ async fn send_gold_unlock(ctx: Context<'_>) -> Result<(), crate::Error> {
                 ))
                 .thumbnail(user.avatar_url().unwrap_or_default())
                 .color(data::EMBED_GOLD)
-                .footer(serenity::CreateEmbedFooter::new(
-                    "@~ powered by UwUntu & RustyBamboo",
-                )),
+                .footer(default_footer()),
         ),
     )
     .await?;
@@ -153,9 +149,7 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
                     .thumbnail(base_ref.unwrap().to_string())
                     .color(data::EMBED_DEFAULT)
                     .image(ponder_image)
-                    .footer(serenity::CreateEmbedFooter::new(
-                        "@~ powered by UwUntu & RustyBamboo",
-                    )),
+                    .footer(default_footer()),
             ),
         )
         .await?;
@@ -177,9 +171,7 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
                     .thumbnail(roll_ref.unwrap().to_string())
                     .color(roll_color)
                     .image(ponder_image)
-                    .footer(serenity::CreateEmbedFooter::new(
-                        "@~ powered by UwUntu & RustyBamboo",
-                    )),
+                    .footer(default_footer()),
             ),
         )
         .await?;
@@ -212,9 +204,7 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
                     ))
                     .thumbnail(user.avatar_url().unwrap_or_default())
                     .color(data::EMBED_LEVEL)
-                    .footer(serenity::CreateEmbedFooter::new(
-                        "@~ powered by UwUntu & RustyBamboo",
-                    )),
+                    .footer(default_footer()),
             ),
         )
         .await?;
@@ -257,9 +247,7 @@ pub async fn claim_bonus(ctx: Context<'_>) -> Result<(), Error> {
                         .thumbnail(base_ref.unwrap().to_string())
                         .color(data::EMBED_DEFAULT)
                         .image("https://cdn.discordapp.com/attachments/1260223476766343188/1262193927386038302/giphy.gif?ex=6695b532&is=669463b2&hm=62e2fb0cc811b9e5b198a44c4351ca8f5d28bcc728c10334c55ba6b2f00ad658&")
-                        .footer(serenity::CreateEmbedFooter::new(
-                            "@~ powered by UwUntu & RustyBamboo",
-                        )),
+                        .footer(default_footer()),
                 ),
             )
             .await?;
@@ -294,9 +282,7 @@ pub async fn claim_bonus(ctx: Context<'_>) -> Result<(), Error> {
                         .thumbnail(roll_ref.unwrap().to_string())
                         .color(roll_color)
                         .image("https://cdn.discordapp.com/attachments/1260223476766343188/1262191655323308053/19c237178769d1c1fe6cd44b3399afb61d2840b9_hq.gif?ex=6695b315&is=66946195&hm=43de96a5e0aac7f571a537420608f6a3b893831b5ccbc5bcdd3b74c9378bcaa8&")
-                        .footer(serenity::CreateEmbedFooter::new(
-                            "@~ powered by UwUntu & RustyBamboo",
-                        )),
+                        .footer(default_footer()),
                 ),
             )
             .await?;
@@ -320,9 +306,7 @@ pub async fn claim_bonus(ctx: Context<'_>) -> Result<(), Error> {
                         ))
                         .thumbnail(user.avatar_url().unwrap_or_default())
                         .color(data::EMBED_LEVEL)
-                        .footer(serenity::CreateEmbedFooter::new(
-                            "@~ powered by UwUntu & RustyBamboo",
-                        )),
+                        .footer(default_footer()),
                 ),
             )
             .await?;
@@ -338,9 +322,7 @@ pub async fn claim_bonus(ctx: Context<'_>) -> Result<(), Error> {
                             ))
                             .thumbnail(user.avatar_url().unwrap_or_default())
                             .color(data::EMBED_GOLD)
-                            .footer(serenity::CreateEmbedFooter::new(
-                                "@~ powered by UwUntu & RustyBamboo",
-                            )),
+                            .footer(default_footer()),
                     ),
                 )
                 .await?;
@@ -365,9 +347,7 @@ pub async fn claim_bonus(ctx: Context<'_>) -> Result<(), Error> {
                     .title("Claim Bonus")
                     .description(desc)
                     .color(data::EMBED_ERROR)
-                    .footer(serenity::CreateEmbedFooter::new(
-                        "@~ powered by UwUntu & RustyBamboo",
-                    ))
+                    .footer(default_footer())
                     .thumbnail("https://cdn.discordapp.com/attachments/1260223476766343188/1262191656124284999/f7WPkmj.jpeg?ex=6695b315&is=66946195&hm=552171d50e562072461dc76c8222e9791cd9931f2ee7252975f25ab0dc63b0e5&"),
             ),
         )
@@ -411,8 +391,8 @@ pub async fn wallet(ctx: Context<'_>) -> Result<(), Error> {
     let gold_badge = if level >= data::GOLD_LEVEL_THRESHOLD { "  ⭐ **Gold Status**" } else { "" };
 
     let desc = format!(
-        "**Level {}**{}  -  {}/{}\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\nDaily UwU........... . . . **{}**\nAverage Luck..... . . . **{}**\nClaim Bonus....... . . . **{}**\n\nTotal Creds: **{}** \u{3000}\u{3000}\u{2000}Tickets: **{}**\n",
-        level, gold_badge, xp, next_level, daily, luck, claim, creds, tickets
+        "**Level {}**{}  -  {}/{}\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\nDaily UwU........... . . . **{}**\nAverage Luck..... . . . **{}**\nClaim Bonus....... . . . **{}**\n\nTotal Creds: **{}** (${:.2}) \u{3000}\u{3000}\u{2000}Tickets: **{}**\n",
+        level, gold_badge, xp, next_level, daily, luck, claim, creds, creds_to_price(creds as f64), tickets
     );
 
     ctx.send(
@@ -422,9 +402,7 @@ pub async fn wallet(ctx: Context<'_>) -> Result<(), Error> {
                 .description(desc)
                 .thumbnail(user.avatar_url().unwrap_or_default().to_string())
                 .color(data::EMBED_GOLD)
-                .footer(serenity::CreateEmbedFooter::new(
-                    "@~ powered by UwUntu & RustyBamboo",
-                )),
+                .footer(default_footer()),
         ),
     )
     .await?;
@@ -760,9 +738,7 @@ pub async fn buy_tickets(ctx: Context<'_>) -> Result<(), Error> {
                         .title("Buy Tickets".to_string())
                         .description(&desc)
                         .colour(data::EMBED_DEFAULT)
-                        .footer(serenity::CreateEmbedFooter::new(
-                            "@~ powered by UwUntu & RustyBamboo",
-                        )),
+                        .footer(default_footer()),
                 )
                 .components(components),
         )
@@ -824,9 +800,7 @@ pub async fn buy_tickets(ctx: Context<'_>) -> Result<(), Error> {
                                             .description(&desc)
                                             .thumbnail("https://cdn.discordapp.com/attachments/1260223476766343188/1262203993245876244/tumblr_inline_pamkf7AfPf1s2a9fg_500.gif?ex=6695be92&is=66946d12&hm=49948cee0fd647192a40c9e88ad890cbbcb63724c460ee61964c99594c9c3a53&")
                                             .colour(data::EMBED_ERROR)
-                                            .footer(serenity::CreateEmbedFooter::new(
-                                                "@~ powered by UwUntu & RustyBamboo",
-                                            )),
+                                            .footer(default_footer()),
                                     )
                                     .components(Vec::new()),
                             )
@@ -850,9 +824,7 @@ pub async fn buy_tickets(ctx: Context<'_>) -> Result<(), Error> {
                                     ))
                                     .image("https://cdn.discordapp.com/attachments/1260223476766343188/1262202607980777662/tumblr_n8dtwljTrx1tt5tk6o1_500.gif?ex=6695bd48&is=66946bc8&hm=da981bf028647549f958bb60e30c9c2f5d4635b6b597c50fb58f50b1618f7619&")
                                     .color(data::EMBED_CYAN)
-                                    .footer(serenity::CreateEmbedFooter::new(
-                                        "@~ powered by UwUntu & RustyBamboo",
-                                    )),
+                                    .footer(default_footer()),
                             )
                             .components(Vec::new()),
                     )
@@ -877,9 +849,7 @@ pub async fn buy_tickets(ctx: Context<'_>) -> Result<(), Error> {
                             .title("Buy Tickets".to_string())
                             .description(&desc)
                             .colour(data::EMBED_ERROR)
-                            .footer(serenity::CreateEmbedFooter::new(
-                                "@~ powered by UwUntu & RustyBamboo",
-                            )),
+                            .footer(default_footer()),
                     )
                     .components(Vec::new()),
             )
@@ -1006,9 +976,7 @@ pub async fn info(ctx: Context<'_>) -> Result<(), Error> {
                     emojis
                 ))
                 .colour(data::EMBED_DEFAULT)
-                .footer(serenity::CreateEmbedFooter::new(
-                    "@~ powered by UwUntu & RustyBamboo",
-                )),
+                .footer(default_footer()),
         ),
     )
     .await?;

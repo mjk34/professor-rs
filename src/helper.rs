@@ -8,9 +8,11 @@
 //!     [ ] - fmt_qty / format_large_num                               !
 //!     [ ] - option_intrinsic / parse_option_type / option_type_str   !
 //!     [ ] - default_footer                                            !
+//!     [ ] - fmt_pnl / fmt_pct_change                                 !
+//!     [ ] - gold_hysa_rate / is_gold                                 !
 //!---------------------------------------------------------------------!
 
-use crate::data::OptionType;
+use crate::data::{OptionType, UserData, GOLD_LEVEL_THRESHOLD};
 use poise::serenity_prelude as serenity;
 
 pub fn parse_user_mention(user_mention: &str) -> Option<u64> {
@@ -72,4 +74,28 @@ pub fn option_type_str(ot: &OptionType) -> &'static str {
 
 pub fn default_footer() -> serenity::CreateEmbedFooter {
     serenity::CreateEmbedFooter::new("@~ powered by UwUntu & RustyBamboo")
+}
+
+pub fn fmt_pnl(pnl: f64) -> String {
+    if pnl >= 0.0 {
+        format!("▲ +${:.2}", creds_to_price(pnl))
+    } else {
+        format!("▼ -${:.2}", creds_to_price(pnl.abs()))
+    }
+}
+
+pub fn fmt_pct_change(value: f64, basis: f64) -> String {
+    if basis > 0.0 {
+        format!(" ({:+.1}%)", value / basis * 100.0)
+    } else {
+        String::new()
+    }
+}
+
+pub fn gold_hysa_rate(fed_rate: f64) -> f64 {
+    (fed_rate * 0.92).max(0.5)
+}
+
+pub fn is_gold(user_data: &UserData) -> bool {
+    user_data.get_level() >= GOLD_LEVEL_THRESHOLD
 }

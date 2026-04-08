@@ -35,9 +35,7 @@ async fn modify_creds(
                     .description("The max amount allowed is 100000.")
                     .image("https://cdn.discordapp.com/attachments/1196582162057662484/1205685838877433866/tenor_2.gif?ex=65d94570&is=65c6d070&hm=be06433cb7dd2c592468560dfffbc5ce6c294582db38f177028ba80a46f67a43&")
                     .color(data::EMBED_ERROR)
-                    .footer(serenity::CreateEmbedFooter::new(
-                        "@~ powered by UwUntu & RustyBamboo",
-                    )),
+                    .footer(default_footer()),
             ),
         )
         .await?;
@@ -135,9 +133,7 @@ async fn modify_creds(
                     .description(desc)
                     .image(image)
                     .color(data::EMBED_MOD)
-                    .footer(serenity::CreateEmbedFooter::new(
-                        "@~ powered by UwUntu & RustyBamboo",
-                    )),
+                    .footer(default_footer()),
             ),
     )
     .await?;
