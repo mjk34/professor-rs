@@ -3,12 +3,12 @@
 //!---------------------------------------------------------------------!
 
 use crate::data::{
-    self, AssetType, OptionContract, OptionSide, TradeAction, TradeRecord,
+    self, AssetType, OptionContract, OptionSide, OrderSide, PendingOrder, TradeAction, TradeRecord,
     TRADE_HISTORY_LIMIT,
 };
-use crate::helper::{creds_to_price, option_intrinsic, option_type_str, price_to_creds};
+use crate::helper::{creds_to_price, fmt_pnl, fmt_qty, option_intrinsic, option_type_str, price_to_creds};
 use crate::serenity;
-use chrono::{Datelike, Timelike, Utc, Weekday};
+use chrono::{DateTime, Datelike, Timelike, Utc, Weekday};
 use dashmap::DashMap;
 use poise::serenity_prelude::{futures, ChannelId, CreateMessage};
 use serde::Deserialize;
@@ -653,4 +653,215 @@ pub async fn is_market_open() -> bool {
     fetch_quote_detail("SPY").await
         .and_then(|q| Some(q.is_market_open()))
         .unwrap_or(false)
+}
+
+/// Returns the expiry for a new pending order: end of today at 20:00 UTC if market
+/// hasn't closed yet, otherwise end of the next weekday at 20:00 UTC.
+pub fn order_expiry() -> DateTime<Utc> {
+    let now = Utc::now();
+    let today_close = now
+        .date_naive()
+        .and_hms_opt(20, 0, 0)
+        .unwrap()
+        .and_utc();
+
+    // Use today if market hasn't closed yet (before 20:00 UTC on a weekday)
+    if now < today_close && !matches!(now.weekday(), Weekday::Sat | Weekday::Sun) {
+        return today_close;
+    }
+
+    // Walk forward to find the next weekday
+    let mut day = now.date_naive() + chrono::Duration::days(1);
+    loop {
+        if !matches!(day.weekday(), Weekday::Sat | Weekday::Sun) {
+            break;
+        }
+        day += chrono::Duration::days(1);
+    }
+    day.and_hms_opt(20, 0, 0).unwrap().and_utc()
+}
+
+/// Sweep pending orders: execute those whose conditions are met, expire stale ones.
+pub async fn sweep_pending_orders(
+    users: &UsersMap,
+    http: &Arc<serenity::Http>,
+    bot_chat: &str,
+) {
+    let channel = ChannelId::new(
+        bot_chat.parse::<u64>().expect("bot_chat must be a valid u64"),
+    );
+    let now = Utc::now();
+
+    // ── Phase 1: snapshot eligible orders (no await inside lock) ─────────────
+    struct OrderSnapshot {
+        user_id: serenity::UserId,
+        order: PendingOrder,
+    }
+    let mut snapshots: Vec<OrderSnapshot> = Vec::new();
+
+    for entry in users.iter() {
+        let user_id = *entry.key();
+        let guard = entry.value().read().await;
+        for order in &guard.stock.pending_orders {
+            snapshots.push(OrderSnapshot { user_id, order: order.clone() });
+        }
+    }
+
+    if snapshots.is_empty() {
+        return;
+    }
+
+    // ── Phase 2: fetch prices concurrently (no locks held) ──────────────────
+    let unique_tickers: Vec<String> = {
+        let mut seen = std::collections::HashSet::new();
+        snapshots.iter().map(|s| s.order.ticker.clone()).filter(|t| seen.insert(t.clone())).collect()
+    };
+
+    let prices: std::collections::HashMap<String, f64> = futures::future::join_all(
+        unique_tickers.iter().map(|t| { let t = t.clone(); async move { (t.clone(), fetch_price(&t).await.unwrap_or(0.0)) } })
+    ).await.into_iter().filter(|(_, p)| *p > 0.0).collect();
+
+    // ── Phase 3: execute or expire under write lock ──────────────────────────
+    for snap in &snapshots {
+        let price_usd = match prices.get(&snap.order.ticker) {
+            Some(&p) => p,
+            None => continue, // can't price it, skip this cycle
+        };
+
+        let expired = now >= snap.order.expiry;
+        let triggered = match snap.order.side {
+            OrderSide::Buy => match snap.order.limit_price {
+                Some(lp) => price_usd <= lp,
+                None => true, // market order — execute at open
+            },
+            OrderSide::Sell => match snap.order.limit_price {
+                Some(lp) => price_usd >= lp,
+                None => true,
+            },
+        };
+
+        if !triggered && !expired {
+            continue;
+        }
+
+        let entry = match users.get(&snap.user_id) {
+            Some(e) => e,
+            None => continue,
+        };
+        let mut user_data = entry.value().write().await;
+
+        // Confirm the order is still present (could have been cancelled)
+        let order_idx = match user_data.stock.pending_orders.iter().position(|o| o.id == snap.order.id) {
+            Some(i) => i,
+            None => continue,
+        };
+
+        if expired {
+            user_data.stock.pending_orders.remove(order_idx);
+            drop(user_data);
+            let msg = format!(
+                "<@{}> Your **{} {}** order (#{}) expired.",
+                snap.user_id, snap.order.side.label(), snap.order.ticker, snap.order.id,
+            );
+            let _ = channel.send_message(http, CreateMessage::new().content(msg)).await;
+            continue;
+        }
+
+        // Triggered — execute
+        let order = user_data.stock.pending_orders.remove(order_idx);
+        let price_per_unit = price_to_creds(price_usd);
+
+        let msg = match order.side {
+            OrderSide::Buy => {
+                let total_cost = price_per_unit * order.quantity;
+                let port_idx = user_data.stock.portfolios.iter().position(|p| p.name == order.portfolio_name);
+                match port_idx {
+                    Some(idx) if user_data.stock.portfolios[idx].cash >= total_cost => {
+                        let stock = &mut user_data.stock;
+                        crate::trader::apply_buy(
+                            &mut stock.portfolios[idx],
+                            &mut stock.trade_history,
+                            &order.ticker,
+                            &order.asset_name,
+                            order.asset_type.clone(),
+                            order.quantity,
+                            price_per_unit,
+                            total_cost,
+                            &order.portfolio_name,
+                        );
+                        format!(
+                            "<@{}> Limit buy filled: **{} {}** @ **${:.2}**/unit (${:.2} total) in **{}**.",
+                            snap.user_id, fmt_qty(order.quantity), order.ticker, price_usd,
+                            creds_to_price(total_cost), order.portfolio_name,
+                        )
+                    }
+                    Some(_) => {
+                        format!(
+                            "<@{}> Limit buy **{}** (#{}) cancelled — insufficient cash in **{}**.",
+                            snap.user_id, order.ticker, order.id, order.portfolio_name,
+                        )
+                    }
+                    None => {
+                        format!(
+                            "<@{}> Limit buy **{}** (#{}) cancelled — portfolio **{}** not found.",
+                            snap.user_id, order.ticker, order.id, order.portfolio_name,
+                        )
+                    }
+                }
+            }
+            OrderSide::Sell => {
+                let port_idx = user_data.stock.portfolios.iter().position(|p| p.name == order.portfolio_name);
+                match port_idx {
+                    Some(idx) => {
+                        let held = user_data.stock.portfolios[idx].positions.iter()
+                            .find(|p| p.ticker == order.ticker && !matches!(&p.asset_type, AssetType::Option(_)))
+                            .map(|p| p.quantity)
+                            .unwrap_or(0.0);
+                        let qty = if (order.quantity - held).abs() < 5e-5 { held } else { order.quantity };
+                        if held < qty - 1e-9 {
+                            format!(
+                                "<@{}> Limit sell **{}** (#{}) cancelled — only hold {} but order was for {}.",
+                                snap.user_id, order.ticker, order.id, fmt_qty(held), fmt_qty(qty),
+                            )
+                        } else {
+                            let proceeds = price_per_unit * qty;
+                            let stock = &mut user_data.stock;
+                            let pnl = crate::trader::apply_sell(
+                                &mut stock.portfolios[idx],
+                                &mut stock.trade_history,
+                                &order.ticker,
+                                &order.asset_name,
+                                qty,
+                                price_per_unit,
+                                &order.portfolio_name,
+                            ).unwrap_or(0.0);
+                            format!(
+                                "<@{}> Limit sell filled: **{} {}** @ **${:.2}**/unit (${:.2}) | P&L: **{}** | Portfolio: **{}**.",
+                                snap.user_id, fmt_qty(qty), order.ticker, price_usd,
+                                creds_to_price(proceeds), fmt_pnl(pnl), order.portfolio_name,
+                            )
+                        }
+                    }
+                    None => {
+                        format!(
+                            "<@{}> Limit sell **{}** (#{}) cancelled — portfolio **{}** not found.",
+                            snap.user_id, order.ticker, order.id, order.portfolio_name,
+                        )
+                    }
+                }
+            }
+        };
+
+        drop(user_data);
+        let _ = channel.send_message(http, CreateMessage::new().content(msg)).await;
+    }
+}
+
+impl OrderSide {
+    pub fn label(&self) -> &'static str {
+        match self {
+            OrderSide::Buy => "buy",
+            OrderSide::Sell => "sell",
+        }
+    }
 }

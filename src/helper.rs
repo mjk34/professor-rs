@@ -84,6 +84,11 @@ pub fn fmt_pnl(pnl: f64) -> String {
     }
 }
 
+pub fn fmt_limit_tag(lp: Option<f64>) -> String {
+    lp.map(|p| format!("@ limit **${:.2}**", p))
+        .unwrap_or_else(|| "@ market".to_string())
+}
+
 pub fn fmt_pct_change(value: f64, basis: f64) -> String {
     if basis > 0.0 {
         format!(" ({:+.1}%)", value / basis * 100.0)

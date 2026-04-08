@@ -26,6 +26,7 @@ pub struct ProfessorMemory {
 pub const GOLD_LEVEL_THRESHOLD: i32 = 10;
 pub const BASE_HYSA_RATE: f64 = 0.1;  // annual % for non-gold users
 pub const TRADE_HISTORY_LIMIT: usize = 500;
+pub const MAX_PENDING_ORDERS: usize = 20;
 
 // Constants
 pub const NUMBER_EMOJS: [&str; 10] = [
@@ -514,6 +515,10 @@ pub struct StockProfile {
     pub portfolios: Vec<Portfolio>,
     pub trade_history: VecDeque<TradeRecord>,
     pub watchlist: Vec<String>,
+    #[serde(default)]
+    pub pending_orders: Vec<PendingOrder>,
+    #[serde(default)]
+    pub next_order_id: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -610,4 +615,24 @@ pub struct TradeRecord {
 pub enum TradeAction {
     Buy,
     Sell,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum OrderSide {
+    Buy,
+    Sell,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PendingOrder {
+    pub id: u32,
+    pub side: OrderSide,
+    pub ticker: String,
+    pub asset_name: String,
+    pub asset_type: AssetType,
+    pub portfolio_name: String,
+    pub quantity: f64,
+    /// None = market order (queued for next open); Some = limit price in USD
+    pub limit_price: Option<f64>,
+    pub expiry: DateTime<Utc>,
 }

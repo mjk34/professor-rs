@@ -3,7 +3,7 @@
 //!---------------------------------------------------------------------!
 
 use crate::api::{fetch_price, fetch_quote_detail, market_data_err};
-use crate::data::{self, AssetType, Portfolio, Position, TradeAction, TradeRecord, TRADE_HISTORY_LIMIT};
+use crate::data::{self, AssetType, PendingOrder, Portfolio, Position, TradeAction, TradeRecord, TRADE_HISTORY_LIMIT};
 use crate::helper::{creds_to_price, default_footer, fmt_qty, option_intrinsic, price_to_creds};
 use crate::{serenity, Context, Error};
 use chrono::Utc;
@@ -210,7 +210,7 @@ pub async fn build_portfolio_picker(
     (embed, components)
 }
 
-pub async fn build_portfolio_view_embed(portfolio: &data::Portfolio, annual_rate: f64) -> serenity::CreateEmbed {
+pub async fn build_portfolio_view_embed(portfolio: &data::Portfolio, pending_orders: &[PendingOrder], annual_rate: f64) -> serenity::CreateEmbed {
     let daily_accrual = (annual_rate / 100.0 / 365.0) * portfolio.cash;
 
     let unique_tickers: Vec<String> = {
@@ -294,6 +294,25 @@ pub async fn build_portfolio_view_embed(portfolio: &data::Portfolio, annual_rate
                 }
             }
         }
+    }
+
+    if !pending_orders.is_empty() {
+        desc += "\n**Queued:**\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n";
+        for (i, order) in pending_orders.iter().take(5).enumerate() {
+            let limit_tag = order.limit_price
+                .map(|lp| format!("limit ${:.2}", lp))
+                .unwrap_or_else(|| "market".to_string());
+            desc += &format!(
+                "{} — {} {} {} | {} | expires: <t:{}:R>\n",
+                data::NUMBER_EMOJS[(i + 1).min(9)],
+                order.side.label().to_uppercase(),
+                fmt_qty(order.quantity),
+                order.ticker,
+                limit_tag,
+                order.expiry.timestamp(),
+            );
+        }
+        desc += "\n*Use ❌1️⃣ ❌2️⃣ … below to cancel a queued order.*";
     }
 
     serenity::CreateEmbed::new()
@@ -579,10 +598,18 @@ pub async fn portfolio(ctx: Context<'_>) -> Result<(), Error> {
             };
 
             'view: loop {
-                let port_opt = { u.read().await.stock.portfolios.iter().find(|p| p.name == port_name).cloned() };
+                let (port_opt, port_orders) = {
+                    let ud = u.read().await;
+                    let port = ud.stock.portfolios.iter().find(|p| p.name == port_name).cloned();
+                    let orders: Vec<PendingOrder> = ud.stock.pending_orders.iter()
+                        .filter(|o| o.portfolio_name == port_name)
+                        .cloned()
+                        .collect();
+                    (port, orders)
+                };
                 let Some(port) = port_opt else { continue 'picker; };
 
-                let embed = build_portfolio_view_embed(&port, annual_rate).await;
+                let embed = build_portfolio_view_embed(&port, &port_orders, annual_rate).await;
                 let mut view_btns = vec![
                     serenity::CreateButton::new("pv_back").label("↩ Back").style(serenity::ButtonStyle::Secondary),
                     serenity::CreateButton::new("pv_fund").label("Fund").style(serenity::ButtonStyle::Success),
@@ -591,7 +618,15 @@ pub async fn portfolio(ctx: Context<'_>) -> Result<(), Error> {
                     view_btns.push(serenity::CreateButton::new("pv_withdraw").label("Withdraw").style(serenity::ButtonStyle::Primary));
                 }
                 view_btns.push(serenity::CreateButton::new("pv_delete").label("Delete").style(serenity::ButtonStyle::Danger));
-                let action_buttons = vec![serenity::CreateActionRow::Buttons(view_btns)];
+                let mut action_buttons = vec![serenity::CreateActionRow::Buttons(view_btns)];
+                if !port_orders.is_empty() {
+                    let cancel_btns: Vec<serenity::CreateButton> = port_orders.iter().take(5).enumerate().map(|(i, o)| {
+                        serenity::CreateButton::new(format!("pv_cancel_{}", o.id))
+                            .label(format!("❌{}", data::NUMBER_EMOJS[(i + 1).min(9)]))
+                            .style(serenity::ButtonStyle::Secondary)
+                    }).collect();
+                    action_buttons.push(serenity::CreateActionRow::Buttons(cancel_btns));
+                }
                 reply.edit(ctx, poise::CreateReply::default().embed(embed.clone()).components(action_buttons)).await?;
 
                 let msg2 = reply.message().await?;
@@ -819,6 +854,18 @@ pub async fn portfolio(ctx: Context<'_>) -> Result<(), Error> {
                                 }
                             }
                         }
+                    }
+
+                    id if id.starts_with("pv_cancel_") => {
+                        action.defer(ctx.http()).await?;
+                        let order_id: u32 = id.strip_prefix("pv_cancel_")
+                            .and_then(|s| s.parse().ok())
+                            .unwrap_or(u32::MAX);
+                        {
+                            let mut ud = u.write().await;
+                            ud.stock.pending_orders.retain(|o| o.id != order_id);
+                        }
+                        continue 'view;
                     }
 
                     _ => {}

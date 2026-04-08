@@ -75,8 +75,9 @@ async fn main() {
                 mods::test_set_level(),
                 trader::portfolio(),
                 stock::search(),
-                stock::buy(),
-                stock::sell(),
+                // /buy and /sell hidden — users go through /search interface
+                // stock::buy(),
+                // stock::sell(),
                 trader::watchlist(),
                 trader::trades(),
                 options::options_quote(),
@@ -138,7 +139,8 @@ async fn main() {
                     }
                 }
 
-                professor_task(users, http, bot_chat, bot_user_id);
+                professor_task(users.clone(), http.clone(), bot_chat.clone(), bot_user_id);
+                pending_orders_task(users, http, bot_chat);
                 Ok(data)
             })
         })
@@ -322,6 +324,21 @@ fn professor_task(
             let elapsed = now2.hour() as u64 * 3600 + now2.minute() as u64 * 60 + now2.second() as u64;
             let secs_to_next = 86_400 - elapsed + 19 * 3600;
             tokio::time::sleep(std::time::Duration::from_secs(secs_to_next)).await;
+        }
+    });
+}
+
+fn pending_orders_task(
+    users: Arc<DashMap<serenity::UserId, Arc<RwLock<UserData>>>>,
+    http: Arc<serenity::Http>,
+    bot_chat: String,
+) {
+    tokio::spawn(async move {
+        loop {
+            if api::is_market_hours() {
+                api::sweep_pending_orders(&users, &http, &bot_chat).await;
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(60 * 30)).await;
         }
     });
 }
