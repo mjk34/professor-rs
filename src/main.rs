@@ -29,7 +29,11 @@ async fn register(ctx: Context<'_>) -> Result<(), Error> {
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::new("info,serenity::gateway=off"),
+        )
+        .init();
     dotenvy::dotenv().expect("Failed to read .env file");
     let token = env::var("DISCORD_TOKEN").expect("missing DISCORD_TOKEN");
     let mut data = data::Data::load();
@@ -294,36 +298,27 @@ fn professor_task(
 ) {
     tokio::spawn(async move {
         loop {
+            // Sleep until the next 19:00 UTC — always sleep first to avoid the boundary
+            // case where waking at exactly 19:00 causes secs_until_hm to return 0 and skip.
             let now = chrono::Utc::now();
-
-            // Skip weekends
-            if matches!(now.weekday(), Weekday::Sat | Weekday::Sun) {
-                let days_until_mon: u64 = if now.weekday() == Weekday::Sat { 2 } else { 1 };
-                let secs = days_until_mon * 86_400 + secs_until_hm(now.hour(), now.minute(), 19, 0);
-                tokio::time::sleep(std::time::Duration::from_secs(secs)).await;
-                continue;
-            }
-
-            // Fire at 19:00 UTC on weekdays (3:00 PM EDT)
-            let secs_to_fire = secs_until_hm(now.hour(), now.minute(), 19, 0);
-            if secs_to_fire == 0 {
-                // Already past 17:00 today — sleep until tomorrow 17:00 and loop
-                let elapsed = now.hour() as u64 * 3600 + now.minute() as u64 * 60 + now.second() as u64;
-                let secs_to_next = 86_400 - elapsed + 19 * 3600;
-                tokio::time::sleep(std::time::Duration::from_secs(secs_to_next)).await;
-                continue;
-            }
+            let cur_secs = now.hour() as u64 * 3600 + now.minute() as u64 * 60 + now.second() as u64;
+            let target_secs = 19u64 * 3600;
+            let secs_to_fire = if cur_secs < target_secs {
+                target_secs - cur_secs
+            } else {
+                86_400 - cur_secs + target_secs
+            };
             tokio::time::sleep(std::time::Duration::from_secs(secs_to_fire)).await;
+
+            // Skip weekends — loop again so we sleep to the next 19:00
+            let now = chrono::Utc::now();
+            if matches!(now.weekday(), Weekday::Sat | Weekday::Sun) {
+                continue;
+            }
 
             if api::is_market_open().await {
                 professor::professor_daily_session(&users, &http, &bot_chat, bot_user_id).await;
             }
-
-            // Sleep until tomorrow 19:00 UTC (3:00 PM EDT)
-            let now2 = chrono::Utc::now();
-            let elapsed = now2.hour() as u64 * 3600 + now2.minute() as u64 * 60 + now2.second() as u64;
-            let secs_to_next = 86_400 - elapsed + 19 * 3600;
-            tokio::time::sleep(std::time::Duration::from_secs(secs_to_next)).await;
         }
     });
 }
