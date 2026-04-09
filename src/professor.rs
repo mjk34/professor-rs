@@ -28,6 +28,10 @@ pub static PULSE_CACHE: LazyLock<tokio::sync::RwLock<Option<(chrono::NaiveDate, 
 pub static MIDDAY_CACHE: LazyLock<tokio::sync::RwLock<Option<(chrono::NaiveDate, String)>>> =
     LazyLock::new(|| tokio::sync::RwLock::new(None));
 
+/// Tracks the last UTC date the professor session ran — prevents double-firing on restart.
+pub static LAST_SESSION_DATE: LazyLock<tokio::sync::RwLock<Option<chrono::NaiveDate>>> =
+    LazyLock::new(|| tokio::sync::RwLock::new(None));
+
 // ── Finnhub / Claude structs ──────────────────────────────────────────────────
 
 #[derive(Deserialize)]
@@ -253,8 +257,24 @@ pub async fn professor_daily_session(
     bot_chat: &str,
     bot_user_id: serenity::UserId,
 ) {
-    // [TEST] market open guard disabled
-    // let market_open = is_market_open().await;
+    let today = Utc::now().date_naive();
+
+    // Daily guard — skip if we already ran today (protects against double-fire on restart)
+    {
+        let last = LAST_SESSION_DATE.read().await;
+        if *last == Some(today) {
+            tracing::info!("[Professor] Already ran today ({today}) — skipping");
+            return;
+        }
+    }
+
+    // Market guard — skip if market is closed
+    if !crate::api::is_market_open().await {
+        tracing::info!("[Professor] Market closed — skipping session");
+        return;
+    }
+
+    *LAST_SESSION_DATE.write().await = Some(today);
 
     let u = match users.get(&bot_user_id) {
         Some(u) => u,
@@ -322,9 +342,6 @@ pub async fn professor_daily_session(
         (uwu_creds, claim_creds, memory, snap, tickers, pre_trade_cash_usd, pre_trade_positions)
     };
 
-
-    // [TEST] market closed early return disabled
-    // if !market_open { ... }
 
     let headlines = fetch_market_news().await;
     let pulse = morning_pulse(&headlines, &memory).await;
