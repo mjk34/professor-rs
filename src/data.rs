@@ -1,6 +1,8 @@
+//! Shared bot state, user data models, and global constants.
 use crate::serenity;
 use chrono::prelude::{DateTime, Utc};
 use dashmap::DashMap;
+use std::collections::VecDeque;
 use poise::serenity_prelude::RoleId;
 use serde::{Deserialize, Serialize};
 use serenity::Color;
@@ -8,7 +10,28 @@ use std::sync::Arc;
 use std::{env, fs};
 use tokio::sync::RwLock;
 
-// Constants
+// Professor AI memory
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryEntry {
+    pub date: DateTime<Utc>,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ProfessorMemory {
+    pub core_behavior: String,
+    pub entries: VecDeque<MemoryEntry>,
+}
+
+/// Minimum level required to unlock Gold Status and the elevated HYSA rate.
+pub const GOLD_LEVEL_THRESHOLD: i32 = 10;
+/// Annual HYSA interest rate (as a fraction) applied to uninvested cash for non-gold users.
+pub const BASE_HYSA_RATE: f64 = 0.1;
+/// Maximum number of trade history records retained per user before oldest entries are dropped.
+pub const TRADE_HISTORY_LIMIT: usize = 500;
+/// Maximum number of pending (queued) orders a user may have at once.
+pub const MAX_PENDING_ORDERS: usize = 20;
+
 pub const NUMBER_EMOJS: [&str; 10] = [
     "\u{0030}\u{FE0F}\u{20E3}",
     "\u{0031}\u{FE0F}\u{20E3}",
@@ -22,16 +45,15 @@ pub const NUMBER_EMOJS: [&str; 10] = [
     "\u{0039}\u{FE0F}\u{20E3}",
 ];
 
-pub const EMBED_DEFAULT: Color = Color::new(16119285); // white - transition color
-pub const EMBED_CYAN: Color = Color::new(6943230); // cyan  - good finish color
+pub const EMBED_DEFAULT: Color = Color::new(16_119_285); // white - transition color
+pub const EMBED_CYAN: Color = Color::new(6_943_230); // cyan  - good finish color
 pub const EMBED_GOLD: Color = Color::GOLD; // gold - cred related color
 pub const EMBED_FAIL: Color = Color::RED; // red - absolute fails
 pub const EMBED_LEVEL: Color = Color::ORANGE; // orange - level/xp related color
-pub const EMBED_SUCCESS: Color = Color::new(65280); // green - major success
-pub const EMBED_ERROR: Color = Color::new(6053215); // grey - soft fails
-pub const EMBED_MOD: Color = Color::new(16749300); // pink - moderator commands
+pub const EMBED_SUCCESS: Color = Color::new(65_280); // green - major success
+pub const EMBED_ERROR: Color = Color::new(6_053_215); // grey - soft fails
+pub const EMBED_MOD: Color = Color::new(16_749_300); // pink - moderator commands
 
-// General Structures
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct ClipData {
     pub title: String,
@@ -42,7 +64,7 @@ pub struct ClipData {
 
 impl ClipData {
     pub fn new(title: String, link: String) -> Self {
-        ClipData {
+        Self {
             title,
             link,
             date: Utc::now(),
@@ -51,7 +73,6 @@ impl ClipData {
     }
 }
 
-// User profile
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct UserData {
     level: i32,
@@ -65,14 +86,22 @@ pub struct UserData {
 
     pub submits: Vec<Option<ClipData>>,
     tickets: i32,
+
+    pub stock: StockProfile,
+
+    #[serde(default)]
+    pub professor_memory: Option<ProfessorMemory>,
+
+    #[serde(default)]
+    recent_rolls: VecDeque<i32>,
 }
 
 impl UserData {
-    pub fn update_level(&mut self) {
+    pub const fn update_level(&mut self) {
         self.level += 1;
     }
 
-    pub fn update_xp(&mut self, xp: i32) -> bool {
+    pub const fn update_xp(&mut self, xp: i32) -> bool {
         if xp < 0 {
             return false;
         }
@@ -94,7 +123,7 @@ impl UserData {
         self.daily_count += 1;
     }
 
-    pub fn add_rolls(&mut self, roll: i32) -> bool {
+    pub const fn add_rolls(&mut self, roll: i32) -> bool {
         if roll < 1 {
             return false;
         }
@@ -112,15 +141,15 @@ impl UserData {
         self.bonus_count = (self.bonus_count + 1).min(3);
     }
 
-    pub fn reset_bonus(&mut self) {
+    pub const fn reset_bonus(&mut self) {
         self.bonus_count = 0;
     }
 
-    pub fn check_claim(&self) -> bool {
+    pub const fn check_claim(&self) -> bool {
         matches!(self.bonus_count, 3)
     }
 
-    pub fn add_creds(&mut self, creds: i32) -> bool {
+    pub const fn add_creds(&mut self, creds: i32) -> bool {
         if creds < 0 {
             return false;
         }
@@ -129,7 +158,7 @@ impl UserData {
         true
     }
 
-    pub fn sub_creds(&mut self, creds: i32) -> bool {
+    pub const fn sub_creds(&mut self, creds: i32) -> bool {
         if creds < 0 {
             return false;
         }
@@ -137,7 +166,7 @@ impl UserData {
         true
     }
 
-    pub fn add_tickets(&mut self, tickets: i32) -> bool {
+    pub const fn add_tickets(&mut self, tickets: i32) -> bool {
         if tickets < 1 {
             return false;
         }
@@ -146,11 +175,11 @@ impl UserData {
         true
     }
 
-    pub fn get_creds(&self) -> i32 {
+    pub const fn get_creds(&self) -> i32 {
         self.creds
     }
 
-    pub fn get_tickets(&self) -> i32 {
+    pub const fn get_tickets(&self) -> i32 {
         self.tickets
     }
 
@@ -164,11 +193,11 @@ impl UserData {
         if average < 6 {
             luck = "Horrible".to_string();
         } else if (6..9).contains(&average) {
-            luck = "Below Average".to_string();
+            luck = "Bad".to_string();
         } else if (9..12).contains(&average) {
             luck = "Average".to_string();
         } else if (12..15).contains(&average) {
-            luck = "Above Average".to_string();
+            luck = "Good".to_string();
         } else {
             luck = "Blessed".to_string();
         }
@@ -176,23 +205,55 @@ impl UserData {
         luck
     }
 
-    pub fn get_luck_score(&self) -> i32 {
+    pub const fn get_luck_score(&self) -> i32 {
         self.rolls / (self.daily_count + 1)
     }
 
-    pub fn get_bonus(&self) -> i32 {
+    pub fn push_roll(&mut self, d20: i32) {
+        if self.recent_rolls.len() >= 7 {
+            self.recent_rolls.pop_front();
+        }
+        self.recent_rolls.push_back(d20);
+    }
+
+    pub fn get_rolling_luck_score(&self) -> i32 {
+        if self.recent_rolls.is_empty() {
+            return 0;
+        }
+        self.recent_rolls.iter().sum::<i32>() / self.recent_rolls.len() as i32
+    }
+
+    pub fn get_rolling_luck(&self) -> String {
+        if self.recent_rolls.is_empty() {
+            return "N/A".to_string();
+        }
+        let average = self.get_rolling_luck_score();
+        if average < 6 {
+            "Horrible".to_string()
+        } else if (6..9).contains(&average) {
+            "Bad".to_string()
+        } else if (9..12).contains(&average) {
+            "Average".to_string()
+        } else if (12..15).contains(&average) {
+            "Good".to_string()
+        } else {
+            "Blessed".to_string()
+        }
+    }
+
+    pub const fn get_bonus(&self) -> i32 {
         self.bonus_count
     }
 
-    pub fn get_level(&self) -> i32 {
+    pub const fn get_level(&self) -> i32 {
         self.level
     }
 
-    pub fn get_xp(&self) -> i32 {
+    pub const fn get_xp(&self) -> i32 {
         self.xp
     }
 
-    pub fn get_next_level(&self) -> i32 {
+    pub const fn get_next_level(&self) -> i32 {
         500 + self.get_level() * 80
     }
 
@@ -213,8 +274,8 @@ impl UserData {
     }
 
     pub fn remove_submit(&mut self, submit_index: usize) -> bool {
-        let res = self.submits.remove(submit_index);
-        res.is_some()
+        if submit_index >= self.submits.len() { return false; }
+        self.submits.remove(submit_index).is_some()
     }
 
     pub fn get_submissions(&self, show_score: bool, show_icon: bool) -> Vec<String> {
@@ -222,7 +283,7 @@ impl UserData {
         for (id, clip) in self.submits.iter().enumerate() {
             if let Some(clip) = clip {
                 let score = if let Some(s) = clip.rating {
-                    format!("[{}/5]", s)
+                    format!("[{s}/5]")
                 } else {
                     "[-/5]".to_string()
                 };
@@ -230,9 +291,9 @@ impl UserData {
                     "{} {} **[{}]({})** ({})",
                     if show_icon { NUMBER_EMOJS[id] } else { "" },
                     if show_score {
-                        format!(" {} ", score)
+                        format!(" {score} ")
                     } else {
-                        "".to_string()
+                        String::new()
                     },
                     clip.title,
                     clip.link,
@@ -254,8 +315,8 @@ pub struct VoiceUser {
 }
 
 impl VoiceUser {
-    pub fn new() -> VoiceUser {
-        VoiceUser {
+    pub fn new() -> Self {
+        Self {
             joined: Utc::now(),
             last_reward: None,
             mute: None,
@@ -292,7 +353,6 @@ impl std::ops::Deref for SaveData {
 }
 
 /// User data, which is stored and accessible in all command invocations
-#[derive(Default)]
 pub struct Data {
     /// Persistent data of users
     pub users: Arc<DashMap<serenity::UserId, Arc<RwLock<UserData>>>>,
@@ -306,9 +366,10 @@ pub struct Data {
     pub gen_chat: String,
     pub bot_chat: String,
     pub sub_chat: String,
-    pub prof_id: String,
     pub bad_fortune: Vec<String>,
-    pub good_fortune: Vec<String>
+    pub good_fortune: Vec<String>,
+    pub hysa_fed_rate: Arc<RwLock<f64>>,
+    pub bot_user_id: serenity::UserId,
 }
 
 impl Data {
@@ -321,7 +382,9 @@ impl Data {
                 return Ok(());
             }
 
-            data.insert(user_id, Default::default());
+            let mut new_user = UserData::default();
+            new_user.add_creds(100_000);
+            data.insert(user_id, Arc::new(RwLock::new(new_user)));
         }
 
         ctx.send(
@@ -348,10 +411,16 @@ impl Data {
     }
 
     /// Attempts to load the Data from a file, otherwise return a default
-    pub fn load() -> Data {
+    pub fn load() -> Self {
         let data = fs::read_to_string("data.json").ok();
         let users_data: SaveData = if let Some(file) = data {
-            serde_json::from_str(&file).expect("Old data format?")
+            match serde_json::from_str(&file) {
+                Ok(d) => d,
+                Err(e) => {
+                    tracing::warn!("Failed to deserialize data.json (schema mismatch?): {e}");
+                    SaveData::default()
+                }
+            }
         } else {
             SaveData::default()
         };
@@ -381,9 +450,7 @@ impl Data {
         let gen_chat = env::var("GENERAL").expect("missing GENERAL id");
         let bot_chat = env::var("BOT_CMD").expect("missing BOT_CMD id");
         let sub_chat = env::var("SUBMIT").expect("missing SUBMIT id");
-        let prof_id = env::var("PROFESSOR").expect("missing PROFESSOR id");
-
-        Data {
+        Self {
             users,
             voice_users: Arc::new(DashMap::new()),
             meme,
@@ -394,9 +461,15 @@ impl Data {
             gen_chat,
             bot_chat,
             sub_chat,
-            prof_id,
             bad_fortune,
-            good_fortune
+            good_fortune,
+            hysa_fed_rate: Arc::new(RwLock::new(3.35)),
+            bot_user_id: serenity::UserId::new(
+                env::var("PROFESSOR")
+                    .expect("missing PROFESSOR id")
+                    .parse()
+                    .expect("PROFESSOR id is not a valid u64"),
+            ),
         }
     }
 }
@@ -419,12 +492,155 @@ pub async fn save_users(
 }
 
 fn read_lines(filename: &str) -> Vec<String> {
-    let lines: Vec<String> = fs::read_to_string(filename)
-        .unwrap()
-        .lines()
-        .map(String::from)
-        .collect();
+    match fs::read_to_string(filename) {
+        Ok(contents) => {
+            let lines: Vec<String> = contents.lines().map(String::from).collect();
+            tracing::info!("{}: loaded {} lines", filename, lines.len());
+            lines
+        }
+        Err(e) => {
+            tracing::warn!("Could not read '{}': {} — using empty list", filename, e);
+            Vec::new()
+        }
+    }
+}
 
-    tracing::info!("{}: loaded {} lines", filename, lines.len());
-    lines
+// ──────────────────────────────────────────────
+// Stock / portfolio types
+// ──────────────────────────────────────────────
+
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+pub struct StockProfile {
+    pub portfolios: Vec<Portfolio>,
+    pub trade_history: VecDeque<TradeRecord>,
+    pub watchlist: Vec<String>,
+    #[serde(default)]
+    pub pending_orders: Vec<PendingOrder>,
+    #[serde(default)]
+    pub next_order_id: u32,
+}
+
+impl StockProfile {
+    pub fn push_trade(&mut self, record: TradeRecord) {
+        self.trade_history.push_back(record);
+        if self.trade_history.len() > TRADE_HISTORY_LIMIT {
+            self.trade_history.pop_front();
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Portfolio {
+    pub name: String,
+    pub cash: f64,
+    pub last_interest_credited: DateTime<Utc>,
+    pub positions: Vec<Position>,
+    pub created_at: DateTime<Utc>,
+}
+
+impl Portfolio {
+    pub fn new(name: String) -> Self {
+        Self {
+            name,
+            cash: 0.0,
+            last_interest_credited: Utc::now(),
+            positions: Vec::new(),
+            created_at: Utc::now(),
+        }
+    }
+
+    /// Sum of collateral locked across all naked short option positions.
+    pub fn locked_cash(&self) -> f64 {
+        self.positions.iter().filter_map(|p| {
+            if let AssetType::Option(c) = &p.asset_type {
+                if c.side == OptionSide::Short { return Some(c.collateral); }
+            }
+            None
+        }).sum()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Position {
+    pub ticker: String,
+    pub asset_type: AssetType,
+    pub quantity: f64,
+    pub avg_cost: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum AssetType {
+    Stock,
+    #[allow(clippy::upper_case_acronyms)]
+    ETF,
+    Crypto,
+    Option(OptionContract),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum OptionSide {
+    Long,
+    Short,
+}
+
+const fn default_long() -> OptionSide {
+    OptionSide::Long
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OptionContract {
+    pub strike: f64,
+    pub expiry: DateTime<Utc>,
+    pub option_type: OptionType,
+    pub contracts: u32,
+    #[serde(default = "default_long")]
+    pub side: OptionSide,
+    /// Total creds locked as margin collateral for naked short positions. 0 for covered/cash-secured.
+    #[serde(default)]
+    pub collateral: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum OptionType {
+    Call,
+    Put,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TradeRecord {
+    pub portfolio: String,
+    pub ticker: String,
+    pub asset_name: String,
+    pub action: TradeAction,
+    pub quantity: f64,
+    pub price_per_unit: f64,
+    pub total_creds: f64,
+    pub realized_pnl: Option<f64>,
+    pub timestamp: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum TradeAction {
+    Buy,
+    Sell,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum OrderSide {
+    Buy,
+    Sell,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PendingOrder {
+    pub id: u32,
+    pub side: OrderSide,
+    pub ticker: String,
+    pub asset_name: String,
+    pub asset_type: AssetType,
+    pub portfolio_name: String,
+    pub quantity: f64,
+    /// None = market order (queued for next open); Some = limit price in USD
+    pub limit_price: Option<f64>,
+    pub expiry: DateTime<Utc>,
 }

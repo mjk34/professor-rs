@@ -3,13 +3,14 @@
 //! the organization, submission and facilitation of clip night         !
 //!                                                                     !
 //! Commands:                                                           !
-//!     [x] - submit_clip                                               !
-//!     [x] - server_clips                                              !
-//!     [x] - my_clips                                                  !
-//!     [x] - next_clip                                                 !
+//!     [x] - `submit_clip`                                               !
+//!     [x] - `server_clips`                                              !
+//!     [x] - `my_clips`                                                  !
+//!     [x] - `next_clip`                                                 !
 //!---------------------------------------------------------------------!
 
 use crate::data::{self, ClipData};
+use crate::helper::default_footer;
 use crate::{serenity, Context, Error};
 use dashmap::DashMap;
 use poise::serenity_prelude::futures::StreamExt;
@@ -17,7 +18,6 @@ use poise::serenity_prelude::{EditMessage, ReactionType};
 use rand::seq::IteratorRandom;
 use rand::thread_rng;
 use regex::Regex;
-use std::env;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
@@ -51,9 +51,7 @@ pub async fn submit_clip(
     #[description = "the name of your clip"] title: String,
     #[description = "the youtube or medal link of your clip"] link: String,
 ) -> Result<(), Error> {
-    let sub_chat = env::var("SUBMIT").expect("missing SUBMIT id");
-
-    if ctx.channel_id().get().to_string() != sub_chat {
+    if ctx.channel_id().get().to_string() != ctx.data().sub_chat {
         return Ok(());
     }
 
@@ -65,9 +63,7 @@ pub async fn submit_clip(
                     .description("Invalid link - Link must either be youtube or medal")
                     .thumbnail("https://cdn.discordapp.com/attachments/1196582162057662484/1197004718631833650/tenor.gif?ex=65b9b084&is=65a73b84&hm=0368979e5bdf0c258f6b344ec2b79826459b3ec4c937374e05ec77f131adf37f&")
                     .color(data::EMBED_ERROR)
-                    .footer(serenity::CreateEmbedFooter::new(
-                        "@~ powered by UwUntu & RustyBamboo",
-                    )),
+                    .footer(default_footer()),
             ),
         )
         .await?;
@@ -79,7 +75,7 @@ pub async fn submit_clip(
     let u = data.get_mut(&user.id).unwrap();
     let mut user_data = u.write().await;
 
-    let avatar = user.avatar_url().unwrap_or_default().to_string();
+    let avatar = user.avatar_url().unwrap_or_default().clone();
 
     let desc = format!(
         "Title: \u{3000}**{}**\nLink: \u{3000}**{}**\n",
@@ -99,9 +95,7 @@ pub async fn submit_clip(
                     .description("Max clips reached...")
                     .image("https://cdn.discordapp.com/attachments/1196582162057662484/1205354794588307456/tenor_1.gif?ex=65d81121&is=65c59c21&hm=35114062e5a4516b69da081842189520df9b846bce5b8547f83ad39c91c2d1cd&")
                     .color(data::EMBED_FAIL)
-                    .footer(serenity::CreateEmbedFooter::new(
-                        "@~ powered by UwUntu & RustyBamboo",
-                    )),
+                    .footer(default_footer()),
             ),
         )
         .await?;
@@ -115,9 +109,7 @@ pub async fn submit_clip(
                 .thumbnail(&avatar)
                 .description(desc)
                 .color(data::EMBED_CYAN)
-                .footer(serenity::CreateEmbedFooter::new(
-                    "@~ powered by UwUntu & RustyBamboo",
-                )),
+                .footer(default_footer()),
         ),
     )
     .await?;
@@ -137,14 +129,12 @@ pub async fn server_clips(ctx: Context<'_>) -> Result<(), Error> {
 
     let mut all_clips = Vec::new();
 
-    let mut desc = "".to_string();
+    let mut desc = String::new();
     for x in data.iter() {
         let (id, u) = x.pair();
         let u = u.read().await;
-        for c in &u.submits {
-            if let Some(c) = c {
-                all_clips.push((*id, c.clone()));
-            }
+        for c in u.submits.iter().flatten() {
+            all_clips.push((*id, c.clone()));
         }
         let author = id.to_user(ctx).await.unwrap();
         let clips = u.get_submissions(true, false);
@@ -159,8 +149,6 @@ pub async fn server_clips(ctx: Context<'_>) -> Result<(), Error> {
         }
     }
 
-    println!("{:}", &desc);
-
     if all_clips.is_empty() {
         ctx.send(
             poise::CreateReply::default().embed(
@@ -169,9 +157,7 @@ pub async fn server_clips(ctx: Context<'_>) -> Result<(), Error> {
                     .description("Where are the clips...")
                     .image("https://cdn.discordapp.com/attachments/1196582162057662484/1205354794156429362/tenor_2.gif?ex=65d81121&is=65c59c21&hm=c402afb9f3a578f018657cd60a4b8ec1cefccc09e26b0830701037593852b65d&")
                     .color(data::EMBED_ERROR)
-                    .footer(serenity::CreateEmbedFooter::new(
-                        "@~ powered by UwUntu & RustyBamboo",
-                    )),
+                    .footer(default_footer()),
             ),
         )
         .await?;
@@ -217,8 +203,6 @@ pub async fn server_clips(ctx: Context<'_>) -> Result<(), Error> {
         desc = top_ten_desc + "-\n" + &desc;
     }
 
-    println!("{:}", &desc);
-
     ctx.send(
         poise::CreateReply::default().embed(
             serenity::CreateEmbed::default()
@@ -226,9 +210,7 @@ pub async fn server_clips(ctx: Context<'_>) -> Result<(), Error> {
                 .thumbnail(&icon_url)
                 .description(desc)
                 .color(data::EMBED_MOD)
-                .footer(serenity::CreateEmbedFooter::new(
-                    "@~ powered by UwUntu & RustyBamboo",
-                )),
+                .footer(default_footer()),
         ),
     )
     .await?;
@@ -241,7 +223,7 @@ pub async fn server_clips(ctx: Context<'_>) -> Result<(), Error> {
 pub async fn my_clips(ctx: Context<'_>) -> Result<(), Error> {
     let author = ctx.author();
     let id = author.id;
-    let avatar = author.avatar_url().unwrap_or_default().to_string();
+    let avatar = author.avatar_url().unwrap_or_default().clone();
 
     let data = &ctx.data().users;
     let u = data.get(&id).unwrap();
@@ -258,9 +240,7 @@ pub async fn my_clips(ctx: Context<'_>) -> Result<(), Error> {
                     .thumbnail(&avatar)
                     .image("https://cdn.discordapp.com/attachments/1196582162057662484/1205354793753903104/tenor_3.gif?ex=65d81121&is=65c59c21&hm=32b8b0926677e68d225a2085b4a99ac63d0356b5cb4d05d54e13f5013b9a8664&")
                     .color(data::EMBED_ERROR)
-                    .footer(serenity::CreateEmbedFooter::new(
-                        "@~ powered by UwUntu & RustyBamboo",
-                    )),
+                    .footer(default_footer()),
             ),
         )
         .await?;
@@ -272,7 +252,7 @@ pub async fn my_clips(ctx: Context<'_>) -> Result<(), Error> {
         let emoji = ReactionType::Unicode(data::NUMBER_EMOJS[i].to_string());
         let button = serenity::CreateButton::new("open_modal")
             .label("")
-            .custom_id(format!("delete-clip-{}", i))
+            .custom_id(format!("delete-clip-{i}"))
             .emoji(emoji)
             .style(poise::serenity_prelude::ButtonStyle::Secondary);
         buttons.push(button);
@@ -286,12 +266,10 @@ pub async fn my_clips(ctx: Context<'_>) -> Result<(), Error> {
                 .embed(
                     serenity::CreateEmbed::default()
                         .title("My Clips")
-                        .description(format!("Ta-da!! Your carefully crafted clips!! (*If you wish to remove a clip, use the emojis below*)\n\n{}", desc))
+                        .description(format!("Ta-da!! Your carefully crafted clips!! (*If you wish to remove a clip, use the emojis below*)\n\n{desc}"))
                         .thumbnail(&avatar)
                         .color(data::EMBED_DEFAULT)
-                        .footer(serenity::CreateEmbedFooter::new(
-                            "@~ powered by UwUntu & RustyBamboo",
-                        )),
+                        .footer(default_footer()),
                 )
                 .components(components),
         )
@@ -338,9 +316,7 @@ pub async fn my_clips(ctx: Context<'_>) -> Result<(), Error> {
                                 .thumbnail(&avatar)
                                 .image("https://cdn.discordapp.com/attachments/1196582162057662484/1205354795012071424/tenor.gif?ex=65d81121&is=65c59c21&hm=e283dc1b9ffdeb45b85d8caabfdc68dedbf18faef0bdf84967f7d242749476cd&")
                                 .color(data::EMBED_CYAN)
-                                .footer(serenity::CreateEmbedFooter::new(
-                                    "@~ powered by UwUntu & RustyBamboo",
-                                )),
+                                .footer(default_footer()),
                         )
                         .components(Vec::new()),
                 )
@@ -357,11 +333,9 @@ pub async fn my_clips(ctx: Context<'_>) -> Result<(), Error> {
                         serenity::CreateEmbed::default()
                             .title("My Clips")
                             .thumbnail(&avatar)
-                            .description(format!("Edit timed out...\n\n{}", desc))
+                            .description(format!("Edit timed out...\n\n{desc}"))
                             .colour(data::EMBED_ERROR)
-                            .footer(serenity::CreateEmbedFooter::new(
-                                "@~ powered by UwUntu & RustyBamboo",
-                            )),
+                            .footer(default_footer()),
                     )
                     .components(Vec::new()),
             )
@@ -390,8 +364,7 @@ pub async fn next_clip(ctx: Context<'_>) -> Result<(), Error> {
         let (id, user) = x.pair();
         let u = user.read().await;
 
-        let clips = u.clone().submits;
-        for (idx, c) in clips.iter().enumerate() {
+        for (idx, c) in u.submits.iter().enumerate() {
             if let Some(c) = c {
                 if c.rating.is_none() {
                     all_clips.push((*id, Arc::clone(user), idx));
@@ -411,9 +384,7 @@ pub async fn next_clip(ctx: Context<'_>) -> Result<(), Error> {
                     .image("https://cdn.discordapp.com/attachments/1196582162057662484/1205354793246138408/tenor_4.gif?ex=65d81121&is=65c59c21&hm=752fa8c3dbc4ef91ec632f3988261c0e7628fb6ca54170ffdd6439a5de9a3a9b&")
                     .thumbnail(&icon_url)
                     .colour(data::EMBED_FAIL)
-                    .footer(serenity::CreateEmbedFooter::new(
-                        "@~ powered by UwUntu & RustyBamboo",
-                    )),
+                    .footer(default_footer()),
             ),
         )
         .await?;
@@ -427,7 +398,7 @@ pub async fn next_clip(ctx: Context<'_>) -> Result<(), Error> {
         let emoji = ReactionType::Unicode(data::NUMBER_EMOJS[i].to_string());
         let button = serenity::CreateButton::new("open_modal")
             .label("")
-            .custom_id(format!("vote-clip-{}", i))
+            .custom_id(format!("vote-clip-{i}"))
             .emoji(emoji)
             .style(poise::serenity_prelude::ButtonStyle::Secondary);
         buttons.push(button);
@@ -445,7 +416,7 @@ pub async fn next_clip(ctx: Context<'_>) -> Result<(), Error> {
     ];
 
     let user = rand_clip.1.read().await;
-    let clip = user.submits[rand_clip.2].clone().unwrap();
+    let clip = if let Some(c) = user.submits.get(rand_clip.2).and_then(std::clone::Clone::clone) { c } else { ctx.say("That clip is no longer available.").await?; return Ok(()); };
 
     ctx.send(poise::CreateReply::default().content(format!("**{}**\n{}", clip.title, clip.link)))
         .await?;
@@ -459,9 +430,7 @@ pub async fn next_clip(ctx: Context<'_>) -> Result<(), Error> {
                         .description("Rate this clip!")
                         .thumbnail(&icon_url)
                         .colour(data::EMBED_DEFAULT)
-                        .footer(serenity::CreateEmbedFooter::new(
-                            "@~ powered by UwUntu & RustyBamboo",
-                        )),
+                        .footer(default_footer()),
                 )
                 .components(components),
         )
@@ -475,7 +444,6 @@ pub async fn next_clip(ctx: Context<'_>) -> Result<(), Error> {
         .read()
         .await
         .await_component_interactions(ctx)
-        .timeout(Duration::new(10 * 60, 0))
         .stream();
 
     let mod_id = ctx.data().mod_id;
@@ -488,7 +456,7 @@ pub async fn next_clip(ctx: Context<'_>) -> Result<(), Error> {
     tokio::spawn(async move {
         let score: AtomicF64 = AtomicF64::new(0.0);
         let voted_users = DashMap::new();
-        while let Some(reaction) = reactions.next().await {
+        while let Ok(Some(reaction)) = tokio::time::timeout(Duration::new(10 * 60, 0), reactions.next()).await {
             let roles = reaction.member.clone().unwrap_or_default().roles;
             if reaction.data.custom_id == "vote-done" {
                 if !roles.contains(&mod_id) {
@@ -517,9 +485,7 @@ pub async fn next_clip(ctx: Context<'_>) -> Result<(), Error> {
                                     .image("https://cdn.discordapp.com/attachments/1196582162057662484/1205354792621309972/tenor_5.gif?ex=65d81120&is=65c59c20&hm=b7661397c96231060492b909d1d7f2025bcfa91c166618611f612e95551be35a&")
                                     .thumbnail(&icon_url)
                                     .colour(data::EMBED_MOD)
-                                    .footer(serenity::CreateEmbedFooter::new(
-                                        "@~ powered by UwUntu & RustyBamboo",
-                                    )),
+                                    .footer(default_footer()),
                             )
                             .components(Vec::new()),
                     )
@@ -534,7 +500,7 @@ pub async fn next_clip(ctx: Context<'_>) -> Result<(), Error> {
             voted_users.insert(user.id, i);
 
             let s: u8 = voted_users.iter().map(|x| *x.pair().1).sum();
-            let s = s as f64 / voted_users.len() as f64;
+            let s = f64::from(s) / voted_users.len() as f64;
             score.store(s, Ordering::Relaxed);
 
             reaction
@@ -555,9 +521,7 @@ pub async fn next_clip(ctx: Context<'_>) -> Result<(), Error> {
                                 score.load(Ordering::Relaxed)
                             ))
                             .colour(data::EMBED_DEFAULT)
-                            .footer(serenity::CreateEmbedFooter::new(
-                                "@~ powered by UwUntu & RustyBamboo",
-                            )),
+                            .footer(default_footer()),
                     ),
                 )
                 .await
@@ -582,9 +546,7 @@ pub async fn next_clip(ctx: Context<'_>) -> Result<(), Error> {
                             .thumbnail(&icon_url)
                             .image("https://cdn.discordapp.com/attachments/1196582162057662484/1205354792621309972/tenor_5.gif?ex=65d81120&is=65c59c20&hm=b7661397c96231060492b909d1d7f2025bcfa91c166618611f612e95551be35a&")
                             .colour(data::EMBED_MOD)
-                            .footer(serenity::CreateEmbedFooter::new(
-                                "@~ powered by UwUntu & RustyBamboo",
-                            )),
+                            .footer(default_footer()),
                     )
                     .components(Vec::new()),
             )
@@ -599,7 +561,7 @@ pub struct AtomicF64 {
     storage: AtomicU64,
 }
 impl AtomicF64 {
-    pub fn new(value: f64) -> Self {
+    pub const fn new(value: f64) -> Self {
         let as_u64 = value.to_bits();
         Self {
             storage: AtomicU64::new(as_u64),
@@ -607,7 +569,7 @@ impl AtomicF64 {
     }
     pub fn store(&self, value: f64, ordering: Ordering) {
         let as_u64 = value.to_bits();
-        self.storage.store(as_u64, ordering)
+        self.storage.store(as_u64, ordering);
     }
     pub fn load(&self, ordering: Ordering) -> f64 {
         let as_u64 = self.storage.load(ordering);
