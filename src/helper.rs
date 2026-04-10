@@ -1,16 +1,4 @@
-//!---------------------------------------------------------------------!
-//! This file contains a collection of internal functions to help       !
-//! reduce repetitive code                                              !
-//!                                                                     !
-//! Utilities:                                                          !
-//!     [ ] - `parse_user_mention`                                        !
-//!     [ ] - `price_to_creds` / `creds_to_price`                          !
-//!     [ ] - `fmt_qty` / `format_large_num`                               !
-//!     [ ] - `option_intrinsic` / `parse_option_type` / `option_type_str`   !
-//!     [ ] - `default_footer`                                            !
-//!     [ ] - `fmt_pnl` / `fmt_pct_change`                                 !
-//!     [ ] - `gold_hysa_rate` / `is_gold`                                 !
-//!---------------------------------------------------------------------!
+//! Shared formatting, financial math, and embed utilities.
 
 use crate::data::{OptionType, UserData, GOLD_LEVEL_THRESHOLD};
 use poise::serenity_prelude as serenity;

@@ -1,4 +1,4 @@
-//! /options_write and /options_cover — short-side (sell-to-open) options commands.
+//! `/options_write` and `/options_cover` — short-side (sell-to-open) options commands.
 
 use super::engine::{find_option_idx, naked_margin_usd, option_premium_creds, parse_expiry, ERR_EXPIRY_PAST, ERR_INVALID_EXPIRY, ERR_INVALID_OPTION_TYPE, ERR_MIN_CONTRACTS, SHARES_PER_CONTRACT};
 use crate::api::{fetch_price, market_data_err};

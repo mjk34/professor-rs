@@ -1,4 +1,4 @@
-//! /options_quote command
+//! `/options_quote` command
 
 use super::engine::{parse_expiry, ERR_EXPIRY_PAST, ERR_INVALID_EXPIRY, ERR_INVALID_OPTION_TYPE, SHARES_PER_CONTRACT, TIME_VALUE_PER_DTE};
 use crate::api::{fetch_price, market_data_err};

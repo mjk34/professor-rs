@@ -1,4 +1,4 @@
-//! Economy commands — /uwu, /claim_bonus, /buy_tickets, and Professor simulation helpers.
+//! Economy commands — /uwu, `/claim_bonus`, `/buy_tickets`, and Professor simulation helpers.
 
 use crate::{data, serenity, Context, Error};
 use crate::helper::default_footer;
@@ -31,6 +31,20 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
     let user = ctx.author();
     let data = &ctx.data().users;
     let u = data.get(&user.id).unwrap();
+
+    {
+        let user_data = u.read().await;
+        if !user_data.check_daily() {
+            ctx.send(poise::CreateReply::default().embed(
+                serenity::CreateEmbed::new()
+                    .title("Daily")
+                    .description(format!("You've already rolled today! Next roll available <t:{}:R>.", user_data.next_daily_timestamp()))
+                    .color(data::EMBED_ERROR)
+                    .footer(default_footer()),
+            )).await?;
+            return Ok(());
+        }
+    }
 
     let d20 = thread_rng().gen_range(1..21);
     let check = thread_rng().gen_range(6..15);
@@ -402,8 +416,8 @@ pub fn simulate_uwu(user_data: &mut data::UserData) -> i32 {
     total
 }
 
-/// Simulate a /claim_bonus roll for Professor.
-/// Returns creds awarded (0 if bonus_count < 3).
+/// Simulate a `/claim_bonus` roll for Professor.
+/// Returns creds awarded (0 if `bonus_count` < 3).
 pub fn simulate_claim(user_data: &mut data::UserData) -> i32 {
     if !user_data.check_claim() { return 0; }
     let d20: i32 = thread_rng().gen_range(1..21);

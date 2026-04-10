@@ -1,13 +1,4 @@
-//!---------------------------------------------------------------------!
-//! This file contains a collection of MODERATOR related commands to    !
-//! to better serve the facilitation of professorBot                    !
-//!                                                                     !
-//! Commands:                                                           !
-//!     [x] - `give_creds`                                                !
-//!     [x] - `take_creds`                                                !
-//!     [ ] - `give_wishes`                                               !
-//!     [ ] - `refund_tickets`                                            !
-//!---------------------------------------------------------------------!
+//! Moderator commands: `give_creds`, `take_creds`, and test-seeding utilities.
 
 use crate::clips::check_mod;
 use crate::data::{self, Portfolio, StockProfile, TradeAction, TradeRecord, UserData};
@@ -19,20 +10,23 @@ use rand::Rng;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+/// Maximum cred amount a moderator may transfer in a single give/take operation.
+const MAX_CRED_TRANSFER: u32 = 100_000;
+
 async fn modify_creds(
     ctx: Context<'_>,
     mentioned: String,
-    amount: u32,
+    dollars: u32,
     is_give: bool,
 ) -> Result<(), Error> {
     let title = if is_give { "Give Creds" } else { "Take Creds" };
 
-    if amount > 100_000 {
+    if dollars == 0 || dollars > MAX_CRED_TRANSFER {
         ctx.send(
             poise::CreateReply::default().embed(
                 serenity::CreateEmbed::new()
                     .title(title)
-                    .description("The max amount allowed is 100000.")
+                    .description("Amount must be between $1 and $100,000.")
                     .image("https://cdn.discordapp.com/attachments/1196582162057662484/1205685838877433866/tenor_2.gif?ex=65d94570&is=65c6d070&hm=be06433cb7dd2c592468560dfffbc5ce6c294582db38f177028ba80a46f67a43&")
                     .color(data::EMBED_ERROR)
                     .footer(default_footer()),
@@ -42,11 +36,13 @@ async fn modify_creds(
         return Ok(());
     }
 
-    let guild_members = ctx
-        .guild_id()
-        .unwrap()
-        .members(ctx.http(), None, None)
-        .await;
+    let amount = (dollars * 100) as i32;
+
+    let Some(guild_id) = ctx.guild_id() else {
+        ctx.say("This command can only be used in a server.").await?;
+        return Ok(());
+    };
+    let guild_members = guild_id.members(ctx.http(), None, None).await;
 
     let mut guild_ids: Vec<UserId> = Vec::new();
     if let Ok(members) = &guild_members {
@@ -92,9 +88,9 @@ async fn modify_creds(
         let mut user_data = u.write().await;
 
         if is_give {
-            user_data.add_creds(amount as i32);
+            user_data.add_creds(amount);
         } else {
-            user_data.sub_creds(amount as i32);
+            user_data.sub_creds(amount);
         }
         processed_list.push(parsed_id);
     }
@@ -107,9 +103,9 @@ async fn modify_creds(
         desc += if is_give { "No one got creds..." } else { "No one lost creds..." };
     } else {
         let action = if is_give {
-            format!("Moderator <@{}> gave {} creds to ", ctx.author().id, amount)
+            format!("Moderator <@{}> gave ${} to ", ctx.author().id, dollars)
         } else {
-            format!("Moderator <@{}> took {} creds from ", ctx.author().id, amount)
+            format!("Moderator <@{}> took ${} from ", ctx.author().id, dollars)
         };
         desc += &action;
         for id in processed_list {
@@ -161,9 +157,9 @@ async fn modify_creds(
 pub async fn give_creds(
     ctx: Context<'_>,
     #[description = "@username | example: @UwUntu @Rustybamboo"] mentioned: String,
-    #[description = "amount of creds to give (max: 100000)"] amount: u32,
+    #[description = "dollar amount to give (max: $100,000)"] dollars: u32,
 ) -> Result<(), Error> {
-    modify_creds(ctx, mentioned, amount, true).await
+    modify_creds(ctx, mentioned, dollars, true).await
 }
 
 /// [!] MODERATOR - take creds from a user
@@ -171,9 +167,9 @@ pub async fn give_creds(
 pub async fn take_creds(
     ctx: Context<'_>,
     #[description = "@username | example: @UwUntu @Rustybamboo"] mentioned: String,
-    #[description = "amount of creds to take (max: 100000)"] amount: u32,
+    #[description = "dollar amount to take (max: $100,000)"] dollars: u32,
 ) -> Result<(), Error> {
-    modify_creds(ctx, mentioned, amount, false).await
+    modify_creds(ctx, mentioned, dollars, false).await
 }
 
 

@@ -1,5 +1,5 @@
-//! Core trade execution — apply_buy and apply_sell are pure functions that
-//! mutate Portfolio + TradeRecord state without any Discord or async concerns.
+//! Core trade execution — `apply_buy` and `apply_sell` are pure functions that
+//! mutate Portfolio + `TradeRecord` state without any Discord or async concerns.
 //! Keeping them isolated here makes them straightforward to unit-test.
 
 use crate::data::{AssetType, Portfolio, Position, TradeAction, TradeRecord, TRADE_HISTORY_LIMIT};

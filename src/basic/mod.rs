@@ -1,4 +1,4 @@
-//! Core commands — ping, wallet, voice_status, info, and the economy/leaderboard sub-modules.
+//! Core commands — ping, wallet, `voice_status`, info, and the economy/leaderboard sub-modules.
 
 mod economy;
 mod leaderboard;

@@ -10,6 +10,8 @@ use std::io::{BufRead, BufReader};
 
 /// Path to the flat-file birthday/event database (CSV, one entry per line).
 const EVENT_FILE: &str = ".eventdb";
+/// Number of days in advance to send a birthday reminder to the mod channel.
+const BIRTHDAY_REMINDER_DAYS_AHEAD: i64 = 14;
 
 fn import_from_file(filename: &str) -> Vec<Vec<String>> {
     let file = if let Ok(f) = File::open(filename) { f } else {
@@ -97,16 +99,16 @@ pub async fn check_birthday(http: &serenity::Http) {
 
         let days_until = (next_occurrence - today).num_days();
 
-        if (0..=14).contains(&days_until) && !reminded {
+        if (0..=BIRTHDAY_REMINDER_DAYS_AHEAD).contains(&days_until) && !reminded {
             let mod_chat: u64 = env::var("MOD_CHAT")
                 .expect("Failed to load MODERATOR chat id")
                 .parse()
-                .unwrap();
+                .expect("MOD_CHAT must be a valid u64");
 
             let mod_id: u64 = env::var("MOD_ID")
                 .expect("Failed to load MODERATOR ping id")
                 .parse()
-                .unwrap();
+                .expect("MOD_ID must be a valid u64");
 
             let desc = format!(
                 "Hey <@&{mod_id}>, {name}'s Birthday is coming up in 2 weeks! ({next_occurrence})"
@@ -114,7 +116,7 @@ pub async fn check_birthday(http: &serenity::Http) {
 
             row[3] = "1".to_string();
 
-            ChannelId::new(mod_chat)
+            if let Err(e) = ChannelId::new(mod_chat)
                 .send_message(
                     http,
                     CreateMessage::default().embed(
@@ -126,7 +128,9 @@ pub async fn check_birthday(http: &serenity::Http) {
                     ),
                 )
                 .await
-                .unwrap();
+            {
+                tracing::warn!(error = %e, "failed to send birthday reminder to mod channel");
+            }
         }
 
         if today == date_this_year && !pinged {
@@ -137,11 +141,11 @@ pub async fn check_birthday(http: &serenity::Http) {
             let gen_chat: u64 = env::var("GENERAL")
                 .expect("Failed to load GENERAL chat id")
                 .parse()
-                .unwrap();
+                .expect("GENERAL must be a valid u64");
 
             row[4] = "1".to_string();
 
-            ChannelId::new(gen_chat)
+            if let Err(e) = ChannelId::new(gen_chat)
                 .send_message(
                     http,
                     CreateMessage::default().embed(
@@ -153,7 +157,9 @@ pub async fn check_birthday(http: &serenity::Http) {
                     ),
                 )
                 .await
-                .unwrap();
+            {
+                tracing::warn!(error = %e, "failed to send birthday ping to general channel");
+            }
         }
 
     }

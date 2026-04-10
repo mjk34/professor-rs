@@ -3,6 +3,5 @@
 .env
 .eventdb
 .vscode/
-.eventdb
 data.json
 .claude/settings.local.json

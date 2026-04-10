@@ -34,6 +34,7 @@ pub async fn buy(
         return Ok(());
     }
 
+    ctx.defer().await?;
     let quote = if let Some(q) = resolve_ticker(&ticker_query).await { q } else {
         ctx.send(poise::CreateReply::default().embed(
             serenity::CreateEmbed::new().title("Buy")
@@ -72,12 +73,12 @@ pub async fn buy(
         None => price_per_unit * quantity,
     };
 
-    let should_queue = !is_market_hours() || limit_price.is_some_and(|lp| price_usd > lp);
+    let market_open = is_market_hours();
+    let should_queue = !market_open || limit_price.is_some_and(|lp| price_usd > lp);
 
     if should_queue {
-        ctx.defer().await?;
         let expiry = order_expiry();
-        let reason = if is_market_hours() {
+        let reason = if market_open {
             format!("Limit buy: current price **${:.2}** > limit **${:.2}**.", price_usd, limit_price.unwrap())
         } else {
             "Market is closed — order will execute at next open.".to_string()
@@ -225,6 +226,7 @@ pub async fn sell(
         return Ok(());
     }
 
+    ctx.defer().await?;
     let quote = if let Some(q) = resolve_ticker(&ticker_query).await { q } else {
         ctx.send(poise::CreateReply::default().embed(
             serenity::CreateEmbed::new().title("Sell")
@@ -247,7 +249,7 @@ pub async fn sell(
 
     let price_per_unit = price_to_creds(price_usd);
 
-    let (held, port_name_normalized) = {
+    let (held, asset_type, port_name_normalized) = {
         let data_ref = &ctx.data().users;
         let u = data_ref.get(&ctx.author().id).unwrap();
         let user_data = u.read().await;
@@ -266,7 +268,7 @@ pub async fn sell(
             .find(|p| p.ticker == ticker && !matches!(&p.asset_type, AssetType::Option(_)));
 
         if let Some(p) = pos {
-            (p.quantity, user_data.stock.portfolios[port_idx].name.clone())
+            (p.quantity, p.asset_type.clone(), user_data.stock.portfolios[port_idx].name.clone())
         } else {
             drop(user_data);
             ctx.send(poise::CreateReply::default().embed(
@@ -296,12 +298,12 @@ pub async fn sell(
         return Ok(());
     }
 
-    let should_queue = !is_market_hours() || limit_price.is_some_and(|lp| price_usd < lp);
+    let market_open = is_market_hours();
+    let should_queue = !market_open || limit_price.is_some_and(|lp| price_usd < lp);
 
     if should_queue {
-        ctx.defer().await?;
         let expiry = order_expiry();
-        let reason = if is_market_hours() {
+        let reason = if market_open {
             format!("Limit sell: current price **${:.2}** < limit **${:.2}**.", price_usd, limit_price.unwrap())
         } else {
             "Market is closed — order will execute at next open.".to_string()
@@ -359,7 +361,7 @@ pub async fn sell(
             user_data.stock.next_order_id = id.wrapping_add(1);
             user_data.stock.pending_orders.push(PendingOrder {
                 id, side: OrderSide::Sell, ticker: ticker.clone(), asset_name: asset_name.clone(),
-                asset_type: AssetType::Stock, portfolio_name: port_name_normalized.clone(),
+                asset_type, portfolio_name: port_name_normalized.clone(),
                 quantity, limit_price, expiry,
             });
         }

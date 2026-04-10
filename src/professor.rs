@@ -98,9 +98,9 @@ pub async fn fetch_market_news() -> Vec<String> {
         .get("https://finnhub.io/api/v1/news")
         .query(&[("category", "general"), ("token", api_key)])
         .send().await;
-    let resp = match resp { Ok(r) => r, Err(e) => { tracing::warn!("Finnhub fetch failed: {e}"); return vec![]; } };
+    let resp = match resp { Ok(r) => r, Err(e) => { tracing::warn!(error = %e, "Finnhub fetch failed"); return vec![]; } };
     let bytes = match resp.bytes().await {
-        Ok(b) => b, Err(e) => { tracing::warn!("Finnhub body read failed: {e}"); return vec![]; }
+        Ok(b) => b, Err(e) => { tracing::warn!(error = %e, "Finnhub body read failed"); return vec![]; }
     };
     let mut items: Vec<FinnhubNewsItem> = match serde_json::from_slice(&bytes) {
         Ok(v) => v,
@@ -127,9 +127,9 @@ pub async fn call_claude(system: &str, user: &str) -> String {
         .header("anthropic-version", "2023-06-01")
         .header("content-type", "application/json")
         .json(&body).send().await;
-    let resp = match resp { Ok(r) => r, Err(e) => { tracing::warn!("Claude request failed: {e}"); return String::new(); } };
+    let resp = match resp { Ok(r) => r, Err(e) => { tracing::warn!(error = %e, "Claude request failed"); return String::new(); } };
     let bytes = match resp.bytes().await {
-        Ok(b) => b, Err(e) => { tracing::warn!("Claude body read failed: {e}"); return String::new(); }
+        Ok(b) => b, Err(e) => { tracing::warn!(error = %e, "Claude body read failed"); return String::new(); }
     };
     let parsed: ClaudeResponse = match serde_json::from_slice(&bytes) {
         Ok(v) => v,
@@ -265,7 +265,7 @@ pub async fn professor_daily_session(
     {
         let last = LAST_SESSION_DATE.read().await;
         if *last == Some(today) {
-            tracing::info!("[Professor] Already ran today ({today}) — skipping");
+            tracing::info!(date = %today, "[Professor] already ran today — skipping");
             return;
         }
     }
@@ -280,17 +280,24 @@ pub async fn professor_daily_session(
 
     let u = if let Some(u) = users.get(&bot_user_id) { u } else { tracing::warn!("Professor UserData not found"); return; };
 
+    // Read MEMORY.txt before acquiring the write lock so blocking I/O doesn't stall the executor
+    // while holding the lock. Only reads when not yet initialised.
+    let core_memory_init = if u.read().await.professor_memory.is_none() {
+        Some(std::fs::read_to_string("MEMORY.txt").unwrap_or_else(|_| {
+            "You are Professor, a Discord bot managing your own investment portfolio. \
+             Prefer diversified long-term holds. Only make HIGH conviction trades. \
+             Never exceed 30% of cash per trade. Maximum 3 trades per session.".to_string()
+        }))
+    } else {
+        None
+    };
+
     // Write lock acquired here, snapshot taken, lock released before any async calls
     let (uwu_creds, claim_creds, memory, portfolio_snapshot, held_tickers, pre_trade_cash_usd, pre_trade_positions) = {
         let mut ud = u.write().await;
 
         // Ensure professor_memory is initialized (handles data loaded before this field existed)
-        if ud.professor_memory.is_none() {
-            let core = std::fs::read_to_string("MEMORY.txt").unwrap_or_else(|_| {
-                "You are Professor, a Discord bot managing your own investment portfolio. \
-                 Prefer diversified long-term holds. Only make HIGH conviction trades. \
-                 Never exceed 30% of cash per trade. Maximum 3 trades per session.".to_string()
-            });
+        if let Some(core) = core_memory_init {
             ud.professor_memory = Some(data::ProfessorMemory {
                 core_behavior: core,
                 entries: std::collections::VecDeque::new(),
@@ -304,7 +311,7 @@ pub async fn professor_daily_session(
             let mut port = data::Portfolio::new(PROFESSOR_PORT.to_string());
             port.cash = f64::from(wallet);
             ud.stock.portfolios.push(port);
-            tracing::info!("Professor: created missing ProfessorPort with {wallet} creds cash");
+            tracing::info!(wallet = wallet, "Professor: created missing ProfessorPort");
         }
 
         let uwu_creds = crate::basic::simulate_uwu(&mut ud);
@@ -565,9 +572,9 @@ pub async fn professor_daily_session(
         .color(data::EMBED_CYAN)
         .footer(default_footer());
 
-    let channel_id: u64 = if let Ok(id) = bot_chat.parse() { id } else { tracing::warn!("Invalid bot_chat channel id: {bot_chat}"); return; };
+    let channel_id: u64 = if let Ok(id) = bot_chat.parse() { id } else { tracing::warn!(channel = %bot_chat, "invalid bot_chat channel id"); return; };
     if let Err(e) = ChannelId::new(channel_id).send_message(http, CreateMessage::new().embed(embed)).await {
-        tracing::warn!("Failed to post professor summary: {e}");
+        tracing::warn!(error = %e, "failed to post professor summary");
     }
 }
 

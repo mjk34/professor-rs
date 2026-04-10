@@ -1,6 +1,6 @@
 ---
 name: rust-polish
-description: Full ordered Rust code quality pipeline — clippy all → clippy pedantic+nursery → simplify agents → rust-audit → verify
+description: Full ordered Rust code quality pipeline — clippy all → clippy pedantic+nursery → simplify agents → test + audit → verify
 ---
 
 Run the full Rust polish pipeline in order. Each phase must complete before the next starts. Do not skip phases even if a phase looks clean.
@@ -38,9 +38,10 @@ Invoke the `simplify` skill. This launches three parallel agents:
 
 Fix all real findings. Skip false positives with a one-line note.
 
-## Phase 4: Rust Audit
+## Phase 4: Test & Audit
 
-Invoke the `rust-audit` skill on `src/`. Fix all violations with a concrete targeted edit. If a guideline is intentionally violated (e.g., a panic in an infallible context), add a comment explaining why.
+1. `cargo test -- --nocapture` — all tests must pass; any failure is a hard stop
+2. `cargo audit` — scan for CVEs; if not installed, note `cargo install cargo-audit` and skip
 
 ## Phase 5: Verify
 

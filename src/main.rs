@@ -5,10 +5,10 @@
 #![expect(clippy::cast_possible_truncation,    reason = "f64 → i32 truncation in cred calculations is intentional")]
 #![expect(clippy::cast_possible_wrap,          reason = "small bounded values cast to i32 are safe")]
 #![expect(clippy::cast_sign_loss,              reason = "cred/ticket values are always non-negative at cast sites")]
-#![expect(clippy::missing_errors_doc,          reason = "not publishing a public API")]
-#![expect(clippy::missing_panics_doc,          reason = "not publishing a public API")]
-#![expect(clippy::must_use_candidate,          reason = "Discord command return values are always awaited by poise")]
-#![expect(clippy::wildcard_imports,            reason = "poise/serenity re-exports are intentionally glob-imported")]
+#![allow(clippy::missing_errors_doc)]          // not publishing a public API
+#![allow(clippy::missing_panics_doc)]          // not publishing a public API
+#![allow(clippy::must_use_candidate)]          // Discord command return values are always awaited by poise
+#![allow(clippy::wildcard_imports)]            // poise/serenity re-exports are intentionally glob-imported
 #![expect(clippy::items_after_statements,      reason = "nested helper fns after setup statements are intentional")]
 #![expect(clippy::too_many_lines,              reason = "command dispatch functions are inherently long")]
 #![expect(clippy::manual_let_else,             reason = "let-else is too invasive a restructure for existing match/if patterns")]
@@ -16,7 +16,7 @@
 #![expect(clippy::option_if_let_else,          reason = "map_or_else restructure reduces readability in complex closures")]
 #![expect(clippy::similar_names,               reason = "short variable names (u, ud, etc.) are conventional in this codebase")]
 #![expect(clippy::format_push_string,          reason = "push_str(&format!(...)) is clearer than write!() for embed building")]
-#![expect(clippy::redundant_else,              reason = "explicit else after always-continuing if is intentional for readability")]
+#![allow(clippy::redundant_else)]              // explicit else after always-continuing if is intentional for readability
 mod api;
 mod basic;
 mod clips;
@@ -42,6 +42,12 @@ type Context<'a> = poise::Context<'a, data::Data, Error>;
 
 /// Professor daily session trigger time (UTC hour). 19 = testing; restore to 17 (1 PM EDT) for production.
 const PROFESSOR_TRIGGER_HOUR_UTC: u32 = 19;
+/// Days of month on which the HYSA fed rate is refreshed from FRED (1st and 16th = semi-monthly).
+const INTEREST_REFRESH_DAYS: &[u32] = &[1, 16];
+/// How often the maintenance task runs (12 h): saves data, checks birthdays, sweeps expired options.
+const MAINTENANCE_INTERVAL_SECS: u64 = 60 * 60 * 12;
+/// How often pending orders are checked against live prices (30 min — within one market tick cycle).
+const ORDER_SWEEP_INTERVAL_SECS: u64 = 60 * 30;
 
 #[poise::command(prefix_command)]
 async fn register(ctx: Context<'_>) -> Result<(), Error> {
@@ -152,7 +158,7 @@ async fn main() {
                     }
                 } else {
                     let mut prof = data::UserData::default();
-                    prof.add_creds(100_000);
+                    prof.add_creds(data::NEW_USER_STARTING_CREDS);
                     prof.professor_memory = Some(data::ProfessorMemory {
                         core_behavior: core_behavior.clone(),
                         entries: std::collections::VecDeque::new(),
@@ -173,7 +179,7 @@ async fn main() {
         .activity(serenity::ActivityData {
             name: "Coding Rust".to_string(),
             kind: serenity::ActivityType::Custom,
-            state: Some("StonkBot - Testing".to_string()),
+            state: Some("Use /uwu to claim your daily creds! #gamba".to_string()),
             url: None,
         })
         .status(serenity::OnlineStatus::Online)
@@ -201,16 +207,16 @@ async fn event_handler(
             let est_offset = chrono::FixedOffset::west_opt(5 * 3600).unwrap(); // EST (UTC-5); adjust to -4 during EDT
             let next_run_est = next_run.with_timezone(&est_offset);
             tracing::info!(
-                "Logged in as {} | startup UTC: {} ({:?})",
-                data_about_bot.user.name,
-                now.format("%Y-%m-%d %H:%M:%S"),
-                now.weekday(),
+                user = %data_about_bot.user.name,
+                utc = %now.format("%Y-%m-%d %H:%M:%S"),
+                weekday = ?now.weekday(),
+                "bot ready",
             );
             tracing::info!(
-                "Professor's next daily routine: {} at {} EST ({})",
-                next_run_est.format("%Y-%m-%d"),
-                next_run_est.format("%I:%M %p"),
-                next_run_est.weekday(),
+                date = %next_run_est.format("%Y-%m-%d"),
+                time_est = %next_run_est.format("%I:%M %p"),
+                weekday = ?next_run_est.weekday(),
+                "professor next daily run",
             );
         }
 
@@ -305,12 +311,12 @@ fn maintenance_task(
             reminder::check_birthday(&http).await;
             data::save_users(&users).await;
             let today = chrono::Utc::now().day();
-            if today == 1 || today == 16 {
+            if INTEREST_REFRESH_DAYS.contains(&today) {
                 api::refresh_market_rate(&hysa_rate).await;
             }
             api::apply_monthly_interest(&users, &hysa_rate).await;
             api::sweep_expired_options(&users, &http, &bot_chat).await;
-            tokio::time::sleep(std::time::Duration::from_secs(60 * 60 * 12)).await;
+            tokio::time::sleep(std::time::Duration::from_secs(MAINTENANCE_INTERVAL_SECS)).await;
         }
     });
 }
@@ -358,7 +364,7 @@ fn pending_orders_task(
             if api::is_market_hours() {
                 api::sweep_pending_orders(&users, &http, &bot_chat).await;
             }
-            tokio::time::sleep(std::time::Duration::from_secs(60 * 30)).await;
+            tokio::time::sleep(std::time::Duration::from_secs(ORDER_SWEEP_INTERVAL_SECS)).await;
         }
     });
 }

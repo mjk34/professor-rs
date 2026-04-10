@@ -31,6 +31,8 @@ pub const BASE_HYSA_RATE: f64 = 0.1;
 pub const TRADE_HISTORY_LIMIT: usize = 500;
 /// Maximum number of pending (queued) orders a user may have at once.
 pub const MAX_PENDING_ORDERS: usize = 20;
+/// Starting cred balance for every newly registered user (100,000 creds = $1,000 notional).
+pub const NEW_USER_STARTING_CREDS: i32 = 100_000;
 
 /// Discord keycap digit emoji 0–9, indexed by digit value. Used for ticket shop buttons.
 pub const NUMBER_EMOJS: [&str; 10] = [
@@ -138,6 +140,10 @@ impl UserData {
         diff.num_hours() >= 21
     }
 
+    pub fn next_daily_timestamp(&self) -> i64 {
+        (self.last_daily + chrono::Duration::hours(21)).timestamp()
+    }
+
     pub fn add_bonus(&mut self) {
         self.bonus_count = (self.bonus_count + 1).min(3);
     }
@@ -188,22 +194,7 @@ impl UserData {
         if self.daily_count == 0 {
             return "N/A".to_string();
         }
-
-        let average = self.get_luck_score();
-        let luck: String;
-        if average < 6 {
-            luck = "Horrible".to_string();
-        } else if (6..9).contains(&average) {
-            luck = "Bad".to_string();
-        } else if (9..12).contains(&average) {
-            luck = "Average".to_string();
-        } else if (12..15).contains(&average) {
-            luck = "Good".to_string();
-        } else {
-            luck = "Blessed".to_string();
-        }
-
-        luck
+        luck_label(self.get_luck_score()).to_string()
     }
 
     pub const fn get_luck_score(&self) -> i32 {
@@ -228,18 +219,7 @@ impl UserData {
         if self.recent_rolls.is_empty() {
             return "N/A".to_string();
         }
-        let average = self.get_rolling_luck_score();
-        if average < 6 {
-            "Horrible".to_string()
-        } else if (6..9).contains(&average) {
-            "Bad".to_string()
-        } else if (9..12).contains(&average) {
-            "Average".to_string()
-        } else if (12..15).contains(&average) {
-            "Good".to_string()
-        } else {
-            "Blessed".to_string()
-        }
+        luck_label(self.get_rolling_luck_score()).to_string()
     }
 
     pub const fn get_bonus(&self) -> i32 {
@@ -307,6 +287,14 @@ impl UserData {
     }
 }
 
+fn luck_label(score: i32) -> &'static str {
+    if score < 6 { "Horrible" }
+    else if (6..9).contains(&score) { "Bad" }
+    else if (9..12).contains(&score) { "Average" }
+    else if (12..15).contains(&score) { "Good" }
+    else { "Blessed" }
+}
+
 #[derive(Debug, Clone)]
 pub struct VoiceUser {
     pub joined: DateTime<Utc>,
@@ -337,6 +325,12 @@ impl VoiceUser {
         } else {
             self.deaf = None;
         }
+    }
+}
+
+impl Default for VoiceUser {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -385,7 +379,7 @@ impl Data {
             }
 
             let mut new_user = UserData::default();
-            new_user.add_creds(100_000);
+            new_user.add_creds(NEW_USER_STARTING_CREDS);
             data.insert(user_id, Arc::new(RwLock::new(new_user)));
         }
 
@@ -419,7 +413,7 @@ impl Data {
             match serde_json::from_str(&file) {
                 Ok(d) => d,
                 Err(e) => {
-                    tracing::warn!("Failed to deserialize data.json (schema mismatch?): {e}");
+                    tracing::warn!(error = %e, "Failed to deserialize data.json (schema mismatch?)");
                     SaveData::default()
                 }
             }
@@ -465,7 +459,7 @@ impl Data {
             sub_chat,
             bad_fortune,
             good_fortune,
-            hysa_fed_rate: Arc::new(RwLock::new(3.35)),
+            hysa_fed_rate: Arc::new(RwLock::new(3.35)), // approximate fed funds rate at deployment; refreshed from FRED on startup
             bot_user_id: serenity::UserId::new(
                 env::var("PROFESSOR")
                     .expect("missing PROFESSOR id")
@@ -490,7 +484,7 @@ pub async fn save_users(
     let users_save = SaveData { users: users_save };
 
     let encoded = serde_json::to_string(&users_save).unwrap();
-    fs::write("data.json", encoded).expect("Failed to write binary save file");
+    tokio::fs::write("data.json", encoded).await.expect("Failed to write data.json");
 }
 
 fn read_lines(filename: &str) -> Vec<String> {
@@ -621,7 +615,7 @@ pub struct TradeRecord {
     pub timestamp: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TradeAction {
     Buy,
     Sell,

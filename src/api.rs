@@ -264,7 +264,7 @@ pub async fn fetch_price(ticker: &str) -> Option<f64> {
 pub async fn fetch_quote_detail(ticker: &str) -> Option<YfQuote> {
     // Validate ticker before interpolating into URL — guards against SSRF from user or AI input
     if ticker.is_empty() || ticker.len() > 20 || !ticker.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.') {
-        tracing::warn!("fetch_quote_detail: rejected invalid ticker {:?}", ticker);
+        tracing::warn!(ticker = ?ticker, "fetch_quote_detail: rejected invalid ticker");
         return None;
     }
 
@@ -284,7 +284,7 @@ pub async fn fetch_quote_detail(ticker: &str) -> Option<YfQuote> {
         .ok()?;
 
     if http_resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
-        tracing::warn!("Yahoo Finance rate limit hit (429) for ticker {ticker}");
+        tracing::warn!(ticker = %ticker, "Yahoo Finance rate limit hit (429)");
         YAHOO_RATE_LIMITED.store(true, Ordering::Relaxed);
         return None;
     }
@@ -405,10 +405,10 @@ pub async fn fetch_fed_funds_rate() -> Option<f64> {
 
 pub async fn api_health_check() {
     // FRED
-    if let Some(r) = fetch_fed_funds_rate().await { tracing::info!("[API] FRED ✓ — fed funds rate: {:.2}%", r) } else { tracing::warn!("[API] FRED ✗ — failed to fetch fed funds rate") }
+    if let Some(r) = fetch_fed_funds_rate().await { tracing::info!(rate = r, "[API] FRED ✓") } else { tracing::warn!("[API] FRED ✗ — failed to fetch fed funds rate") }
 
     // FMP — probe with a known ticker
-    if let Some(p) = fetch_fmp_profile("SPY").await { tracing::info!("[API] FMP ✓ — SPY price: ${:.2}", p.price.unwrap_or(0.0)) } else { tracing::warn!("[API] FMP ✗ — failed to fetch SPY profile") }
+    if let Some(p) = fetch_fmp_profile("SPY").await { tracing::info!(spy_price = p.price.unwrap_or(0.0), "[API] FMP ✓") } else { tracing::warn!("[API] FMP ✗ — failed to fetch SPY profile") }
 
     // FINNHUB — fetch market news
     let news = crate::professor::fetch_market_news().await;
@@ -431,7 +431,7 @@ pub async fn refresh_market_rate(rate: &Arc<RwLock<f64>>) {
     if let Some(r_val) = fetch_fed_funds_rate().await {
         let mut r = rate.write().await;
         *r = r_val;
-        tracing::info!("HYSA fed rate updated: {:.2}%", r_val);
+        tracing::info!(rate = r_val, "HYSA fed rate updated");
     } else {
         tracing::warn!("Failed to fetch FRED fed funds rate; keeping current value");
     }

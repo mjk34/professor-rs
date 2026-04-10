@@ -82,6 +82,7 @@ fn make_embed(
 /// show server rankings — use buttons to switch between Creds, Fortune, and Investment
 #[poise::command(slash_command)]
 pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
+    ctx.defer().await?;
     let data = &ctx.data().users;
 
     type InfoVec = Vec<(UserId, i64, String, String)>;

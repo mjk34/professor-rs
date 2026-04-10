@@ -1,68 +1,36 @@
 # professor-rs
 
-Discord bot in Rust (poise 0.6 / serenity). See global `~/.claude/CLAUDE.md` for full stack and style conventions.
+Discord bot in Rust. Stack: poise 0.6 over serenity, tokio, DashMap, tracing.
 
-## Module Layout
+## Conventions
+- Commands: `poise::Context<'a, data::Data, Error>` aliased `Context<'a>`; slash commands preferred
+- State in `data::Data`; commands in own module files
+- `pre_command`/`post_command` handle user init/persistence — don't duplicate inside commands
+- `/buy`/`/sell` hidden from command list — enter via `/search`
+- New command? Register in `commands: vec![...]` in `main.rs`
+- `.env` holds token/channel IDs; build target: `x86_64-unknown-linux-musl` (vendored OpenSSL)
 
-| File | Purpose |
+## Production Checks — Disabled for Testing
+| Location | Guard |
 |---|---|
-| `main.rs` | Bot setup, 4 background tasks: voice rewards, maintenance, professor, pending orders |
-| `data.rs` | `Data`, `UserData`, `Portfolio`, `ProfessorMemory` — all shared state |
-| `basic/mod.rs` | Re-exports + `/ping`, `/wallet`, `/voice_status`, `/info` |
-| `basic/economy.rs` | `/uwu`, `/claim_bonus`, `/buy_tickets`, `simulate_uwu`, `simulate_claim` |
-| `basic/leaderboard.rs` | `/leaderboard` — creds, fortune, investment rankings with pagination |
-| `stock/mod.rs` | Re-exports: `buy`, `sell`, `search` |
-| `stock/search.rs` | `/search` command + `build_quote_embed` |
-| `stock/orders.rs` | `/buy`, `/sell` commands (hidden; entered via `/search`) |
-| `stock/modals.rs` | `BuyModal`, `SellModal`, `parse_trade_fields` |
-| `trader/mod.rs` | Re-exports: `portfolio`, `watchlist`, `trades`, `apply_buy`, `apply_sell` |
-| `trader/portfolio.rs` | `/portfolio` command — create, view, fund, withdraw, delete |
-| `trader/watchlist.rs` | `/watchlist` command + `build_watchlist_embed` |
-| `trader/trades.rs` | `/trades` command + `build_summary_embed`, `build_filtered_embed`, `build_all_trades_embed` |
-| `trader/engine.rs` | Pure `apply_buy` / `apply_sell` — no Discord concerns, fully unit-tested |
-| `options/mod.rs` | Re-exports all 5 option commands + engine fns |
-| `options/engine.rs` | Pure pricing fns: `option_premium_creds`, `naked_margin_usd`, `find_option_idx`, `parse_expiry` — unit tested |
-| `options/quote.rs` | `/options_quote` |
-| `options/long.rs` | `/options_buy`, `/options_sell` |
-| `options/short.rs` | `/options_write`, `/options_cover` |
-| `professor.rs` | Claude-powered AI daily trading session |
-| `api.rs` | Yahoo Finance, FRED, FMP, Finnhub, health checks, rate limit guard |
-| `helper.rs` | Shared utilities |
-| `mods.rs` | Mod commands: `/give_creds`, `/take_creds` |
-| `clips.rs` | Clip submission/voting system |
-| `reminder.rs` | Birthday reminders (reads `TZ_OFFSET_HOURS` from env) |
+| `src/stock/orders.rs:75,299` | `is_market_hours()` for order queuing in `/buy`/`/sell` |
+| `src/professor.rs:274` | `is_market_open()` check before Professor trades |
+| `src/basic/economy.rs` | `check_daily()` cooldown in `/uwu` command (active) and `simulate_uwu` |
+| `src/main.rs:44` | `PROFESSOR_TRIGGER_HOUR_UTC` (19 → 17) |
 
-## Key Invariants
+## Gotchas
+- `is_market_hours()` (`api.rs:154`) is sync, checks 9:30–4 PM ET — used for cache TTL and order queuing
+- `is_market_open()` (`api.rs:639`) is async, hits Finnhub — used before Professor trades
+- Float comparisons use `5e-5` epsilon throughout — don't use `==` on quantities
+- Professor caches (`PULSE_CACHE`, `MIDDAY_CACHE`) are UTC-day scoped; `LAST_SESSION_DATE` prevents double-fire on restart
+- `BuyModal`/`SellModal` manually implement the `Modal` trait with dynamic field labels — fragile, don't restructure without testing
 
-- `/buy` and `/sell` are registered but **hidden from the command list** — users enter trades through `/search`
-- `MEMORY.txt` at repo root is Professor's core behavior prompt — read on every bot startup
-- Professor fires daily at **19:00 UTC** (testing) — restore to **17:00 UTC** (1:00 PM EDT) for production
-- Professor portfolio is always named `ProfessorPort`; funded once at 100k creds on first init
-- Options use intrinsic value only (no Black-Scholes) — intentional, keeps it gamified
+## Tests
+Unit tests in `trader/engine.rs`, `options/engine.rs`, `data.rs`, `helper.rs`. Run `cargo test` before changes to engine logic.
 
-## Testing Guards — Must Re-enable Before Production
-
-These are commented out for active testing. Uncomment all before merging to main or deploying:
-
-| Location | What it guards |
-|---|---|
-| `src/stock/orders.rs:75` | Market hours check for `/buy` |
-| `src/stock/orders.rs:299` | Market hours check for `/sell` |
-| `src/professor.rs:257` | `let market_open = is_market_open().await;` |
-| `src/professor.rs:327` | `if !market_open { ... }` |
-| `src/basic.rs:994-995` | Daily cooldown for `/uwu` |
-| `src/main.rs` | Professor trigger time (19:00 → 17:00 UTC) |
+## Workflow
+- Before pushing: run `/sanity` at minimum, `/preflight` for a full gate
+- Skill ladder: `/sanity` → `/rust-polish` → `/preflight`
 
 ## Sensitive Files — Never Commit
-
-- `.env` — bot token and channel IDs
-- `.eventdb` — birthday data
-- `data.json` — live user state
-
-## Future: Website API
-
-Planned axum HTTP layer. Two patterns:
-1. **Mutation** — POST → bot acquires RwLock write on `DashMap` entry → calls existing methods → 200 OK
-2. **Discord profile forwarding** — GET `/user/{id}/profile` → bot calls `guild.member(&http, id)` → returns avatar URL + display name
-
-All mutation endpoints need `X-Secret` auth header. Bot is single source of truth — website never touches `data.json` directly.
+`.env`, `.eventdb`, `data.json`

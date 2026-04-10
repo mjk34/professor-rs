@@ -12,8 +12,19 @@ Professor bot is a developing agent used to incentivise members with rewarding a
 
 Static bin:
 
+One of the easier ways is to install `zig` and `cargo zigbuild`
+
 ```
-cargo build --release --target x86_64-unknown-linux-musl --features vendored
+pacman -S zig
+```
+
+```
+cargo install --locked cargo-zigbuild
+```
+
+
+```
+cargo zigbuild build --release --target x86_64-unknown-linux-musl --features vendored
 ```
 
 ---
@@ -44,7 +55,7 @@ Full simulated options system with covered calls and cash-secured puts.
 - `/options_write` / `/options_cover` — write and close short positions
 - Automatic expiry settlement via daily sweep — ITM positions pay out, OTM expire worthless
 
-### Professor AI Portfolio
+### Professor Portfolio
 Professor (the bot itself) manages its own portfolio using Claude AI as its trading brain.
 
 - Runs a daily session Mon–Fri: market news briefing → position scoring → trade execution
@@ -58,15 +69,3 @@ Professor (the bot itself) manages its own portfolio using Claude AI as its trad
 - `/my_clips` — view your submitted clips
 - `/server_clips` — browse all server submissions
 - `/next_clip` — pull a random unrated clip for review
-
-### Moderation
-- `/give_creds` / `/take_creds` — moderator tools for managing member balances
-
----
-
-## Current Development Branches
-- `stockbot` — stock trading system + Professor AI portfolio
-
-## Past Development Branches
-- `main` — transition from Python to Rust
-- `phase1_rollout` — initial feature set (economy, clips, raffles)

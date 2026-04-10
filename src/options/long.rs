@@ -1,4 +1,4 @@
-//! /options_buy and /options_sell — long-side options commands.
+//! `/options_buy` and `/options_sell` — long-side options commands.
 
 use super::engine::{find_option_idx, option_premium_creds, parse_expiry, ERR_EXPIRY_PAST, ERR_INVALID_EXPIRY, ERR_INVALID_OPTION_TYPE, ERR_MIN_CONTRACTS};
 use crate::api::{fetch_price, market_data_err};

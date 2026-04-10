@@ -11,6 +11,7 @@ use poise::serenity_prelude::futures;
 use std::time::Duration;
 
 /// Builds the embed for a single ticker's detailed view.
+#[allow(clippy::too_many_arguments)] // all args are distinct display fields for a single embed
 fn build_quote_embed(
     ticker: &str,
     display_name: &str,
@@ -18,8 +19,8 @@ fn build_quote_embed(
     change: f64,
     change_pct: f64,
     market_status: &str,
-    profile: &Option<FmpProfile>,
-    ratios: &Option<FmpRatios>,
+    profile: Option<&FmpProfile>,
+    ratios: Option<&FmpRatios>,
 ) -> serenity::CreateEmbed {
     let color = if change >= 0.0 { data::EMBED_SUCCESS } else { data::EMBED_FAIL };
     let arrow = if change_pct >= 0.0 { "+" } else { "" };
@@ -38,7 +39,7 @@ fn build_quote_embed(
         desc += "─────────────────────\n";
         if let Some(vol) = p.volume { desc += &format!("Volume: **{}**\n", format_large_num(vol as f64)); }
         if let Some(mc) = p.market_cap { desc += &format!("Market Cap: **{}**\n", format_large_num(mc)); }
-        if let Some(pe) = ratios.as_ref().and_then(|r| r.pe_ratio).filter(|&v| v > 0.0) {
+        if let Some(pe) = ratios.and_then(|r| r.pe_ratio).filter(|&v| v > 0.0) {
             desc += &format!("P/E (TTM): **{pe:.2}**\n");
         }
         if let Some(r) = &p.range { desc += &format!("52-Week: **{r}**\n"); }
@@ -88,7 +89,7 @@ pub async fn search(
         let display_name = profile.as_ref().and_then(|p| p.company_name.clone()).unwrap_or_else(|| quote.display_name());
         let market_status = quote.market_status();
 
-        let embed = build_quote_embed(&ticker, &display_name, price_usd, change, change_pct, &market_status, &profile, &ratios);
+        let embed = build_quote_embed(&ticker, &display_name, price_usd, change, change_pct, market_status, profile.as_ref(), ratios.as_ref());
 
         let data_ref = &ctx.data().users;
         let u = data_ref.get(&ctx.author().id).unwrap();
