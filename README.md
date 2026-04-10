@@ -8,6 +8,16 @@ Professor bot is a developing agent used to incentivise members with rewarding a
 
 ---
 
+## Build
+
+Static bin:
+
+```
+cargo build --release --target x86_64-unknown-linux-musl --features vendored
+```
+
+---
+
 ## Features
 
 ### Economy
