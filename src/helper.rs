@@ -103,3 +103,71 @@ pub fn gold_hysa_rate(fed_rate: f64) -> f64 {
 pub const fn is_gold(user_data: &UserData) -> bool {
     user_data.get_level() >= GOLD_LEVEL_THRESHOLD
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::data::OptionType;
+
+    #[test]
+    fn price_creds_roundtrip() {
+        assert_eq!(price_to_creds(10.0), 1000.0);
+        assert_eq!(creds_to_price(1000.0), 10.0);
+        assert_eq!(creds_to_price(price_to_creds(42.50)), 42.50);
+    }
+
+    #[test]
+    fn fmt_qty_integer_vs_fractional() {
+        assert_eq!(fmt_qty(5.0), "5");
+        assert_eq!(fmt_qty(5.5), "5.5000");
+        assert_eq!(fmt_qty(0.0001), "0.0001");
+    }
+
+    #[test]
+    fn format_large_num_thresholds() {
+        assert_eq!(format_large_num(500.0), "$500.00");
+        assert_eq!(format_large_num(1_500_000.0), "$1.50M");
+        assert_eq!(format_large_num(2_300_000_000.0), "$2.30B");
+        assert_eq!(format_large_num(1_100_000_000_000.0), "$1.10T");
+    }
+
+    #[test]
+    fn option_intrinsic_call() {
+        assert_eq!(option_intrinsic(&OptionType::Call, 150.0, 100.0), 50.0);
+        assert_eq!(option_intrinsic(&OptionType::Call, 80.0, 100.0), 0.0); // OTM
+    }
+
+    #[test]
+    fn option_intrinsic_put() {
+        assert_eq!(option_intrinsic(&OptionType::Put, 80.0, 100.0), 20.0);
+        assert_eq!(option_intrinsic(&OptionType::Put, 150.0, 100.0), 0.0); // OTM
+    }
+
+    #[test]
+    fn fmt_pnl_positive_and_negative() {
+        assert_eq!(fmt_pnl(500.0), "▲ +$5.00");
+        assert_eq!(fmt_pnl(-300.0), "▼ -$3.00");
+        assert_eq!(fmt_pnl(0.0), "▲ +$0.00");
+    }
+
+    #[test]
+    fn fmt_pct_change_normal_and_zero_basis() {
+        assert_eq!(fmt_pct_change(10.0, 100.0), " (+10.0%)");
+        assert_eq!(fmt_pct_change(-5.0, 100.0), " (-5.0%)");
+        assert_eq!(fmt_pct_change(10.0, 0.0), ""); // zero basis returns empty
+    }
+
+    #[test]
+    fn gold_hysa_rate_floor_and_normal() {
+        assert_eq!(gold_hysa_rate(0.0), 0.5);   // floor
+        assert!((gold_hysa_rate(5.0) - 4.6).abs() < 1e-9);
+    }
+
+    #[test]
+    fn parse_user_mention_formats() {
+        assert_eq!(parse_user_mention("<@123456789>"), Some(123_456_789));
+        assert_eq!(parse_user_mention("<@!123456789>"), Some(123_456_789));
+        assert_eq!(parse_user_mention("123456789"), Some(123_456_789));
+        assert_eq!(parse_user_mention("notanumber"), None);
+    }
+}

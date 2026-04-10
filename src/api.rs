@@ -410,7 +410,7 @@ pub async fn api_health_check() {
     if news.is_empty() {
         tracing::warn!("[API] FINNHUB ✗ — no headlines returned (check key or rate limit)");
     } else {
-        tracing::info!("[API] FINNHUB ✓ — {} headlines fetched", news.len());
+        tracing::info!(count = news.len(), "[API] FINNHUB ✓ — headlines fetched");
     }
 
     // CLAUDE — key presence only (no paid call on startup)

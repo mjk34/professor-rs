@@ -403,7 +403,7 @@ pub async fn professor_daily_session(
             .filter(|t| !prices.contains_key(t))
             .collect();
         if !missing.is_empty() {
-            tracing::info!("[Professor] fetching prices for {} unlisted trade ticker(s): {:?}", missing.len(), missing);
+            tracing::info!(count = missing.len(), tickers = ?missing, "[Professor] fetching prices for unlisted tickers");
             let extra = futures::future::join_all(
                 missing.iter().map(|t| { let t = t.clone(); async move { let result = fetch_quote_detail(&t).await; (t, result) } })
             ).await;
@@ -427,7 +427,7 @@ pub async fn professor_daily_session(
     match &response {
         None => tracing::warn!("[Professor] Claude returned no parseable response"),
         Some(r) => {
-            tracing::info!("[Professor] Claude reason: {}", r.reason);
+            tracing::info!(reason = %r.reason, "[Professor] Claude reason");
             if r.trades.is_empty() {
                 tracing::info!("[Professor] Claude trades: [] (hold)");
             } else {
@@ -443,12 +443,12 @@ pub async fn professor_daily_session(
 
     if let Some(ref resp) = response {
         let cash_limit_creds = price_to_creds(cash_usd * MAX_TRADE_CASH_RATIO);
-        tracing::info!("[Professor] cash_usd={:.2} cash_limit_creds={:.0}", cash_usd, cash_limit_creds);
+        tracing::info!(cash_usd = cash_usd, cash_limit_creds = cash_limit_creds, "[Professor] trade budget");
         let mut ud = u.write().await;
         let port_idx = if let Some(i) = ud.stock.portfolios.iter().position(|p| p.name == PROFESSOR_PORT) { i } else { tracing::warn!("Professor: ProfessorPort missing at trade execution — skipping trades"); return; };
         for trade in resp.trades.iter().take(3) {
             let Some((price_usd, asset_name, asset_type)) = prices.get(&trade.ticker).map(|(p,n,at)| (*p, n.clone(), at.clone())) else {
-                tracing::warn!("[Professor] trade skipped — no price data for {}", trade.ticker);
+                tracing::warn!(ticker = %trade.ticker, "[Professor] trade skipped — no price data");
                 continue;
             };
             let price_creds = price_to_creds(price_usd);
@@ -460,37 +460,37 @@ pub async fn professor_daily_session(
                 "apply_buy" => {
                     let amount_usd = trade.amount_usd.unwrap_or(0.0);
                     if amount_usd < MIN_TRADE_USD {
-                        tracing::warn!("[Professor] BUY {} skipped — amount_usd {:.2} < {}", trade.ticker, amount_usd, MIN_TRADE_USD);
+                        tracing::warn!(ticker = %trade.ticker, amount_usd = amount_usd, min = MIN_TRADE_USD, "[Professor] BUY skipped — below minimum");
                         continue;
                     }
                     let cost_creds = price_to_creds(amount_usd);
                     if port.cash < cost_creds || cost_creds.round() > cash_limit_creds.round() {
-                        tracing::warn!("[Professor] BUY {} skipped — cost_creds={:.0} cash={:.0} limit={:.0}", trade.ticker, cost_creds, port.cash, cash_limit_creds);
+                        tracing::warn!(ticker = %trade.ticker, cost_creds = cost_creds, cash = port.cash, limit = cash_limit_creds, "[Professor] BUY skipped — insufficient funds");
                         continue;
                     }
                     let quantity = amount_usd / price_usd;
                     apply_buy(port, history, &trade.ticker, &asset_name, asset_type, quantity, price_creds, cost_creds, PROFESSOR_PORT);
-                    tracing::info!("[Professor] BUY {} executed — {:.4}sh @ ${:.2}", trade.ticker, quantity, price_usd);
+                    tracing::info!(ticker = %trade.ticker, shares = quantity, price_usd = price_usd, "[Professor] BUY executed");
                     executed.push(ExecutedTrade { action: TradeAction::Buy, ticker: trade.ticker.clone(), amount_usd, price_usd, pnl: None });
                 }
                 "apply_sell" => {
                     let sell_pct = trade.sell_pct.unwrap_or(0.0).clamp(0.0, 1.0);
                     if sell_pct == 0.0 {
-                        tracing::warn!("[Professor] SELL {} skipped — sell_pct is 0", trade.ticker);
+                        tracing::warn!(ticker = %trade.ticker, "[Professor] SELL skipped — sell_pct is 0");
                         continue;
                     }
                     let qty = if let Some(p) = port.positions.iter().find(|p| p.ticker == trade.ticker && !matches!(&p.asset_type, AssetType::Option(_))) { p.quantity * sell_pct } else {
-                        tracing::warn!("[Professor] SELL {} skipped — position not found", trade.ticker);
+                        tracing::warn!(ticker = %trade.ticker, "[Professor] SELL skipped — position not found");
                         continue;
                     };
                     let Some(pnl) = apply_sell(port, history, &trade.ticker, &asset_name, qty, price_creds, PROFESSOR_PORT) else {
-                        tracing::warn!("[Professor] SELL {} skipped — apply_sell returned None", trade.ticker);
+                        tracing::warn!(ticker = %trade.ticker, "[Professor] SELL skipped — apply_sell returned None");
                         continue;
                     };
-                    tracing::info!("[Professor] SELL {} executed — {:.4}sh @ ${:.2}", trade.ticker, qty, price_usd);
+                    tracing::info!(ticker = %trade.ticker, shares = qty, price_usd = price_usd, "[Professor] SELL executed");
                     executed.push(ExecutedTrade { action: TradeAction::Sell, ticker: trade.ticker.clone(), amount_usd: price_usd * qty, price_usd, pnl: Some(pnl) });
                 }
-                _ => { tracing::warn!("[Professor] unknown trade func: {}", trade.func); }
+                _ => { tracing::warn!(func = %trade.func, "[Professor] unknown trade func"); }
             }
         }
 

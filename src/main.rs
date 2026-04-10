@@ -368,3 +368,41 @@ fn next_professor_run(now: chrono::DateTime<Utc>) -> chrono::DateTime<Utc> {
     }
     day.and_hms_opt(19, 0, 0).unwrap().and_utc()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    fn utc(y: i32, mo: u32, d: u32, h: u32, m: u32) -> chrono::DateTime<Utc> {
+        Utc.with_ymd_and_hms(y, mo, d, h, m, 0).unwrap()
+    }
+
+    #[test]
+    fn next_run_same_day_before_19() {
+        // Monday 09:00 — should fire Monday 19:00
+        let result = next_professor_run(utc(2026, 4, 6, 9, 0));
+        assert_eq!(result, utc(2026, 4, 6, 19, 0));
+    }
+
+    #[test]
+    fn next_run_same_day_after_19() {
+        // Monday 20:00 — should fire Tuesday 19:00
+        let result = next_professor_run(utc(2026, 4, 6, 20, 0));
+        assert_eq!(result, utc(2026, 4, 7, 19, 0));
+    }
+
+    #[test]
+    fn next_run_skips_weekend() {
+        // Friday 20:00 — should skip Sat/Sun, fire Monday 19:00
+        let result = next_professor_run(utc(2026, 4, 10, 20, 0));
+        assert_eq!(result, utc(2026, 4, 13, 19, 0));
+    }
+
+    #[test]
+    fn next_run_saturday_before_19() {
+        // Saturday 10:00 — should fire Monday 19:00
+        let result = next_professor_run(utc(2026, 4, 11, 10, 0));
+        assert_eq!(result, utc(2026, 4, 13, 19, 0));
+    }
+}
