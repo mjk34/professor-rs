@@ -8,10 +8,23 @@ Discord bot in Rust (poise 0.6 / serenity). See global `~/.claude/CLAUDE.md` for
 |---|---|
 | `main.rs` | Bot setup, 4 background tasks: voice rewards, maintenance, professor, pending orders |
 | `data.rs` | `Data`, `UserData`, `Portfolio`, `ProfessorMemory` — all shared state |
-| `basic.rs` | Core commands: `/uwu`, `/wallet`, `/claim_bonus`, `/leaderboard`, `/buy_tickets`, `/voice_status` |
-| `stock.rs` | Full trading system: `/buy`, `/sell`, `/search` (~2500 lines) |
-| `trader.rs` | `/portfolio`, `/watchlist`, `/trades` |
-| `options.rs` | `/options_quote`, `/options_buy`, `/options_sell`, `/options_write`, `/options_cover` |
+| `basic/mod.rs` | Re-exports + `/ping`, `/wallet`, `/voice_status`, `/info` |
+| `basic/economy.rs` | `/uwu`, `/claim_bonus`, `/buy_tickets`, `simulate_uwu`, `simulate_claim` |
+| `basic/leaderboard.rs` | `/leaderboard` — creds, fortune, investment rankings with pagination |
+| `stock/mod.rs` | Re-exports: `buy`, `sell`, `search` |
+| `stock/search.rs` | `/search` command + `build_quote_embed` |
+| `stock/orders.rs` | `/buy`, `/sell` commands (hidden; entered via `/search`) |
+| `stock/modals.rs` | `BuyModal`, `SellModal`, `parse_trade_fields` |
+| `trader/mod.rs` | Re-exports: `portfolio`, `watchlist`, `trades`, `apply_buy`, `apply_sell` |
+| `trader/portfolio.rs` | `/portfolio` command — create, view, fund, withdraw, delete |
+| `trader/watchlist.rs` | `/watchlist` command + `build_watchlist_embed` |
+| `trader/trades.rs` | `/trades` command + `build_summary_embed`, `build_filtered_embed`, `build_all_trades_embed` |
+| `trader/engine.rs` | Pure `apply_buy` / `apply_sell` — no Discord concerns, fully unit-tested |
+| `options/mod.rs` | Re-exports all 5 option commands + engine fns |
+| `options/engine.rs` | Pure pricing fns: `option_premium_creds`, `naked_margin_usd`, `find_option_idx`, `parse_expiry` — unit tested |
+| `options/quote.rs` | `/options_quote` |
+| `options/long.rs` | `/options_buy`, `/options_sell` |
+| `options/short.rs` | `/options_write`, `/options_cover` |
 | `professor.rs` | Claude-powered AI daily trading session |
 | `api.rs` | Yahoo Finance, FRED, FMP, Finnhub, health checks, rate limit guard |
 | `helper.rs` | Shared utilities |
@@ -33,8 +46,8 @@ These are commented out for active testing. Uncomment all before merging to main
 
 | Location | What it guards |
 |---|---|
-| `src/stock.rs:644` | Market hours check for `/buy` |
-| `src/stock.rs:789` | Market hours check for `/sell` |
+| `src/stock/orders.rs:75` | Market hours check for `/buy` |
+| `src/stock/orders.rs:299` | Market hours check for `/sell` |
 | `src/professor.rs:257` | `let market_open = is_market_open().await;` |
 | `src/professor.rs:327` | `if !market_open { ... }` |
 | `src/basic.rs:994-995` | Daily cooldown for `/uwu` |

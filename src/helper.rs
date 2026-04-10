@@ -164,6 +164,17 @@ mod tests {
     }
 
     #[test]
+    fn parse_option_type_all_variants() {
+        assert_eq!(parse_option_type("call"), Some(OptionType::Call));
+        assert_eq!(parse_option_type("CALL"), Some(OptionType::Call));
+        assert_eq!(parse_option_type("c"), Some(OptionType::Call));
+        assert_eq!(parse_option_type("put"), Some(OptionType::Put));
+        assert_eq!(parse_option_type("PUT"), Some(OptionType::Put));
+        assert_eq!(parse_option_type("p"), Some(OptionType::Put));
+        assert_eq!(parse_option_type("invalid"), None);
+    }
+
+    #[test]
     fn parse_user_mention_formats() {
         assert_eq!(parse_user_mention("<@123456789>"), Some(123_456_789));
         assert_eq!(parse_user_mention("<@!123456789>"), Some(123_456_789));

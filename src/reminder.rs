@@ -13,7 +13,7 @@ const EVENT_FILE: &str = ".eventdb";
 
 fn import_from_file(filename: &str) -> Vec<Vec<String>> {
     let file = if let Ok(f) = File::open(filename) { f } else {
-        tracing::warn!("Event file '{}' not found, starting with empty database", filename);
+        tracing::warn!(file = %filename, "event file not found — starting with empty database");
         return Vec::new();
     };
 

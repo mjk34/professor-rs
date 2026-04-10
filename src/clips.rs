@@ -24,10 +24,10 @@ use std::time::Duration;
 use tokio::sync::RwLock;
 
 static YOUTUBE_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(https?://)?(www\.)?(youtube\.com/watch\?v=|youtu\.be/).+").unwrap()
+    Regex::new(r"(https?://)?(www\.)?(youtube\.com/watch\?v=|youtu\.be/).+").expect("literal regex")
 });
 static MEDAL_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"https?://medal\.tv/clips/.+").unwrap());
+    LazyLock::new(|| Regex::new(r"https?://medal\.tv/clips/.+").expect("literal regex"));
 
 pub async fn check_mod(ctx: Context<'_>) -> Result<bool, Error> {
     let mod_id = ctx.data().mod_id;
@@ -173,9 +173,9 @@ pub async fn server_clips(ctx: Context<'_>) -> Result<(), Error> {
 
     rated_clips.sort_by(|a, b| {
         b.1.rating
-            .unwrap()
-            .partial_cmp(&a.1.rating.unwrap())
-            .unwrap()
+            .unwrap_or(0.0)
+            .partial_cmp(&a.1.rating.unwrap_or(0.0))
+            .unwrap_or(std::cmp::Ordering::Equal)
     });
 
     let top_ten = rated_clips.iter().take(10);
@@ -559,6 +559,11 @@ pub async fn next_clip(ctx: Context<'_>) -> Result<(), Error> {
 
 pub struct AtomicF64 {
     storage: AtomicU64,
+}
+impl std::fmt::Debug for AtomicF64 {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("AtomicF64").field(&self.load(std::sync::atomic::Ordering::Relaxed)).finish()
+    }
 }
 impl AtomicF64 {
     pub const fn new(value: f64) -> Self {

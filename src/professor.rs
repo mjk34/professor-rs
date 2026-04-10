@@ -42,20 +42,20 @@ pub static LAST_SESSION_DATE: LazyLock<tokio::sync::RwLock<Option<chrono::NaiveD
 
 // ── Finnhub / Claude structs ──────────────────────────────────────────────────
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct FinnhubNewsItem {
     pub headline: String,
     pub source: String,
     pub datetime: i64,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct ClaudeMessage {
     pub role: String,
     pub content: String,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct ClaudeRequest {
     pub model: String,
     pub max_tokens: u32,
@@ -63,28 +63,28 @@ pub struct ClaudeRequest {
     pub messages: Vec<ClaudeMessage>,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct ClaudeContent {
     pub text: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct ClaudeResponse {
     pub content: Vec<ClaudeContent>,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct TradeCall {
     #[serde(rename = "fn")]
     pub func: String,
     pub ticker: String,
-    #[allow(dead_code)]
+    #[expect(dead_code, reason = "deserialized from Claude JSON response; may be used for future filtering")]
     pub asset_type: Option<String>,
     pub amount_usd: Option<f64>,
     pub sell_pct: Option<f64>,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct ProfessorResponse {
     pub reason: String,
     pub trades: Vec<TradeCall>,
@@ -105,7 +105,7 @@ pub async fn fetch_market_news() -> Vec<String> {
     let mut items: Vec<FinnhubNewsItem> = match serde_json::from_slice(&bytes) {
         Ok(v) => v,
         Err(e) => {
-            tracing::warn!("Finnhub parse failed: {e} — body: {}", String::from_utf8_lossy(&bytes).chars().take(200).collect::<String>());
+            tracing::warn!(error = %e, body = %String::from_utf8_lossy(&bytes).chars().take(200).collect::<String>(), "Finnhub parse failed");
             return vec![];
         }
     };
@@ -134,7 +134,7 @@ pub async fn call_claude(system: &str, user: &str) -> String {
     let parsed: ClaudeResponse = match serde_json::from_slice(&bytes) {
         Ok(v) => v,
         Err(e) => {
-            tracing::warn!("Claude parse failed: {e} — body: {}", String::from_utf8_lossy(&bytes).chars().take(300).collect::<String>());
+            tracing::warn!(error = %e, body = %String::from_utf8_lossy(&bytes).chars().take(300).collect::<String>(), "Claude parse failed");
             return String::new();
         }
     };
@@ -243,13 +243,13 @@ pub async fn trading_session(
     let json_str = match (raw.find('{'), raw.rfind('}')) {
         (Some(start), Some(end)) if end > start => &raw[start..=end],
         _ => {
-            tracing::warn!("Professor parse failed: no JSON object found (response length: {} chars) — body: {}", raw.len(), raw.chars().take(300).collect::<String>());
+            tracing::warn!(response_len = raw.len(), body = %raw.chars().take(300).collect::<String>(), "Professor parse failed — no JSON object found");
             return None;
         }
     };
     match serde_json::from_str::<ProfessorResponse>(json_str) {
         Ok(r) => Some(r),
-        Err(e) => { tracing::warn!("Professor parse failed: {e} — json: {}", json_str.chars().take(300).collect::<String>()); None }
+        Err(e) => { tracing::warn!(error = %e, json = %json_str.chars().take(300).collect::<String>(), "Professor parse failed"); None }
     }
 }
 

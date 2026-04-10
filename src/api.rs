@@ -20,7 +20,7 @@ pub type UsersMap = Arc<DashMap<serenity::UserId, Arc<RwLock<crate::data::UserDa
 
 // ── FMP API structs ───────────────────────────────────────────────────────────
 
-#[derive(Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct FmpProfile {
     pub price: Option<f64>,
     #[serde(rename = "marketCap")]
@@ -38,7 +38,7 @@ pub struct FmpProfile {
     pub range: Option<String>,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct FmpRatios {
     #[serde(rename = "priceToEarningsRatioTTM")]
     pub pe_ratio: Option<f64>,
@@ -46,43 +46,43 @@ pub struct FmpRatios {
 
 // ── Yahoo Finance API structs ─────────────────────────────────────────────────
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct YfSearchResponse {
     pub quotes: Vec<YfSearchQuote>,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct YfSearchQuote {
     pub symbol: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct YfChartResponse {
     pub chart: YfChartOuter,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct YfChartOuter {
     pub result: Option<Vec<YfChartEntry>>,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct YfChartEntry {
     pub meta: YfChartMeta,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct YfTradingSession {
     pub start: i64,
     pub end: i64,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct YfCurrentTradingPeriod {
     pub regular: YfTradingSession,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct YfChartMeta {
     pub symbol: String,
     #[serde(rename = "longName")]
@@ -99,7 +99,7 @@ pub struct YfChartMeta {
     pub current_trading_period: Option<YfCurrentTradingPeriod>,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct YfQuote {
     pub symbol: String,
     #[serde(rename = "longName")]
@@ -142,6 +142,8 @@ impl YfQuote {
 
 // ── Market hours ─────────────────────────────────────────────────────────────
 
+/// Eastern timezone offset in hours, read from `TZ_OFFSET_HOURS` env var. Defaults to -4 (EDT).
+/// Set to -5 for EST (winter). Used to determine NYSE market hours.
 pub static TZ_OFFSET: LazyLock<i64> = LazyLock::new(|| {
     std::env::var("TZ_OFFSET_HOURS")
         .ok()
@@ -160,6 +162,7 @@ pub fn is_market_hours() -> bool {
 
 // ── HTTP statics ──────────────────────────────────────────────────────────────
 
+/// Shared HTTP client with a 10-second timeout and a browser-like user-agent (required by Yahoo Finance).
 pub static HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
     reqwest::Client::builder()
         .user_agent("Mozilla/5.0 (compatible; professor-rs/1.0)")
@@ -168,10 +171,12 @@ pub static HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
         .unwrap_or_else(|_| reqwest::Client::new())
 });
 
+/// How long a Yahoo Finance quote is cached before re-fetching (60 seconds — balances freshness vs. rate limits).
 const QUOTE_CACHE_TTL: Duration = Duration::from_secs(60);
 pub static QUOTE_CACHE: LazyLock<DashMap<String, (YfQuote, Instant)>> =
     LazyLock::new(DashMap::new);
 
+/// How long an FMP company profile is cached before re-fetching (5 minutes — profile data changes infrequently).
 const FMP_CACHE_TTL: Duration = Duration::from_secs(300);
 pub static FMP_CACHE: LazyLock<DashMap<String, (FmpProfile, Instant)>> =
     LazyLock::new(DashMap::new);
@@ -584,7 +589,7 @@ pub async fn sweep_expired_options(
                     if p.ticker != info.ticker {
                         return true;
                     }
-                    #[allow(clippy::float_cmp)] // strike prices are stored/compared as exact values we set
+                    #[expect(clippy::float_cmp, reason = "strike prices are stored/compared as exact values we set")]
                     if let AssetType::Option(c) = &p.asset_type {
                         !(c.strike == info.contract.strike
                             && c.expiry == info.contract.expiry

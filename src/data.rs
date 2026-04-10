@@ -32,6 +32,7 @@ pub const TRADE_HISTORY_LIMIT: usize = 500;
 /// Maximum number of pending (queued) orders a user may have at once.
 pub const MAX_PENDING_ORDERS: usize = 20;
 
+/// Discord keycap digit emoji 0–9, indexed by digit value. Used for ticket shop buttons.
 pub const NUMBER_EMOJS: [&str; 10] = [
     "\u{0030}\u{FE0F}\u{20E3}",
     "\u{0031}\u{FE0F}\u{20E3}",
@@ -339,7 +340,7 @@ impl VoiceUser {
     }
 }
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Default, Debug, Serialize, Deserialize)]
 pub struct SaveData {
     pub users: DashMap<serenity::UserId, UserData>,
 }
@@ -353,6 +354,7 @@ impl std::ops::Deref for SaveData {
 }
 
 /// User data, which is stored and accessible in all command invocations
+#[derive(Debug)]
 pub struct Data {
     /// Persistent data of users
     pub users: Arc<DashMap<serenity::UserId, Arc<RwLock<UserData>>>>,
@@ -495,11 +497,11 @@ fn read_lines(filename: &str) -> Vec<String> {
     match fs::read_to_string(filename) {
         Ok(contents) => {
             let lines: Vec<String> = contents.lines().map(String::from).collect();
-            tracing::info!("{}: loaded {} lines", filename, lines.len());
+            tracing::info!(file = %filename, lines = lines.len(), "file loaded");
             lines
         }
         Err(e) => {
-            tracing::warn!("Could not read '{}': {} — using empty list", filename, e);
+            tracing::warn!(file = %filename, error = %e, "could not read file — using empty list");
             Vec::new()
         }
     }
@@ -571,7 +573,7 @@ pub struct Position {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AssetType {
     Stock,
-    #[allow(clippy::upper_case_acronyms)]
+    #[expect(clippy::upper_case_acronyms, reason = "ETF is a well-known abbreviation, not a type name")]
     ETF,
     Crypto,
     Option(OptionContract),
@@ -629,6 +631,223 @@ pub enum TradeAction {
 pub enum OrderSide {
     Buy,
     Sell,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── UserData ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn add_creds_normal_and_negative_guard() {
+        let mut u = UserData::default();
+        assert!(u.add_creds(500));
+        assert_eq!(u.get_creds(), 500);
+        assert!(!u.add_creds(-1));
+        assert_eq!(u.get_creds(), 500); // unchanged
+    }
+
+    #[test]
+    fn sub_creds_normal_and_negative_guard() {
+        let mut u = UserData::default();
+        u.add_creds(1000);
+        assert!(u.sub_creds(400));
+        assert_eq!(u.get_creds(), 600);
+        assert!(!u.sub_creds(-1));
+        assert_eq!(u.get_creds(), 600); // unchanged
+    }
+
+    #[test]
+    fn update_xp_no_levelup() {
+        let mut u = UserData::default();
+        let leveled = u.update_xp(100);
+        assert!(!leveled);
+        assert_eq!(u.get_xp(), 100);
+        assert_eq!(u.get_level(), 0);
+    }
+
+    #[test]
+    fn update_xp_exact_threshold_levels_up() {
+        let mut u = UserData::default();
+        // Level 0 threshold: 500 + 0 * 80 = 500
+        let leveled = u.update_xp(500);
+        assert!(leveled);
+        assert_eq!(u.get_level(), 1);
+        assert_eq!(u.get_xp(), 0); // no leftover
+    }
+
+    #[test]
+    fn update_xp_carries_over_excess() {
+        let mut u = UserData::default();
+        // Level 0 threshold = 500; give 550 — should level up with 50 leftover
+        let leveled = u.update_xp(550);
+        assert!(leveled);
+        assert_eq!(u.get_level(), 1);
+        assert_eq!(u.get_xp(), 50);
+    }
+
+    #[test]
+    fn update_xp_threshold_increases_with_level() {
+        let mut u = UserData::default();
+        u.update_xp(500); // level 0 → 1; threshold was 500
+        // Level 1 threshold: 500 + 1 * 80 = 580
+        assert_eq!(u.get_next_level(), 580);
+        let leveled = u.update_xp(579);
+        assert!(!leveled);
+        assert_eq!(u.get_level(), 1);
+    }
+
+    #[test]
+    fn update_xp_negative_is_noop() {
+        let mut u = UserData::default();
+        assert!(!u.update_xp(-1));
+        assert_eq!(u.get_xp(), 0);
+        assert_eq!(u.get_level(), 0);
+    }
+
+    #[test]
+    fn luck_tiers_at_boundaries() {
+        let mut u = UserData::default();
+        u.daily_count = 1;
+
+        u.rolls = 5;  assert_eq!(u.get_luck(), "Horrible"); // score = 5/2 = 2
+        u.rolls = 12; assert_eq!(u.get_luck(), "Bad");      // score = 12/2 = 6
+        u.rolls = 18; assert_eq!(u.get_luck(), "Average");  // score = 18/2 = 9
+        u.rolls = 24; assert_eq!(u.get_luck(), "Good");     // score = 24/2 = 12
+        u.rolls = 30; assert_eq!(u.get_luck(), "Blessed");  // score = 30/2 = 15
+    }
+
+    #[test]
+    fn luck_no_dailies_returns_na() {
+        let u = UserData::default();
+        assert_eq!(u.get_luck(), "N/A");
+    }
+
+    #[test]
+    fn push_roll_capped_at_seven() {
+        let mut u = UserData::default();
+        for i in 1..=10 {
+            u.push_roll(i);
+        }
+        // Only last 7 should remain: 4..=10
+        assert_eq!(u.recent_rolls.len(), 7);
+        assert_eq!(*u.recent_rolls.front().unwrap(), 4);
+        assert_eq!(*u.recent_rolls.back().unwrap(), 10);
+    }
+
+    #[test]
+    fn rolling_luck_score_averages_correctly() {
+        let mut u = UserData::default();
+        u.push_roll(10);
+        u.push_roll(20);
+        // avg = 30 / 2 = 15 → Blessed
+        assert_eq!(u.get_rolling_luck_score(), 15);
+        assert_eq!(u.get_rolling_luck(), "Blessed");
+    }
+
+    #[test]
+    fn rolling_luck_empty_returns_na() {
+        let u = UserData::default();
+        assert_eq!(u.get_rolling_luck(), "N/A");
+        assert_eq!(u.get_rolling_luck_score(), 0);
+    }
+
+    #[test]
+    fn bonus_counter_caps_at_three_and_check_claim() {
+        let mut u = UserData::default();
+        assert!(!u.check_claim());
+        u.add_bonus(); u.add_bonus(); u.add_bonus();
+        assert_eq!(u.get_bonus(), 3);
+        assert!(u.check_claim());
+        u.add_bonus(); // should not exceed 3
+        assert_eq!(u.get_bonus(), 3);
+        u.reset_bonus();
+        assert_eq!(u.get_bonus(), 0);
+        assert!(!u.check_claim());
+    }
+
+    // ── Portfolio ─────────────────────────────────────────────────────────
+
+    fn make_short_option(collateral: f64) -> Position {
+        Position {
+            ticker: "TEST".to_string(),
+            asset_type: AssetType::Option(OptionContract {
+                strike: 100.0,
+                expiry: Utc::now(),
+                option_type: OptionType::Call,
+                contracts: 1,
+                side: OptionSide::Short,
+                collateral,
+            }),
+            quantity: 1.0,
+            avg_cost: 0.0,
+        }
+    }
+
+    fn make_long_option(collateral: f64) -> Position {
+        Position {
+            ticker: "TEST".to_string(),
+            asset_type: AssetType::Option(OptionContract {
+                strike: 100.0,
+                expiry: Utc::now(),
+                option_type: OptionType::Put,
+                contracts: 1,
+                side: OptionSide::Long,
+                collateral,
+            }),
+            quantity: 1.0,
+            avg_cost: 0.0,
+        }
+    }
+
+    fn make_stock_position() -> Position {
+        Position {
+            ticker: "AAPL".to_string(),
+            asset_type: AssetType::Stock,
+            quantity: 10.0,
+            avg_cost: 500.0,
+        }
+    }
+
+    #[test]
+    fn locked_cash_sums_only_short_collateral() {
+        let mut port = Portfolio::new("test".to_string());
+        port.positions.push(make_short_option(1000.0));
+        port.positions.push(make_short_option(500.0));
+        port.positions.push(make_long_option(999.0));  // should not count
+        port.positions.push(make_stock_position());     // should not count
+        assert_eq!(port.locked_cash(), 1500.0);
+    }
+
+    #[test]
+    fn locked_cash_empty_portfolio() {
+        let port = Portfolio::new("empty".to_string());
+        assert_eq!(port.locked_cash(), 0.0);
+    }
+
+    // ── StockProfile ──────────────────────────────────────────────────────
+
+    #[test]
+    fn push_trade_enforces_history_limit() {
+        let mut sp = StockProfile::default();
+        for i in 0..=TRADE_HISTORY_LIMIT {
+            sp.push_trade(TradeRecord {
+                portfolio: "p".to_string(),
+                ticker: format!("T{i}"),
+                asset_name: "name".to_string(),
+                action: TradeAction::Buy,
+                quantity: 1.0,
+                price_per_unit: 100.0,
+                total_creds: 100.0,
+                realized_pnl: None,
+                timestamp: Utc::now(),
+            });
+        }
+        assert_eq!(sp.trade_history.len(), TRADE_HISTORY_LIMIT);
+        // oldest entry (T0) should have been dropped
+        assert_eq!(sp.trade_history.front().unwrap().ticker, "T1");
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

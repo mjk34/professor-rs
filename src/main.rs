@@ -1,22 +1,22 @@
 //! Entry point: bot setup, task scheduling, and event dispatch.
 // Pedantic/nursery lints that are either intentional or not worth the churn:
-#![allow(clippy::significant_drop_tightening)] // DashMap Ref shard locks; contention is acceptable in this bot's concurrency model
-#![allow(clippy::cast_precision_loss)]         // integer → f64 casts in game math are fine
-#![allow(clippy::cast_possible_truncation)]    // f64 → i32 truncation in cred calculations is intentional
-#![allow(clippy::cast_possible_wrap)]          // small bounded values cast to i32 are safe
-#![allow(clippy::cast_sign_loss)]
-#![allow(clippy::missing_errors_doc)]          // not publishing a public API
-#![allow(clippy::missing_panics_doc)]
-#![allow(clippy::must_use_candidate)]
-#![allow(clippy::wildcard_imports)]
-#![allow(clippy::items_after_statements)]
-#![allow(clippy::too_many_lines)]
-#![allow(clippy::manual_let_else)]             // let...else is too invasive a restructure for existing match/if patterns
-#![allow(clippy::string_add)]                  // format! appended to String is idiomatic for embed building
-#![allow(clippy::option_if_let_else)]          // map_or_else restructure reduces readability in complex closures
-#![allow(clippy::similar_names)]               // short variable names (u, ud, etc.) are conventional in this codebase
-#![allow(clippy::format_push_string)]          // push_str(&format!(...)) is clearer than write!() for embed building
-#![allow(clippy::redundant_else)]              // explicit else after always-continuing if is intentional for readability
+#![expect(clippy::significant_drop_tightening, reason = "DashMap Ref shard locks; contention is acceptable in this bot's concurrency model")]
+#![expect(clippy::cast_precision_loss,         reason = "integer → f64 casts in game math are fine")]
+#![expect(clippy::cast_possible_truncation,    reason = "f64 → i32 truncation in cred calculations is intentional")]
+#![expect(clippy::cast_possible_wrap,          reason = "small bounded values cast to i32 are safe")]
+#![expect(clippy::cast_sign_loss,              reason = "cred/ticket values are always non-negative at cast sites")]
+#![expect(clippy::missing_errors_doc,          reason = "not publishing a public API")]
+#![expect(clippy::missing_panics_doc,          reason = "not publishing a public API")]
+#![expect(clippy::must_use_candidate,          reason = "Discord command return values are always awaited by poise")]
+#![expect(clippy::wildcard_imports,            reason = "poise/serenity re-exports are intentionally glob-imported")]
+#![expect(clippy::items_after_statements,      reason = "nested helper fns after setup statements are intentional")]
+#![expect(clippy::too_many_lines,              reason = "command dispatch functions are inherently long")]
+#![expect(clippy::manual_let_else,             reason = "let-else is too invasive a restructure for existing match/if patterns")]
+#![expect(clippy::string_add,                  reason = "push_str(&format!(...)) is idiomatic for embed building")]
+#![expect(clippy::option_if_let_else,          reason = "map_or_else restructure reduces readability in complex closures")]
+#![expect(clippy::similar_names,               reason = "short variable names (u, ud, etc.) are conventional in this codebase")]
+#![expect(clippy::format_push_string,          reason = "push_str(&format!(...)) is clearer than write!() for embed building")]
+#![expect(clippy::redundant_else,              reason = "explicit else after always-continuing if is intentional for readability")]
 mod api;
 mod basic;
 mod clips;
@@ -35,10 +35,13 @@ use data::{UserData, VoiceUser};
 use std::{env, sync::Arc};
 use tokio::sync::RwLock;
 
-pub use poise::serenity_prelude as serenity;
+#[doc(inline)] pub use poise::serenity_prelude as serenity;
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 type Context<'a> = poise::Context<'a, data::Data, Error>;
+
+/// Professor daily session trigger time (UTC hour). 19 = testing; restore to 17 (1 PM EDT) for production.
+const PROFESSOR_TRIGGER_HOUR_UTC: u32 = 19;
 
 #[poise::command(prefix_command)]
 async fn register(ctx: Context<'_>) -> Result<(), Error> {
@@ -180,7 +183,7 @@ async fn main() {
     client.unwrap().start().await.unwrap();
 }
 
-#[allow(clippy::unused_async)] // poise requires async fn signature for event handlers
+#[expect(clippy::unused_async, reason = "poise requires async fn signature for event handlers")]
 async fn event_handler(
     _ctx: &serenity::Context,
     event: &serenity::FullEvent,
@@ -195,13 +198,19 @@ async fn event_handler(
         serenity::FullEvent::Ready { data_about_bot, .. } => {
             let now = chrono::Utc::now();
             let next_run = next_professor_run(now);
+            let est_offset = chrono::FixedOffset::west_opt(5 * 3600).unwrap(); // EST (UTC-5); adjust to -4 during EDT
+            let next_run_est = next_run.with_timezone(&est_offset);
             tracing::info!(
-                "Logged in as {} | startup UTC: {} ({:?}) | professor next run: {} ({:?})",
+                "Logged in as {} | startup UTC: {} ({:?})",
                 data_about_bot.user.name,
                 now.format("%Y-%m-%d %H:%M:%S"),
                 now.weekday(),
-                next_run.format("%Y-%m-%d %H:%M:%S"),
-                next_run.weekday(),
+            );
+            tracing::info!(
+                "Professor's next daily routine: {} at {} EST ({})",
+                next_run_est.format("%Y-%m-%d"),
+                next_run_est.format("%I:%M %p"),
+                next_run_est.weekday(),
             );
         }
 
@@ -366,7 +375,7 @@ fn next_professor_run(now: chrono::DateTime<Utc>) -> chrono::DateTime<Utc> {
         }
         day += chrono::Duration::days(1);
     }
-    day.and_hms_opt(19, 0, 0).unwrap().and_utc()
+    day.and_hms_opt(PROFESSOR_TRIGGER_HOUR_UTC, 0, 0).unwrap().and_utc()
 }
 
 #[cfg(test)]

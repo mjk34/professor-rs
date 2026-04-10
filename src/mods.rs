@@ -258,7 +258,7 @@ pub async fn test_seed_data(
     let users = &ctx.data().users;
     let inserted = seeded.len();
     for (id, ud) in seeded {
-        tracing::info!("seed_test_data: seeding member {}", id);
+        tracing::info!(user_id = %id, "seed_test_data: seeding member");
         users.insert(id, Arc::new(RwLock::new(ud)));
     }
 
