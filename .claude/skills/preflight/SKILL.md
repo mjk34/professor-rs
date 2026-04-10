@@ -86,3 +86,13 @@ Then:
 - Total findings by severity (`[critical]` / `[warning]` / `[style]`)
 - All `[critical]` findings with their resolution status (fixed / deferred)
 - Any deferred items with reasons — these are the remaining work before push
+
+---
+
+## Gotchas
+
+**Phase 3.5 is not optional — do not wait for user input.**
+After Phase 3 completes, run Phase 3.5 automatically. The skill prescribes it. Pausing to show Phase 3 results and asking "should I fix these?" is wrong — fix them, then show the final summary.
+
+**Do not re-flag findings already in the resolved set.**
+Phase 3 (rust-audit) must skip file:line locations already fixed or deferred in Phase 2.5. Forgetting to pass the resolved set causes duplicate findings in the final summary and redundant fix attempts.

@@ -51,3 +51,16 @@ At the end, print:
 1. Violation counts by severity tier (`critical` / `warning` / `style`)
 2. Violation counts by category (Universal, Safety, Docs, etc.)
 3. All violations ranked by severity tier first, then frequency — no artificial cap
+
+---
+
+## Gotchas
+
+**Read checklist.md before auditing — do not audit from memory.**
+The checklist is the source of truth for rule IDs and severity tiers. Auditing from memory produces wrong severity tags and missed or invented rules.
+
+**This is an application crate — skip all Library rules.**
+`Cargo.toml` has `[[bin]]`, not `[lib]`. Rules prefixed with "Library /" (M-ESCAPE-HATCHES, M-DONT-LEAK-TYPES, M-SIMPLE-ABSTRACTIONS, etc.) do not apply. Flagging them wastes time and creates false positives.
+
+**M-PANIC-IS-STOP vs M-PANIC-ON-BUG are distinct.**
+M-PANIC-IS-STOP: `.unwrap()` on recoverable conditions (user input, external APIs, env vars) — flag these. M-PANIC-ON-BUG: `.unwrap()` on invariants that must hold (logic bugs) — acceptable, do not flag.

@@ -52,3 +52,13 @@ The build must be warning-free and error-free. If warnings remain, return to the
 ---
 
 Report at the end: one line per phase — what was found and fixed, or "clean".
+
+---
+
+## Gotchas
+
+**`#![expect]` fires `unfulfilled_lint_expectations` under `clippy::all` for pedantic lints.**
+Pedantic/nursery lints are not active at the `clippy::all` level. If a suppression uses `#![expect(clippy::some_pedantic_lint)]`, Phase 1 will warn that the expectation was never fulfilled. Fix: use `#![allow(clippy::...)] // reason` for lints that only fire under `--pedantic`. Reserve `#![expect]` for lints that fire at `clippy::all` or lower.
+
+**Do not re-add suppression attributes already present in main.rs.**
+The common suppressions list in Phase 2 documents what's already there. Adding a duplicate `#![allow(...)]` compiles fine but creates confusing redundancy. Check main.rs before adding any new crate-level allow.
