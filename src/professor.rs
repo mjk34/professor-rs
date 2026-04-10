@@ -3,7 +3,7 @@
 //!---------------------------------------------------------------------!
 
 use crate::api::{fetch_quote_detail, UsersMap, HTTP_CLIENT};
-use crate::data::{self, AssetType, MemoryEntry, ProfessorMemory};
+use crate::data::{self, AssetType, MemoryEntry, ProfessorMemory, TradeAction};
 use crate::helper::{creds_to_price, default_footer, fmt_qty, price_to_creds};
 use crate::trader::{apply_buy, apply_sell};
 use crate::{serenity, Context, Error};
@@ -16,17 +16,25 @@ use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
 
 pub const PROFESSOR_PORT: &str = "ProfessorPort";
+/// Maximum fraction of available portfolio cash the professor may deploy in a single trade.
 const MAX_TRADE_CASH_RATIO: f64 = 0.30;
+/// Minimum USD notional value for any professor-initiated trade (avoids dust trades).
 const MIN_TRADE_USD: f64 = 50.0;
+/// Maximum number of memory entries retained in the professor's rolling context window.
 const MAX_MEMORY_ENTRIES: usize = 30;
 
-/// Daily cache for morning_pulse — reused within the same UTC day to avoid redundant Claude calls.
+/// Daily cache for `morning_pulse` — reused within the same UTC day to avoid redundant Claude calls.
 pub static PULSE_CACHE: LazyLock<tokio::sync::RwLock<Option<(chrono::NaiveDate, String)>>> =
     LazyLock::new(|| tokio::sync::RwLock::new(None));
 
-/// Daily cache for midday_check — reused within the same UTC day.
+/// Daily cache for `midday_check` — reused within the same UTC day.
 pub static MIDDAY_CACHE: LazyLock<tokio::sync::RwLock<Option<(chrono::NaiveDate, String)>>> =
     LazyLock::new(|| tokio::sync::RwLock::new(None));
+
+static FINNHUB_API_KEY: LazyLock<Option<String>> =
+    LazyLock::new(|| std::env::var("FINNHUB_API_KEY").ok());
+static CLAUDE_API_KEY: LazyLock<Option<String>> =
+    LazyLock::new(|| std::env::var("CLAUDE_API_KEY").ok());
 
 /// Tracks the last UTC date the professor session ran — prevents double-firing on restart.
 pub static LAST_SESSION_DATE: LazyLock<tokio::sync::RwLock<Option<chrono::NaiveDate>>> =
@@ -85,13 +93,10 @@ pub struct ProfessorResponse {
 // ── Market news ───────────────────────────────────────────────────────────────
 
 pub async fn fetch_market_news() -> Vec<String> {
-    let api_key = match std::env::var("FINNHUB_API_KEY") {
-        Ok(k) => k,
-        Err(_) => { tracing::warn!("FINNHUB_API_KEY not set"); return vec![]; }
-    };
+    let Some(api_key) = FINNHUB_API_KEY.as_deref() else { tracing::warn!("FINNHUB_API_KEY not set"); return vec![]; };
     let resp = HTTP_CLIENT
         .get("https://finnhub.io/api/v1/news")
-        .query(&[("category", "general"), ("token", api_key.as_str())])
+        .query(&[("category", "general"), ("token", api_key)])
         .send().await;
     let resp = match resp { Ok(r) => r, Err(e) => { tracing::warn!("Finnhub fetch failed: {e}"); return vec![]; } };
     let bytes = match resp.bytes().await {
@@ -109,10 +114,7 @@ pub async fn fetch_market_news() -> Vec<String> {
 }
 
 pub async fn call_claude(system: &str, user: &str) -> String {
-    let api_key = match std::env::var("CLAUDE_API_KEY") {
-        Ok(k) => k,
-        Err(_) => { tracing::warn!("CLAUDE_API_KEY not set"); return String::new(); }
-    };
+    let Some(api_key) = CLAUDE_API_KEY.as_deref() else { tracing::warn!("CLAUDE_API_KEY not set"); return String::new(); };
     let body = ClaudeRequest {
         model: "claude-sonnet-4-6".to_string(),
         max_tokens: 1024,
@@ -121,7 +123,7 @@ pub async fn call_claude(system: &str, user: &str) -> String {
     };
     let resp = HTTP_CLIENT
         .post("https://api.anthropic.com/v1/messages")
-        .header("x-api-key", &api_key)
+        .header("x-api-key", api_key)
         .header("anthropic-version", "2023-06-01")
         .header("content-type", "application/json")
         .json(&body).send().await;
@@ -276,10 +278,7 @@ pub async fn professor_daily_session(
 
     *LAST_SESSION_DATE.write().await = Some(today);
 
-    let u = match users.get(&bot_user_id) {
-        Some(u) => u,
-        None => { tracing::warn!("Professor UserData not found"); return; }
-    };
+    let u = if let Some(u) = users.get(&bot_user_id) { u } else { tracing::warn!("Professor UserData not found"); return; };
 
     // Write lock acquired here, snapshot taken, lock released before any async calls
     let (uwu_creds, claim_creds, memory, portfolio_snapshot, held_tickers, pre_trade_cash_usd, pre_trade_positions) = {
@@ -303,27 +302,28 @@ pub async fn professor_daily_session(
             let wallet = ud.get_creds().max(0);
             ud.sub_creds(wallet);
             let mut port = data::Portfolio::new(PROFESSOR_PORT.to_string());
-            port.cash = wallet as f64;
+            port.cash = f64::from(wallet);
             ud.stock.portfolios.push(port);
             tracing::info!("Professor: created missing ProfessorPort with {wallet} creds cash");
         }
 
         let uwu_creds = crate::basic::simulate_uwu(&mut ud);
-        let claim_creds = crate::basic::simulate_claim(&mut ud);
+        // Only attempt claim if uwu rolled — if cooldown hit, bonus_count didn't change
+        let claim_creds = if uwu_creds != 0 { crate::basic::simulate_claim(&mut ud) } else { 0 };
 
         // Sweep full wallet into portfolio cash (covers initial 100k + any daily earnings)
         let wallet = ud.get_creds().max(0);
         if wallet > 0 {
             ud.sub_creds(wallet);
             if let Some(port) = ud.stock.portfolios.iter_mut().find(|p| p.name == PROFESSOR_PORT) {
-                port.cash += wallet as f64;
+                port.cash += f64::from(wallet);
             }
         }
 
         let memory = ud.professor_memory.clone().unwrap_or_default();
         let (snap, tickers, pre_trade_cash_usd, pre_trade_positions) = ud.stock.portfolios.iter()
             .find(|p| p.name == PROFESSOR_PORT)
-            .map(|port| {
+            .map_or_else(|| (String::new(), vec![], 0.0, vec![]), |port| {
                 let snap = format!("Cash: ${:.2}\nPositions:\n{}", creds_to_price(port.cash),
                     port.positions.iter().filter(|p| !matches!(&p.asset_type, AssetType::Option(_)))
                     .map(|p| format!("  {}: {:.4}sh @ ${:.2}", p.ticker, p.quantity, creds_to_price(p.avg_cost)))
@@ -337,8 +337,7 @@ pub async fn professor_daily_session(
                     .map(|p| (p.ticker.clone(), p.quantity))
                     .collect();
                 (snap, tickers, cash_usd, positions)
-            })
-            .unwrap_or_else(|| (String::new(), vec![], 0.0, vec![]));
+            });
         (uwu_creds, claim_creds, memory, snap, tickers, pre_trade_cash_usd, pre_trade_positions)
     };
 
@@ -348,8 +347,9 @@ pub async fn professor_daily_session(
     let watch_tickers = parse_watch_tickers(&pulse);
     let sentiment = parse_sentiment(&pulse);
 
-    let mut all_tickers = held_tickers.clone();
-    for t in &watch_tickers { if !all_tickers.contains(t) { all_tickers.push(t.clone()); } }
+    let mut seen: std::collections::HashSet<String> = held_tickers.iter().cloned().collect();
+    let mut all_tickers = held_tickers; // move — held_tickers not used after this point
+    all_tickers.extend(watch_tickers.into_iter().filter(|t| seen.insert(t.clone())));
     let price_results = futures::future::join_all(
         all_tickers.iter().map(|t| { let t = t.clone(); async move { let result = fetch_quote_detail(&t).await; (t, result) } })
     ).await;
@@ -363,7 +363,7 @@ pub async fn professor_daily_session(
     }
 
     let value_before: f64 = pre_trade_cash_usd + pre_trade_positions.iter()
-        .map(|(t, q)| prices.get(t).map(|(p, _, _)| *p).unwrap_or(0.0) * q)
+        .map(|(t, q)| prices.get(t).map_or(0.0, |(p, _, _)| *p) * q)
         .sum::<f64>();
 
     let positions_with_prices = {
@@ -371,7 +371,7 @@ pub async fn professor_daily_session(
         ur.stock.portfolios.iter().find(|p| p.name == PROFESSOR_PORT).map(|port| {
             port.positions.iter().filter(|p| !matches!(&p.asset_type, AssetType::Option(_)))
             .map(|p| {
-                let cur = prices.get(&p.ticker).map(|(pr,_,_)| *pr).unwrap_or(0.0);
+                let cur = prices.get(&p.ticker).map_or(0.0, |(pr,_,_)| *pr);
                 let avg = creds_to_price(p.avg_cost);
                 let pct = if avg > 0.0 { (cur - avg) / avg * 100.0 } else { 0.0 };
                 format!("  {}: {:.4}sh @ ${:.2}, now ${:.2} ({:+.1}%)", p.ticker, p.quantity, avg, cur, pct)
@@ -391,7 +391,7 @@ pub async fn professor_daily_session(
     let cash_usd = {
         let ur = u.read().await;
         ur.stock.portfolios.iter().find(|p| p.name == PROFESSOR_PORT)
-        .map(|p| creds_to_price(p.cash)).unwrap_or(0.0)
+        .map_or(0.0, |p| creds_to_price(p.cash))
     };
 
     let response = trading_session(&entries_str, &pulse, &sentiment, &midday_scores, &portfolio_snapshot, cash_usd, &memory).await;
@@ -418,9 +418,9 @@ pub async fn professor_daily_session(
     }
 
     // Re-acquire write lock to execute trades and persist memory entry
-    struct ExecutedTrade { action: String, ticker: String, amount_usd: f64, price_usd: f64, pnl: Option<f64> }
+    struct ExecutedTrade { action: TradeAction, ticker: String, amount_usd: f64, price_usd: f64, pnl: Option<f64> }
     let mut executed: Vec<ExecutedTrade> = vec![];
-    let reason = response.as_ref().map(|r| r.reason.clone()).unwrap_or_else(|| "No data from Claude today.".to_string());
+    let reason = response.as_ref().map_or_else(|| "No data from Claude today.".to_string(), |r| r.reason.clone());
 
     // Debug: log Claude's full response
     tracing::info!("[Professor] ───────────────────────────────────────");
@@ -445,10 +445,7 @@ pub async fn professor_daily_session(
         let cash_limit_creds = price_to_creds(cash_usd * MAX_TRADE_CASH_RATIO);
         tracing::info!("[Professor] cash_usd={:.2} cash_limit_creds={:.0}", cash_usd, cash_limit_creds);
         let mut ud = u.write().await;
-        let port_idx = match ud.stock.portfolios.iter().position(|p| p.name == PROFESSOR_PORT) {
-            Some(i) => i,
-            None => { tracing::warn!("Professor: ProfessorPort missing at trade execution — skipping trades"); return; }
-        };
+        let port_idx = if let Some(i) = ud.stock.portfolios.iter().position(|p| p.name == PROFESSOR_PORT) { i } else { tracing::warn!("Professor: ProfessorPort missing at trade execution — skipping trades"); return; };
         for trade in resp.trades.iter().take(3) {
             let Some((price_usd, asset_name, asset_type)) = prices.get(&trade.ticker).map(|(p,n,at)| (*p, n.clone(), at.clone())) else {
                 tracing::warn!("[Professor] trade skipped — no price data for {}", trade.ticker);
@@ -474,7 +471,7 @@ pub async fn professor_daily_session(
                     let quantity = amount_usd / price_usd;
                     apply_buy(port, history, &trade.ticker, &asset_name, asset_type, quantity, price_creds, cost_creds, PROFESSOR_PORT);
                     tracing::info!("[Professor] BUY {} executed — {:.4}sh @ ${:.2}", trade.ticker, quantity, price_usd);
-                    executed.push(ExecutedTrade { action: "BUY".to_string(), ticker: trade.ticker.clone(), amount_usd, price_usd, pnl: None });
+                    executed.push(ExecutedTrade { action: TradeAction::Buy, ticker: trade.ticker.clone(), amount_usd, price_usd, pnl: None });
                 }
                 "apply_sell" => {
                     let sell_pct = trade.sell_pct.unwrap_or(0.0).clamp(0.0, 1.0);
@@ -482,19 +479,16 @@ pub async fn professor_daily_session(
                         tracing::warn!("[Professor] SELL {} skipped — sell_pct is 0", trade.ticker);
                         continue;
                     }
-                    let qty = match port.positions.iter().find(|p| p.ticker == trade.ticker && !matches!(&p.asset_type, AssetType::Option(_))) {
-                        Some(p) => p.quantity * sell_pct,
-                        None => {
-                            tracing::warn!("[Professor] SELL {} skipped — position not found", trade.ticker);
-                            continue;
-                        }
+                    let qty = if let Some(p) = port.positions.iter().find(|p| p.ticker == trade.ticker && !matches!(&p.asset_type, AssetType::Option(_))) { p.quantity * sell_pct } else {
+                        tracing::warn!("[Professor] SELL {} skipped — position not found", trade.ticker);
+                        continue;
                     };
                     let Some(pnl) = apply_sell(port, history, &trade.ticker, &asset_name, qty, price_creds, PROFESSOR_PORT) else {
                         tracing::warn!("[Professor] SELL {} skipped — apply_sell returned None", trade.ticker);
                         continue;
                     };
                     tracing::info!("[Professor] SELL {} executed — {:.4}sh @ ${:.2}", trade.ticker, qty, price_usd);
-                    executed.push(ExecutedTrade { action: "SELL".to_string(), ticker: trade.ticker.clone(), amount_usd: price_usd * qty, price_usd, pnl: Some(pnl) });
+                    executed.push(ExecutedTrade { action: TradeAction::Sell, ticker: trade.ticker.clone(), amount_usd: price_usd * qty, price_usd, pnl: Some(pnl) });
                 }
                 _ => { tracing::warn!("[Professor] unknown trade func: {}", trade.func); }
             }
@@ -515,7 +509,7 @@ pub async fn professor_daily_session(
         "No trades today — holding conviction.".to_string()
     } else {
         executed.iter().map(|t| {
-            if t.action == "BUY" {
+            if t.action == TradeAction::Buy {
                 format!("✦ BOUGHT **{}** @ ${:.2} — ${:.2}", t.ticker, t.price_usd, t.amount_usd)
             } else {
                 let pnl_str = t.pnl.map(crate::helper::fmt_pnl).unwrap_or_default();
@@ -524,18 +518,22 @@ pub async fn professor_daily_session(
         }).collect::<Vec<_>>().join("\n")
     };
 
-    let uwu_line = if uwu_creds > 0 { format!("+{uwu_creds} creds") } else if uwu_creds < 0 { format!("{uwu_creds} creds (crit fail)") } else { "cooldown".to_string() };
+    let uwu_line = match uwu_creds.cmp(&0) {
+        std::cmp::Ordering::Greater => format!("+{uwu_creds} creds"),
+        std::cmp::Ordering::Less    => format!("{uwu_creds} creds (crit fail)"),
+        std::cmp::Ordering::Equal   => "cooldown".to_string(),
+    };
     let claim_line = if claim_creds > 0 { format!("+{claim_creds} creds") } else { "not yet (need 3 uwu rolls)".to_string() };
 
     let (portfolio_after, value_after) = {
         let ur = u.read().await;
         ur.stock.portfolios.iter().find(|p| p.name == PROFESSOR_PORT).map(|port| {
             let total_usd = port.positions.iter().filter(|p| !matches!(&p.asset_type, AssetType::Option(_)))
-                .map(|p| prices.get(&p.ticker).map(|(pr,_,_)| *pr).unwrap_or(0.0) * p.quantity)
+                .map(|p| prices.get(&p.ticker).map_or(0.0, |(pr,_,_)| *pr) * p.quantity)
                 .sum::<f64>() + creds_to_price(port.cash);
             let pos_lines = port.positions.iter().filter(|p| !matches!(&p.asset_type, AssetType::Option(_)))
                 .map(|p| {
-                    let cur = prices.get(&p.ticker).map(|(pr,_,_)| *pr).unwrap_or(0.0);
+                    let cur = prices.get(&p.ticker).map_or(0.0, |(pr,_,_)| *pr);
                     let avg = creds_to_price(p.avg_cost);
                     let pct = if avg > 0.0 { (cur-avg)/avg*100.0 } else { 0.0 };
                     format!("{}: {:.4}sh  {:+.1}%", p.ticker, p.quantity, pct)
@@ -549,7 +547,7 @@ pub async fn professor_daily_session(
     } else {
         0.0
     };
-    let total_change_str = format!("{:+.2}%", total_change_pct);
+    let total_change_str = format!("{total_change_pct:+.2}%");
 
     let desc = format!(
         "**Daily Income**\n/uwu: {uwu_line}\n/claim: {claim_line}\n\n\
@@ -567,10 +565,7 @@ pub async fn professor_daily_session(
         .color(data::EMBED_CYAN)
         .footer(default_footer());
 
-    let channel_id: u64 = match bot_chat.parse() {
-        Ok(id) => id,
-        Err(_) => { tracing::warn!("Invalid bot_chat channel id: {bot_chat}"); return; }
-    };
+    let channel_id: u64 = if let Ok(id) = bot_chat.parse() { id } else { tracing::warn!("Invalid bot_chat channel id: {bot_chat}"); return; };
     if let Err(e) = ChannelId::new(channel_id).send_message(http, CreateMessage::new().embed(embed)).await {
         tracing::warn!("Failed to post professor summary: {e}");
     }
@@ -579,15 +574,9 @@ pub async fn professor_daily_session(
 #[poise::command(slash_command, description_localized("en-US", "View Professor's AI portfolio"))]
 pub async fn professor(ctx: Context<'_>) -> Result<(), Error> {
     let bot_user_id = ctx.data().bot_user_id;
-    let u = match ctx.data().users.get(&bot_user_id) {
-        Some(u) => u,
-        None => { ctx.say("Professor's portfolio hasn't been initialized yet.").await?; return Ok(()); }
-    };
+    let u = if let Some(u) = ctx.data().users.get(&bot_user_id) { u } else { ctx.say("Professor's portfolio hasn't been initialized yet.").await?; return Ok(()); };
     let user_data = u.read().await;
-    let port = match user_data.stock.portfolios.iter().find(|p| p.name == PROFESSOR_PORT) {
-        Some(p) => p,
-        None => { ctx.say("Professor doesn't have a portfolio yet.").await?; return Ok(()); }
-    };
+    let port = if let Some(p) = user_data.stock.portfolios.iter().find(|p| p.name == PROFESSOR_PORT) { p } else { ctx.say("Professor doesn't have a portfolio yet.").await?; return Ok(()); };
 
     let pos_lines = {
         let stocks: Vec<String> = port.positions.iter()
@@ -598,9 +587,7 @@ pub async fn professor(ctx: Context<'_>) -> Result<(), Error> {
     };
 
     let memory_str = user_data.professor_memory.as_ref()
-        .and_then(|m| m.entries.back())
-        .map(|e| format!("_{}_\n{}", e.date.format("%b %d, %Y"), e.content))
-        .unwrap_or_else(|| "_No entries yet._".to_string());
+        .and_then(|m| m.entries.back()).map_or_else(|| "_No entries yet._".to_string(), |e| format!("_{}_\n{}", e.date.format("%b %d, %Y"), e.content));
 
     let recent_trades: Vec<String> = user_data.stock.trade_history.iter().rev()
         .filter(|t| t.portfolio == PROFESSOR_PORT && !matches!(t.action, data::TradeAction::Sell if t.realized_pnl.is_none()))

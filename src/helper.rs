@@ -3,13 +3,13 @@
 //! reduce repetitive code                                              !
 //!                                                                     !
 //! Utilities:                                                          !
-//!     [ ] - parse_user_mention                                        !
-//!     [ ] - price_to_creds / creds_to_price                          !
-//!     [ ] - fmt_qty / format_large_num                               !
-//!     [ ] - option_intrinsic / parse_option_type / option_type_str   !
-//!     [ ] - default_footer                                            !
-//!     [ ] - fmt_pnl / fmt_pct_change                                 !
-//!     [ ] - gold_hysa_rate / is_gold                                 !
+//!     [ ] - `parse_user_mention`                                        !
+//!     [ ] - `price_to_creds` / `creds_to_price`                          !
+//!     [ ] - `fmt_qty` / `format_large_num`                               !
+//!     [ ] - `option_intrinsic` / `parse_option_type` / `option_type_str`   !
+//!     [ ] - `default_footer`                                            !
+//!     [ ] - `fmt_pnl` / `fmt_pct_change`                                 !
+//!     [ ] - `gold_hysa_rate` / `is_gold`                                 !
 //!---------------------------------------------------------------------!
 
 use crate::data::{OptionType, UserData, GOLD_LEVEL_THRESHOLD};
@@ -32,9 +32,9 @@ pub fn creds_to_price(creds: f64) -> f64 {
 
 pub fn fmt_qty(q: f64) -> String {
     if q.fract() == 0.0 {
-        format!("{:.0}", q)
+        format!("{q:.0}")
     } else {
-        format!("{:.4}", q)
+        format!("{q:.4}")
     }
 }
 
@@ -46,7 +46,7 @@ pub fn format_large_num(n: f64) -> String {
     } else if n >= 1e6 {
         format!("${:.2}M", n / 1e6)
     } else {
-        format!("${:.2}", n)
+        format!("${n:.2}")
     }
 }
 
@@ -65,7 +65,7 @@ pub fn parse_option_type(s: &str) -> Option<OptionType> {
     }
 }
 
-pub fn option_type_str(ot: &OptionType) -> &'static str {
+pub const fn option_type_str(ot: &OptionType) -> &'static str {
     match ot {
         OptionType::Call => "CALL",
         OptionType::Put  => "PUT",
@@ -85,8 +85,7 @@ pub fn fmt_pnl(pnl: f64) -> String {
 }
 
 pub fn fmt_limit_tag(lp: Option<f64>) -> String {
-    lp.map(|p| format!("@ limit **${:.2}**", p))
-        .unwrap_or_else(|| "@ market".to_string())
+    lp.map_or_else(|| "@ market".to_string(), |p| format!("@ limit **${p:.2}**"))
 }
 
 pub fn fmt_pct_change(value: f64, basis: f64) -> String {
@@ -101,6 +100,6 @@ pub fn gold_hysa_rate(fed_rate: f64) -> f64 {
     (fed_rate * 0.92).max(0.5)
 }
 
-pub fn is_gold(user_data: &UserData) -> bool {
+pub const fn is_gold(user_data: &UserData) -> bool {
     user_data.get_level() >= GOLD_LEVEL_THRESHOLD
 }

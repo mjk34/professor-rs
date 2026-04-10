@@ -42,9 +42,9 @@ struct BuyModal {
 
 impl poise::Modal for BuyModal {
     fn create(defaults: Option<Self>, custom_id: String) -> serenity::CreateInteractionResponse {
-        let portfolio_val  = defaults.as_ref().map(|d| d.portfolio.as_str()).unwrap_or("");
-        let amount_val     = defaults.as_ref().map(|d| d.amount.as_str()).unwrap_or("");
-        let portfolio_info = defaults.as_ref().map(|d| d.portfolio_info.as_str()).unwrap_or("");
+        let portfolio_val  = defaults.as_ref().map_or("", |d| d.portfolio.as_str());
+        let amount_val     = defaults.as_ref().map_or("", |d| d.amount.as_str());
+        let portfolio_info = defaults.as_ref().map_or("", |d| d.portfolio_info.as_str());
 
         let mut components = vec![
             serenity::CreateActionRow::InputText(
@@ -87,7 +87,7 @@ impl poise::Modal for BuyModal {
 
     fn parse(data: serenity::ModalInteractionData) -> Result<Self, &'static str> {
         let (portfolio, amount, limit_price) = parse_trade_fields(&data);
-        Ok(BuyModal { portfolio, amount, limit_price, portfolio_info: String::new() })
+        Ok(Self { portfolio, amount, limit_price, portfolio_info: String::new() })
     }
 }
 
@@ -102,8 +102,8 @@ struct SellModal {
 
 impl poise::Modal for SellModal {
     fn create(defaults: Option<Self>, custom_id: String) -> serenity::CreateInteractionResponse {
-        let portfolio_val = defaults.as_ref().map(|d| d.portfolio.as_str()).unwrap_or("");
-        let amount_val    = defaults.as_ref().map(|d| d.amount.as_str()).unwrap_or("");
+        let portfolio_val = defaults.as_ref().map_or("", |d| d.portfolio.as_str());
+        let amount_val    = defaults.as_ref().map_or("", |d| d.amount.as_str());
         let amount_label  = defaults.as_ref().and_then(|d| {
             if d.holdings_info.is_empty() { None }
             else {
@@ -140,7 +140,7 @@ impl poise::Modal for SellModal {
 
     fn parse(data: serenity::ModalInteractionData) -> Result<Self, &'static str> {
         let (portfolio, amount, limit_price) = parse_trade_fields(&data);
-        Ok(SellModal { portfolio, amount, limit_price, holdings_info: String::new() })
+        Ok(Self { portfolio, amount, limit_price, holdings_info: String::new() })
     }
 }
 
@@ -158,20 +158,17 @@ pub async fn search(
 
     if items.len() == 1 {
         // Detailed single view
-        let quote = match resolve_ticker(items[0]).await {
-            Some(q) => q,
-            None => {
-                ctx.send(
-                    poise::CreateReply::default().embed(
-                        serenity::CreateEmbed::new()
-                            .title("Search")
-                            .description(market_data_err(&items[0]))
-                            .color(data::EMBED_ERROR),
-                    ),
-                )
-                .await?;
-                return Ok(());
-            }
+        let quote = if let Some(q) = resolve_ticker(items[0]).await { q } else {
+            ctx.send(
+                poise::CreateReply::default().embed(
+                    serenity::CreateEmbed::new()
+                        .title("Search")
+                        .description(market_data_err(items[0]))
+                        .color(data::EMBED_ERROR),
+                ),
+            )
+            .await?;
+            return Ok(());
         };
         let ticker = quote.symbol.clone();
         let (profile, ratios) = tokio::join!(
@@ -200,7 +197,7 @@ pub async fn search(
             .unwrap_or_else(|| quote.display_name());
 
         let arrow = if change_pct >= 0.0 { "+" } else { "" };
-        let mut desc = format!("**${:.2}** ({}{:.2}%)\n", price_usd, arrow, change_pct);
+        let mut desc = format!("**${price_usd:.2}** ({arrow}{change_pct:.2}%)\n");
 
         if let Some(p) = &profile {
             desc += "─────────────────────\n";
@@ -222,17 +219,17 @@ pub async fn search(
                 desc += &format!("Market Cap: **{}**\n", crate::helper::format_large_num(mc));
             }
             if let Some(pe) = ratios.as_ref().and_then(|r| r.pe_ratio).filter(|&v| v > 0.0) {
-                desc += &format!("P/E (TTM): **{:.2}**\n", pe);
+                desc += &format!("P/E (TTM): **{pe:.2}**\n");
             }
             if let Some(r) = &p.range {
-                desc += &format!("52-Week: **{}**\n", r);
+                desc += &format!("52-Week: **{r}**\n");
             }
         }
         desc += &format!("\n{}", quote.market_status());
 
         let embed = with_logo(
             serenity::CreateEmbed::new()
-                .title(format!("{} — {}", ticker, display_name))
+                .title(format!("{ticker} — {display_name}"))
                 .description(desc)
                 .color(color)
                 .footer(default_footer()),
@@ -381,36 +378,28 @@ pub async fn search(
 
         let (quantity_opt, amount_opt): (Option<f64>, Option<f64>) = if sell_all || sell_pct.is_some() {
             (None, None)
-        } else if input.starts_with('$') {
-            match input[1..].replace(',', "").parse::<f64>().ok().filter(|&v| v > 0.0) {
-                Some(a) => (None, Some(a)),
-                None => {
-                    ctx.send(poise::CreateReply::default().embed(
-                        serenity::CreateEmbed::new()
-                            .title(if is_buy { "Buy" } else { "Sell" })
-                            .description("Invalid dollar amount — use e.g. `$500`.")
-                            .color(data::EMBED_ERROR),
-                    )).await?;
-                    return Ok(());
-                }
+        } else if let Some(stripped) = input.strip_prefix('$') {
+            if let Some(a) = stripped.replace(',', "").parse::<f64>().ok().filter(|&v| v > 0.0) { (None, Some(a)) } else {
+                ctx.send(poise::CreateReply::default().embed(
+                    serenity::CreateEmbed::new()
+                        .title(if is_buy { "Buy" } else { "Sell" })
+                        .description("Invalid dollar amount — use e.g. `$500`.")
+                        .color(data::EMBED_ERROR),
+                )).await?;
+                return Ok(());
             }
-        } else {
-            match input.replace(',', "").parse::<f64>().ok().filter(|&v| v > 0.0) {
-                Some(q) => (Some(q), None),
-                None => {
-                    ctx.send(poise::CreateReply::default().embed(
-                        serenity::CreateEmbed::new()
-                            .title(if is_buy { "Buy" } else { "Sell" })
-                            .description(if is_buy {
-                                "Invalid share count — use e.g. `10`, or `$500` for a dollar amount."
-                            } else {
-                                "Invalid amount — use e.g. `10`, `$500`, `50%`, or `all`."
-                            })
-                            .color(data::EMBED_ERROR),
-                    )).await?;
-                    return Ok(());
-                }
-            }
+        } else if let Some(q) = input.replace(',', "").parse::<f64>().ok().filter(|&v| v > 0.0) { (Some(q), None) } else {
+            ctx.send(poise::CreateReply::default().embed(
+                serenity::CreateEmbed::new()
+                    .title(if is_buy { "Buy" } else { "Sell" })
+                    .description(if is_buy {
+                        "Invalid share count — use e.g. `10`, or `$500` for a dollar amount."
+                    } else {
+                        "Invalid amount — use e.g. `10`, `$500`, `50%`, or `all`."
+                    })
+                    .color(data::EMBED_ERROR),
+            )).await?;
+            return Ok(());
         };
 
         let asset_type = quote.asset_type();
@@ -423,14 +412,14 @@ pub async fn search(
                 None => price_per_unit * qty,
             };
             let should_queue = !is_market_hours()
-                || limit_price.map(|lp| price_usd > lp).unwrap_or(false);
+                || limit_price.is_some_and(|lp| price_usd > lp);
 
             let mut user_data = u.write().await;
             let Some(port_idx) = user_data.stock.portfolios.iter().position(|p| p.name == port_name) else {
                 ctx.send(poise::CreateReply::default().embed(
                     serenity::CreateEmbed::new()
                         .title("Buy")
-                        .description(format!("Portfolio **{}** not found.", port_name))
+                        .description(format!("Portfolio **{port_name}** not found."))
                         .color(data::EMBED_ERROR),
                 )).await?;
                 return Ok(());
@@ -442,7 +431,7 @@ pub async fn search(
                     ctx.send(poise::CreateReply::default().embed(
                         serenity::CreateEmbed::new()
                             .title("Queue Failed")
-                            .description(format!("You have reached the limit of **{}** pending orders. Cancel some in `/portfolio`.", MAX_PENDING_ORDERS))
+                            .description(format!("You have reached the limit of **{MAX_PENDING_ORDERS}** pending orders. Cancel some in `/portfolio`."))
                             .color(data::EMBED_ERROR),
                     )).await?;
                     return Ok(());
@@ -517,27 +506,23 @@ pub async fn search(
                 ctx.send(poise::CreateReply::default().embed(
                     serenity::CreateEmbed::new()
                         .title("Sell")
-                        .description(format!("Portfolio **{}** not found.", port_name))
+                        .description(format!("Portfolio **{port_name}** not found."))
                         .color(data::EMBED_ERROR),
                 )).await?;
                 return Ok(());
             };
 
-            let pos_idx = match user_data.stock.portfolios[port_idx]
+            let pos_idx = if let Some(i) = user_data.stock.portfolios[port_idx]
                 .positions
                 .iter()
-                .position(|p| p.ticker == ticker && !matches!(&p.asset_type, AssetType::Option(_)))
-            {
-                Some(i) => i,
-                None => {
-                    ctx.send(poise::CreateReply::default().embed(
-                        serenity::CreateEmbed::new()
-                            .title("Sell")
-                            .description(format!("No **{}** position in portfolio **{}**.", ticker, port_name))
-                            .color(data::EMBED_ERROR),
-                    )).await?;
-                    return Ok(());
-                }
+                .position(|p| p.ticker == ticker && !matches!(&p.asset_type, AssetType::Option(_))) { i } else {
+                ctx.send(poise::CreateReply::default().embed(
+                    serenity::CreateEmbed::new()
+                        .title("Sell")
+                        .description(format!("No **{ticker}** position in portfolio **{port_name}**."))
+                        .color(data::EMBED_ERROR),
+                )).await?;
+                return Ok(());
             };
 
             let held = user_data.stock.portfolios[port_idx].positions[pos_idx].quantity;
@@ -564,7 +549,7 @@ pub async fn search(
             }
 
             let should_queue = !is_market_hours()
-                || limit_price.map(|lp| price_usd < lp).unwrap_or(false);
+                || limit_price.is_some_and(|lp| price_usd < lp);
 
             if should_queue {
                 if user_data.stock.pending_orders.len() >= MAX_PENDING_ORDERS {
@@ -572,7 +557,7 @@ pub async fn search(
                     ctx.send(poise::CreateReply::default().embed(
                         serenity::CreateEmbed::new()
                             .title("Queue Failed")
-                            .description(format!("You have reached the limit of **{}** pending orders. Cancel some in `/portfolio`.", MAX_PENDING_ORDERS))
+                            .description(format!("You have reached the limit of **{MAX_PENDING_ORDERS}** pending orders. Cancel some in `/portfolio`."))
                             .color(data::EMBED_ERROR),
                     )).await?;
                     return Ok(());
@@ -643,7 +628,7 @@ pub async fn search(
         let mut rows = Vec::new();
         for (q, quote_opt) in results {
             let Some(quote) = quote_opt else {
-                rows.push(format!("`{}` — could not resolve", q));
+                rows.push(format!("`{q}` — could not resolve"));
                 continue;
             };
             let ticker = quote.symbol.clone();
@@ -713,41 +698,32 @@ pub async fn buy(
         return Ok(());
     }
 
-    let quote = match resolve_ticker(&ticker_query).await {
-        Some(q) => q,
-        None => {
-            ctx.send(
-                poise::CreateReply::default().embed(
-                    serenity::CreateEmbed::new()
-                        .title("Buy")
-                        .description(market_data_err(&ticker_query))
-                        .color(data::EMBED_ERROR),
-                ),
-            )
-            .await?;
-            return Ok(());
-        }
+    let quote = if let Some(q) = resolve_ticker(&ticker_query).await { q } else {
+        ctx.send(
+            poise::CreateReply::default().embed(
+                serenity::CreateEmbed::new()
+                    .title("Buy")
+                    .description(market_data_err(&ticker_query))
+                    .color(data::EMBED_ERROR),
+            ),
+        )
+        .await?;
+        return Ok(());
     };
     let ticker = quote.symbol.clone();
     let asset_name = quote.display_name();
 
-    // [TEST] market open guard disabled
-    // if !quote.is_market_open() { ctx.send(market_closed_reply("Buy", &ticker)).await?; return Ok(()); }
-
-    let price_usd = match quote.regular_market_price {
-        Some(p) => p,
-        None => {
-            ctx.send(
-                poise::CreateReply::default().embed(
-                    serenity::CreateEmbed::new()
-                        .title("Buy")
-                        .description(market_data_err(&ticker))
-                        .color(data::EMBED_ERROR),
-                ),
-            )
-            .await?;
-            return Ok(());
-        }
+    let price_usd = if let Some(p) = quote.regular_market_price { p } else {
+        ctx.send(
+            poise::CreateReply::default().embed(
+                serenity::CreateEmbed::new()
+                    .title("Buy")
+                    .description(market_data_err(&ticker))
+                    .color(data::EMBED_ERROR),
+            ),
+        )
+        .await?;
+        return Ok(());
     };
 
     let asset_type = quote.asset_type();
@@ -775,22 +751,22 @@ pub async fn buy(
 
     // Queue if outside market hours OR limit price not yet met
     let should_queue = !is_market_hours()
-        || limit_price.map(|lp| price_usd > lp).unwrap_or(false);
+        || limit_price.is_some_and(|lp| price_usd > lp);
 
     if should_queue {
         ctx.defer().await?;
 
         let expiry = order_expiry();
-        let reason = if !is_market_hours() {
-            "Market is closed — order will execute at next open.".to_string()
-        } else {
+        let reason = if is_market_hours() {
             format!(
                 "Limit buy: current price **${:.2}** > limit **${:.2}**.",
                 price_usd,
                 limit_price.unwrap()
             )
+        } else {
+            "Market is closed — order will execute at next open.".to_string()
         };
-        let limit_str = limit_price.map(|lp| format!(" @ limit **${:.2}**", lp)).unwrap_or_default();
+        let limit_str = limit_price.map(|lp| format!(" @ limit **${lp:.2}**")).unwrap_or_default();
         let confirm_id = format!("buy_confirm_{}", ctx.author().id);
         let cancel_id  = format!("buy_cancel_{}", ctx.author().id);
 
@@ -818,17 +794,13 @@ pub async fn buy(
         .await?;
 
         let msg = reply.message().await?;
-        let press = match msg
+        let press = if let Some(p) = msg
             .await_component_interaction(ctx.serenity_context())
             .author_id(ctx.author().id)
             .timeout(Duration::from_secs(60))
-            .await
-        {
-            Some(p) => p,
-            None => {
-                reply.edit(ctx, poise::CreateReply::default().components(vec![])).await?;
-                return Ok(());
-            }
+            .await { p } else {
+            reply.edit(ctx, poise::CreateReply::default().components(vec![])).await?;
+            return Ok(());
         };
 
         press.defer(ctx.serenity_context()).await?;
@@ -852,7 +824,7 @@ pub async fn buy(
                 reply.edit(ctx, poise::CreateReply::default()
                     .embed(serenity::CreateEmbed::new()
                         .title("Queue Failed")
-                        .description(format!("No portfolio named **{}** found.", portfolio))
+                        .description(format!("No portfolio named **{portfolio}** found."))
                         .color(data::EMBED_ERROR))
                     .components(vec![]))
                     .await?;
@@ -863,7 +835,7 @@ pub async fn buy(
                 reply.edit(ctx, poise::CreateReply::default()
                     .embed(serenity::CreateEmbed::new()
                         .title("Queue Failed")
-                        .description(format!("You have reached the limit of **{}** pending orders. Cancel some in `/portfolio`.", MAX_PENDING_ORDERS))
+                        .description(format!("You have reached the limit of **{MAX_PENDING_ORDERS}** pending orders. Cancel some in `/portfolio`."))
                         .color(data::EMBED_ERROR))
                     .components(vec![]))
                     .await?;
@@ -904,20 +876,17 @@ pub async fn buy(
     let u = data_ref.get(&ctx.author().id).unwrap();
     let mut user_data = u.write().await;
 
-    let port_idx = match user_data.stock.portfolios.iter().position(|p| p.name.eq_ignore_ascii_case(&portfolio)) {
-        Some(i) => i,
-        None => {
-            ctx.send(
-                poise::CreateReply::default().embed(
-                    serenity::CreateEmbed::new()
-                        .title("Buy")
-                        .description(format!("No portfolio named **{}** found.", portfolio))
-                        .color(data::EMBED_ERROR),
-                ),
-            )
-            .await?;
-            return Ok(());
-        }
+    let port_idx = if let Some(i) = user_data.stock.portfolios.iter().position(|p| p.name.eq_ignore_ascii_case(&portfolio)) { i } else {
+        ctx.send(
+            poise::CreateReply::default().embed(
+                serenity::CreateEmbed::new()
+                    .title("Buy")
+                    .description(format!("No portfolio named **{portfolio}** found."))
+                    .color(data::EMBED_ERROR),
+            ),
+        )
+        .await?;
+        return Ok(());
     };
 
     if user_data.stock.portfolios[port_idx].cash < total_cost {
@@ -982,41 +951,32 @@ pub async fn sell(
         return Ok(());
     }
 
-    let quote = match resolve_ticker(&ticker_query).await {
-        Some(q) => q,
-        None => {
-            ctx.send(
-                poise::CreateReply::default().embed(
-                    serenity::CreateEmbed::new()
-                        .title("Sell")
-                        .description(market_data_err(&ticker_query))
-                        .color(data::EMBED_ERROR),
-                ),
-            )
-            .await?;
-            return Ok(());
-        }
+    let quote = if let Some(q) = resolve_ticker(&ticker_query).await { q } else {
+        ctx.send(
+            poise::CreateReply::default().embed(
+                serenity::CreateEmbed::new()
+                    .title("Sell")
+                    .description(market_data_err(&ticker_query))
+                    .color(data::EMBED_ERROR),
+            ),
+        )
+        .await?;
+        return Ok(());
     };
     let ticker = quote.symbol.clone();
     let asset_name = quote.display_name();
 
-    // [TEST] market open guard disabled
-    // if !quote.is_market_open() { ctx.send(market_closed_reply("Sell", &ticker)).await?; return Ok(()); }
-
-    let price_usd = match quote.regular_market_price {
-        Some(p) => p,
-        None => {
-            ctx.send(
-                poise::CreateReply::default().embed(
-                    serenity::CreateEmbed::new()
-                        .title("Sell")
-                        .description(market_data_err(&ticker))
-                        .color(data::EMBED_ERROR),
-                ),
-            )
-            .await?;
-            return Ok(());
-        }
+    let price_usd = if let Some(p) = quote.regular_market_price { p } else {
+        ctx.send(
+            poise::CreateReply::default().embed(
+                serenity::CreateEmbed::new()
+                    .title("Sell")
+                    .description(market_data_err(&ticker))
+                    .color(data::EMBED_ERROR),
+            ),
+        )
+        .await?;
+        return Ok(());
     };
 
     let price_per_unit = price_to_creds(price_usd);
@@ -1027,21 +987,18 @@ pub async fn sell(
         let u = data_ref.get(&ctx.author().id).unwrap();
         let user_data = u.read().await;
 
-        let port_idx = match user_data.stock.portfolios.iter().position(|p| p.name.eq_ignore_ascii_case(&portfolio)) {
-            Some(i) => i,
-            None => {
-                drop(user_data);
-                ctx.send(
-                    poise::CreateReply::default().embed(
-                        serenity::CreateEmbed::new()
-                            .title("Sell")
-                            .description(format!("No portfolio named **{}** found.", portfolio))
-                            .color(data::EMBED_ERROR),
-                    ),
-                )
-                .await?;
-                return Ok(());
-            }
+        let port_idx = if let Some(i) = user_data.stock.portfolios.iter().position(|p| p.name.eq_ignore_ascii_case(&portfolio)) { i } else {
+            drop(user_data);
+            ctx.send(
+                poise::CreateReply::default().embed(
+                    serenity::CreateEmbed::new()
+                        .title("Sell")
+                        .description(format!("No portfolio named **{portfolio}** found."))
+                        .color(data::EMBED_ERROR),
+                ),
+            )
+            .await?;
+            return Ok(());
         };
 
         let pos = user_data.stock.portfolios[port_idx]
@@ -1049,21 +1006,18 @@ pub async fn sell(
             .iter()
             .find(|p| p.ticker == ticker && !matches!(&p.asset_type, AssetType::Option(_)));
 
-        match pos {
-            Some(p) => (p.quantity, user_data.stock.portfolios[port_idx].name.clone()),
-            None => {
-                drop(user_data);
-                ctx.send(
-                    poise::CreateReply::default().embed(
-                        serenity::CreateEmbed::new()
-                            .title("Sell")
-                            .description(format!("No **{}** position in portfolio **{}**.", ticker, portfolio))
-                            .color(data::EMBED_ERROR),
-                    ),
-                )
-                .await?;
-                return Ok(());
-            }
+        if let Some(p) = pos { (p.quantity, user_data.stock.portfolios[port_idx].name.clone()) } else {
+            drop(user_data);
+            ctx.send(
+                poise::CreateReply::default().embed(
+                    serenity::CreateEmbed::new()
+                        .title("Sell")
+                        .description(format!("No **{ticker}** position in portfolio **{portfolio}**."))
+                        .color(data::EMBED_ERROR),
+                ),
+            )
+            .await?;
+            return Ok(());
         }
     };
 
@@ -1094,22 +1048,22 @@ pub async fn sell(
 
     // Queue if outside market hours OR limit price not yet met
     let should_queue = !is_market_hours()
-        || limit_price.map(|lp| price_usd < lp).unwrap_or(false);
+        || limit_price.is_some_and(|lp| price_usd < lp);
 
     if should_queue {
         ctx.defer().await?;
 
         let expiry = order_expiry();
-        let reason = if !is_market_hours() {
-            "Market is closed — order will execute at next open.".to_string()
-        } else {
+        let reason = if is_market_hours() {
             format!(
                 "Limit sell: current price **${:.2}** < limit **${:.2}**.",
                 price_usd,
                 limit_price.unwrap()
             )
+        } else {
+            "Market is closed — order will execute at next open.".to_string()
         };
-        let limit_str = limit_price.map(|lp| format!(" @ limit **${:.2}**", lp)).unwrap_or_default();
+        let limit_str = limit_price.map(|lp| format!(" @ limit **${lp:.2}**")).unwrap_or_default();
         let confirm_id = format!("sell_confirm_{}", ctx.author().id);
         let cancel_id  = format!("sell_cancel_{}", ctx.author().id);
 
@@ -1137,17 +1091,13 @@ pub async fn sell(
         .await?;
 
         let msg = reply.message().await?;
-        let press = match msg
+        let press = if let Some(p) = msg
             .await_component_interaction(ctx.serenity_context())
             .author_id(ctx.author().id)
             .timeout(Duration::from_secs(60))
-            .await
-        {
-            Some(p) => p,
-            None => {
-                reply.edit(ctx, poise::CreateReply::default().components(vec![])).await?;
-                return Ok(());
-            }
+            .await { p } else {
+            reply.edit(ctx, poise::CreateReply::default().components(vec![])).await?;
+            return Ok(());
         };
 
         press.defer(ctx.serenity_context()).await?;
@@ -1169,7 +1119,7 @@ pub async fn sell(
                 reply.edit(ctx, poise::CreateReply::default()
                     .embed(serenity::CreateEmbed::new()
                         .title("Queue Failed")
-                        .description(format!("You have reached the limit of **{}** pending orders. Cancel some in `/portfolio`.", MAX_PENDING_ORDERS))
+                        .description(format!("You have reached the limit of **{MAX_PENDING_ORDERS}** pending orders. Cancel some in `/portfolio`."))
                         .color(data::EMBED_ERROR))
                     .components(vec![]))
                     .await?;

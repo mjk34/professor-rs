@@ -3,10 +3,10 @@
 //! to better serve the facilitation of professorBot                    !
 //!                                                                     !
 //! Commands:                                                           !
-//!     [x] - give_creds                                                !
-//!     [x] - take_creds                                                !
-//!     [ ] - give_wishes                                               !
-//!     [ ] - refund_tickets                                            !
+//!     [x] - `give_creds`                                                !
+//!     [x] - `take_creds`                                                !
+//!     [ ] - `give_wishes`                                               !
+//!     [ ] - `refund_tickets`                                            !
 //!---------------------------------------------------------------------!
 
 use crate::clips::check_mod;
@@ -27,7 +27,7 @@ async fn modify_creds(
 ) -> Result<(), Error> {
     let title = if is_give { "Give Creds" } else { "Take Creds" };
 
-    if amount > 100000 {
+    if amount > 100_000 {
         ctx.send(
             poise::CreateReply::default().embed(
                 serenity::CreateEmbed::new()
@@ -49,8 +49,8 @@ async fn modify_creds(
         .await;
 
     let mut guild_ids: Vec<UserId> = Vec::new();
-    for member in guild_members.iter() {
-        for profile in member {
+    if let Ok(members) = &guild_members {
+        for profile in members {
             guild_ids.push(profile.user.id);
         }
     }
@@ -72,15 +72,15 @@ async fn modify_creds(
         }
 
         if !data.contains_key(&user_id) {
-            data.insert(user_id, Default::default());
+            data.insert(user_id, Arc::default());
 
             ctx.send(
                 poise::CreateReply::default()
-                    .content(format!("<@{}>", user_id))
+                    .content(format!("<@{user_id}>"))
                     .embed(
                         serenity::CreateEmbed::new()
                             .title("Account Created!")
-                            .description(format!("Welcome <@{}>! You are now registered with ProfessorBot, feel free to checkout Professors Commands in https://discord.com/channels/1194668798830194850/1194700756306108437", user_id))
+                            .description(format!("Welcome <@{user_id}>! You are now registered with ProfessorBot, feel free to checkout Professors Commands in https://discord.com/channels/1194668798830194850/1194700756306108437"))
                             .image("https://gifdb.com/images/high/anime-girl-okay-sign-b5zlye5h8mnjhdg2.gif")
                             .color(data::EMBED_DEFAULT),
                     ),
@@ -113,8 +113,8 @@ async fn modify_creds(
         };
         desc += &action;
         for id in processed_list {
-            pre_text += &format!("<@{}> ", id);
-            desc += &format!("<@{}> ", id);
+            pre_text += &format!("<@{id}> ");
+            desc += &format!("<@{id}> ");
         }
     }
 
@@ -176,37 +176,6 @@ pub async fn take_creds(
     modify_creds(ctx, mentioned, amount, false).await
 }
 
-/// [!] MODERATOR - set a user's level directly
-#[poise::command(slash_command, check = "check_mod")]
-pub async fn test_set_level(
-    ctx: Context<'_>,
-    #[description = "@user to update"] mentioned: String,
-    #[description = "level to set"] level: i32,
-) -> Result<(), Error> {
-    let id = match parse_user_mention(&mentioned) {
-        Some(id) => UserId::new(id),
-        None => {
-            ctx.say("Invalid user mention.").await?;
-            return Ok(());
-        }
-    };
-
-    let data = &ctx.data().users;
-    match data.get(&id) {
-        None => { ctx.say("User not found.").await?; }
-        Some(u) => {
-            u.write().await.set_level(level);
-            ctx.send(poise::CreateReply::default().embed(
-                serenity::CreateEmbed::new()
-                    .title("Test — Set Level")
-                    .description(format!("Set <@{}> to level **{}**.", id, level))
-                    .color(data::EMBED_MOD),
-            )).await?;
-        }
-    }
-
-    Ok(())
-}
 
 /// [!] MODERATOR - seed fake users for testing leaderboard and portfolio features
 #[poise::command(slash_command, check = "check_mod")]
@@ -216,10 +185,7 @@ pub async fn test_seed_data(
 ) -> Result<(), Error> {
     let count = count.min(20) as usize;
 
-    let guild_id = match ctx.guild_id() {
-        Some(id) => id,
-        None => { ctx.say("Must be run in a server.").await?; return Ok(()); }
-    };
+    let guild_id = if let Some(id) = ctx.guild_id() { id } else { ctx.say("Must be run in a server.").await?; return Ok(()); };
 
     // Fetch real guild members so their IDs resolve in the leaderboard
     let members = ctx.serenity_context().http.get_guild_members(guild_id, Some(100), None).await?;
@@ -257,8 +223,8 @@ pub async fn test_seed_data(
 
             let port_count = rng.gen_range(1usize..=3);
             let mut stock = StockProfile::default();
-            for p in 0..port_count {
-                let mut port = Portfolio::new(PORT_NAMES[p].to_string());
+            for port_name in PORT_NAMES.iter().take(port_count) {
+                let mut port = Portfolio::new(port_name.to_string());
                 port.cash = rng.gen_range(5_000.0f64..200_000.0);
                 stock.portfolios.push(port);
 
@@ -272,7 +238,7 @@ pub async fn test_seed_data(
                     let pnl = proceeds * pnl_pct;
                     if proceeds - pnl <= 0.0 { continue; }
                     stock.trade_history.push_back(TradeRecord {
-                        portfolio: PORT_NAMES[p].to_string(),
+                        portfolio: port_name.to_string(),
                         ticker: ticker.to_string(),
                         asset_name: ticker.to_string(),
                         action: TradeAction::Sell,
@@ -299,7 +265,7 @@ pub async fn test_seed_data(
     ctx.send(poise::CreateReply::default().embed(
         serenity::CreateEmbed::new()
             .title("Test Data Seeded")
-            .description(format!("Seeded **{}** guild members with randomized data.", inserted))
+            .description(format!("Seeded **{inserted}** guild members with randomized data."))
             .color(data::EMBED_MOD)
             .footer(default_footer()),
     )).await?;

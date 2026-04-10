@@ -3,14 +3,18 @@
 //!---------------------------------------------------------------------!
 
 use crate::api::{fetch_price, market_data_err};
-use crate::data::{self, AssetType, OptionContract, OptionSide, OptionType, Position, TradeAction, TradeRecord, TRADE_HISTORY_LIMIT};
+use crate::data::{self, AssetType, OptionContract, OptionSide, OptionType, Position, TradeAction, TradeRecord};
 use crate::helper::{creds_to_price, default_footer, option_intrinsic, option_type_str, parse_option_type, price_to_creds};
 use crate::{serenity, Context, Error};
 use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 
+/// Number of underlying shares represented by one options contract (industry standard).
 const SHARES_PER_CONTRACT: f64 = 100.0;
+/// Intrinsic time-value premium added per day-to-expiry when pricing options.
 const TIME_VALUE_PER_DTE: f64 = 0.05;
+/// Margin requirement as a fraction of notional value for a naked call position.
 const CALL_MARGIN_RATIO: f64 = 0.20;
+/// Margin requirement as a fraction of notional value for a naked put position.
 const PUT_MARGIN_RATIO: f64 = 0.10;
 
 const ERR_INVALID_OPTION_TYPE: &str = "Option type must be `call` or `put`.";
@@ -21,11 +25,11 @@ const ERR_MIN_CONTRACTS: &str = "Contracts must be at least 1.";
 pub fn option_premium_creds(intrinsic_usd: f64, expiry: &DateTime<Utc>, contracts: u32) -> f64 {
     let dte = (*expiry - Utc::now()).num_days().max(0) as f64;
     let per_contract_usd = (intrinsic_usd + dte * TIME_VALUE_PER_DTE).max(0.01);
-    price_to_creds(per_contract_usd * contracts as f64 * SHARES_PER_CONTRACT)
+    price_to_creds(per_contract_usd * f64::from(contracts) * SHARES_PER_CONTRACT)
 }
 
 pub fn naked_margin_usd(opt_type: &OptionType, price_usd: f64, strike: f64, contracts: u32, premium_usd: f64) -> f64 {
-    let notional = SHARES_PER_CONTRACT * contracts as f64;
+    let notional = SHARES_PER_CONTRACT * f64::from(contracts);
     let otm_usd = match opt_type {
         OptionType::Call => (strike - price_usd).max(0.0),
         OptionType::Put  => (price_usd - strike).max(0.0),
@@ -35,8 +39,8 @@ pub fn naked_margin_usd(opt_type: &OptionType, price_usd: f64, strike: f64, cont
         OptionType::Put  => strike,
     };
     f64::max(
-        CALL_MARGIN_RATIO * price_usd * notional + premium_usd - otm_usd,
-        PUT_MARGIN_RATIO * min_basis * notional + premium_usd,
+        (CALL_MARGIN_RATIO * price_usd).mul_add(notional, premium_usd) - otm_usd,
+        (PUT_MARGIN_RATIO * min_basis).mul_add(notional, premium_usd),
     )
 }
 
@@ -52,6 +56,7 @@ pub fn find_option_idx(
         if p.ticker != ticker {
             return false;
         }
+        #[allow(clippy::float_cmp)] // strike prices are stored/compared as exact values we set
         if let AssetType::Option(c) = &p.asset_type {
             c.strike == strike && c.expiry == expiry && c.option_type == *opt_type && c.side == *side
         } else {
@@ -78,36 +83,30 @@ pub async fn options_quote(
     #[description = "Expiry date (YYYY-MM-DD)"] expiry: String,
     #[description = "call or put"] option_type: String,
 ) -> Result<(), Error> {
-    let opt_type = match parse_option_type(&option_type) {
-        Some(t) => t,
-        None => {
-            ctx.send(
-                poise::CreateReply::default().embed(
-                    serenity::CreateEmbed::new()
-                        .title("Options Quote")
-                        .description(ERR_INVALID_OPTION_TYPE)
-                        .color(data::EMBED_ERROR),
-                ),
-            )
-            .await?;
-            return Ok(());
-        }
+    let opt_type = if let Some(t) = parse_option_type(&option_type) { t } else {
+        ctx.send(
+            poise::CreateReply::default().embed(
+                serenity::CreateEmbed::new()
+                    .title("Options Quote")
+                    .description(ERR_INVALID_OPTION_TYPE)
+                    .color(data::EMBED_ERROR),
+            ),
+        )
+        .await?;
+        return Ok(());
     };
 
-    let expiry_dt = match parse_expiry(&expiry) {
-        Some(d) => d,
-        None => {
-            ctx.send(
-                poise::CreateReply::default().embed(
-                    serenity::CreateEmbed::new()
-                        .title("Options Quote")
-                        .description(ERR_INVALID_EXPIRY)
-                        .color(data::EMBED_ERROR),
-                ),
-            )
-            .await?;
-            return Ok(());
-        }
+    let expiry_dt = if let Some(d) = parse_expiry(&expiry) { d } else {
+        ctx.send(
+            poise::CreateReply::default().embed(
+                serenity::CreateEmbed::new()
+                    .title("Options Quote")
+                    .description(ERR_INVALID_EXPIRY)
+                    .color(data::EMBED_ERROR),
+            ),
+        )
+        .await?;
+        return Ok(());
     };
 
     if expiry_dt < Utc::now() {
@@ -124,26 +123,23 @@ pub async fn options_quote(
     }
 
     let ticker = ticker.to_uppercase();
-    let price_usd = match fetch_price(&ticker).await {
-        Some(p) => p,
-        None => {
-            ctx.send(
-                poise::CreateReply::default().embed(
-                    serenity::CreateEmbed::new()
-                        .title("Options Quote")
-                        .description(market_data_err(&ticker))
-                        .color(data::EMBED_ERROR),
-                ),
-            )
-            .await?;
-            return Ok(());
-        }
+    let price_usd = if let Some(p) = fetch_price(&ticker).await { p } else {
+        ctx.send(
+            poise::CreateReply::default().embed(
+                serenity::CreateEmbed::new()
+                    .title("Options Quote")
+                    .description(market_data_err(&ticker))
+                    .color(data::EMBED_ERROR),
+            ),
+        )
+        .await?;
+        return Ok(());
     };
 
     let intrinsic = option_intrinsic(&opt_type, price_usd, strike);
     let dte = (expiry_dt - Utc::now()).num_days().max(0);
-    let time_value_usd = dte as f64 * 0.05;
-    let premium_per_contract_usd = (intrinsic + time_value_usd).max(0.01) * 100.0;
+    let time_value_usd = dte as f64 * TIME_VALUE_PER_DTE;
+    let premium_per_contract_usd = (intrinsic + time_value_usd).max(0.01) * SHARES_PER_CONTRACT;
     let premium_creds = price_to_creds(premium_per_contract_usd);
     let itm = intrinsic > 0.0;
     let type_str = option_type_str(&opt_type);
@@ -192,36 +188,30 @@ pub async fn options_buy(
         return Ok(());
     }
 
-    let opt_type = match parse_option_type(&option_type) {
-        Some(t) => t,
-        None => {
-            ctx.send(
-                poise::CreateReply::default().embed(
-                    serenity::CreateEmbed::new()
-                        .title("Options Buy")
-                        .description(ERR_INVALID_OPTION_TYPE)
-                        .color(data::EMBED_ERROR),
-                ),
-            )
-            .await?;
-            return Ok(());
-        }
+    let opt_type = if let Some(t) = parse_option_type(&option_type) { t } else {
+        ctx.send(
+            poise::CreateReply::default().embed(
+                serenity::CreateEmbed::new()
+                    .title("Options Buy")
+                    .description(ERR_INVALID_OPTION_TYPE)
+                    .color(data::EMBED_ERROR),
+            ),
+        )
+        .await?;
+        return Ok(());
     };
 
-    let expiry_dt = match parse_expiry(&expiry) {
-        Some(d) => d,
-        None => {
-            ctx.send(
-                poise::CreateReply::default().embed(
-                    serenity::CreateEmbed::new()
-                        .title("Options Buy")
-                        .description(ERR_INVALID_EXPIRY)
-                        .color(data::EMBED_ERROR),
-                ),
-            )
-            .await?;
-            return Ok(());
-        }
+    let expiry_dt = if let Some(d) = parse_expiry(&expiry) { d } else {
+        ctx.send(
+            poise::CreateReply::default().embed(
+                serenity::CreateEmbed::new()
+                    .title("Options Buy")
+                    .description(ERR_INVALID_EXPIRY)
+                    .color(data::EMBED_ERROR),
+            ),
+        )
+        .await?;
+        return Ok(());
     };
 
     if expiry_dt < Utc::now() {
@@ -238,50 +228,43 @@ pub async fn options_buy(
     }
 
     let ticker = ticker.to_uppercase();
-    let price_usd = match fetch_price(&ticker).await {
-        Some(p) => p,
-        None => {
-            ctx.send(
-                poise::CreateReply::default().embed(
-                    serenity::CreateEmbed::new()
-                        .title("Options Buy")
-                        .description(market_data_err(&ticker))
-                        .color(data::EMBED_ERROR),
-                ),
-            )
-            .await?;
-            return Ok(());
-        }
+    let price_usd = if let Some(p) = fetch_price(&ticker).await { p } else {
+        ctx.send(
+            poise::CreateReply::default().embed(
+                serenity::CreateEmbed::new()
+                    .title("Options Buy")
+                    .description(market_data_err(&ticker))
+                    .color(data::EMBED_ERROR),
+            ),
+        )
+        .await?;
+        return Ok(());
     };
 
     let intrinsic = option_intrinsic(&opt_type, price_usd, strike);
     let total_cost = option_premium_creds(intrinsic, &expiry_dt, contracts);
-    let cost_per_contract = total_cost / contracts as f64;
+    let cost_per_contract = total_cost / f64::from(contracts);
 
     let data_ref = &ctx.data().users;
     let u = data_ref.get(&ctx.author().id).unwrap();
     let mut user_data = u.write().await;
 
     {
-        let port = match user_data
+        let port = if let Some(p) = user_data
             .stock
             .portfolios
             .iter_mut()
-            .find(|p| p.name.eq_ignore_ascii_case(&portfolio))
-        {
-            Some(p) => p,
-            None => {
-                ctx.send(
-                    poise::CreateReply::default().embed(
-                        serenity::CreateEmbed::new()
-                            .title("Options Buy")
-                            .description(format!("No portfolio named **{}** found.", portfolio))
-                            .color(data::EMBED_ERROR),
-                    ),
-                )
-                .await?;
-                return Ok(());
-            }
+            .find(|p| p.name.eq_ignore_ascii_case(&portfolio)) { p } else {
+            ctx.send(
+                poise::CreateReply::default().embed(
+                    serenity::CreateEmbed::new()
+                        .title("Options Buy")
+                        .description(format!("No portfolio named **{portfolio}** found."))
+                        .color(data::EMBED_ERROR),
+                ),
+            )
+            .await?;
+            return Ok(());
         };
 
         if port.cash < total_cost {
@@ -301,7 +284,7 @@ pub async fn options_buy(
         }
 
         port.cash -= total_cost;
-        let quantity = contracts as f64;
+        let quantity = f64::from(contracts);
 
         let existing_idx =
             find_option_idx(&port.positions, &ticker, strike, expiry_dt, &opt_type, &OptionSide::Long);
@@ -310,7 +293,7 @@ pub async fn options_buy(
             let pos = &mut port.positions[idx];
             let total_q = pos.quantity + quantity;
             pos.avg_cost =
-                (pos.avg_cost * pos.quantity + cost_per_contract * quantity) / total_q;
+                pos.avg_cost.mul_add(pos.quantity, cost_per_contract * quantity) / total_q;
             pos.quantity = total_q;
             if let AssetType::Option(c) = &mut pos.asset_type {
                 c.contracts += contracts;
@@ -336,18 +319,15 @@ pub async fn options_buy(
     let record = TradeRecord {
         portfolio: portfolio.clone(),
         ticker: ticker.clone(),
-        asset_name: format!("{} {} ${:.2} {}", ticker, type_str, strike, expiry),
+        asset_name: format!("{ticker} {type_str} ${strike:.2} {expiry}"),
         action: TradeAction::Buy,
-        quantity: contracts as f64,
+        quantity: f64::from(contracts),
         price_per_unit: cost_per_contract,
         total_creds: total_cost,
         realized_pnl: None,
         timestamp: Utc::now(),
     };
-    user_data.stock.trade_history.push_back(record);
-    if user_data.stock.trade_history.len() > TRADE_HISTORY_LIMIT {
-        user_data.stock.trade_history.pop_front();
-    }
+    user_data.stock.push_trade(record);
     drop(user_data);
 
     ctx.send(
@@ -391,103 +371,86 @@ pub async fn options_sell(
         return Ok(());
     }
 
-    let opt_type = match parse_option_type(&option_type) {
-        Some(t) => t,
-        None => {
-            ctx.send(
-                poise::CreateReply::default().embed(
-                    serenity::CreateEmbed::new()
-                        .title("Options Sell")
-                        .description(ERR_INVALID_OPTION_TYPE)
-                        .color(data::EMBED_ERROR),
-                ),
-            )
-            .await?;
-            return Ok(());
-        }
+    let opt_type = if let Some(t) = parse_option_type(&option_type) { t } else {
+        ctx.send(
+            poise::CreateReply::default().embed(
+                serenity::CreateEmbed::new()
+                    .title("Options Sell")
+                    .description(ERR_INVALID_OPTION_TYPE)
+                    .color(data::EMBED_ERROR),
+            ),
+        )
+        .await?;
+        return Ok(());
     };
 
-    let expiry_dt = match parse_expiry(&expiry) {
-        Some(d) => d,
-        None => {
-            ctx.send(
-                poise::CreateReply::default().embed(
-                    serenity::CreateEmbed::new()
-                        .title("Options Sell")
-                        .description(ERR_INVALID_EXPIRY)
-                        .color(data::EMBED_ERROR),
-                ),
-            )
-            .await?;
-            return Ok(());
-        }
+    let expiry_dt = if let Some(d) = parse_expiry(&expiry) { d } else {
+        ctx.send(
+            poise::CreateReply::default().embed(
+                serenity::CreateEmbed::new()
+                    .title("Options Sell")
+                    .description(ERR_INVALID_EXPIRY)
+                    .color(data::EMBED_ERROR),
+            ),
+        )
+        .await?;
+        return Ok(());
     };
 
     let ticker = ticker.to_uppercase();
-    let price_usd = match fetch_price(&ticker).await {
-        Some(p) => p,
-        None => {
-            ctx.send(
-                poise::CreateReply::default().embed(
-                    serenity::CreateEmbed::new()
-                        .title("Options Sell")
-                        .description(market_data_err(&ticker))
-                        .color(data::EMBED_ERROR),
-                ),
-            )
-            .await?;
-            return Ok(());
-        }
+    let price_usd = if let Some(p) = fetch_price(&ticker).await { p } else {
+        ctx.send(
+            poise::CreateReply::default().embed(
+                serenity::CreateEmbed::new()
+                    .title("Options Sell")
+                    .description(market_data_err(&ticker))
+                    .color(data::EMBED_ERROR),
+            ),
+        )
+        .await?;
+        return Ok(());
     };
 
     let intrinsic = option_intrinsic(&opt_type, price_usd, strike);
     let total_proceeds = option_premium_creds(intrinsic, &expiry_dt, contracts);
-    let proceeds_per_contract = total_proceeds / contracts as f64;
+    let proceeds_per_contract = total_proceeds / f64::from(contracts);
 
     let data_ref = &ctx.data().users;
     let u = data_ref.get(&ctx.author().id).unwrap();
     let mut user_data = u.write().await;
 
     let pnl = {
-        let port = match user_data
+        let port = if let Some(p) = user_data
             .stock
             .portfolios
             .iter_mut()
-            .find(|p| p.name.eq_ignore_ascii_case(&portfolio))
-        {
-            Some(p) => p,
-            None => {
-                ctx.send(
-                    poise::CreateReply::default().embed(
-                        serenity::CreateEmbed::new()
-                            .title("Options Sell")
-                            .description(format!("No portfolio named **{}** found.", portfolio))
-                            .color(data::EMBED_ERROR),
-                    ),
-                )
-                .await?;
-                return Ok(());
-            }
+            .find(|p| p.name.eq_ignore_ascii_case(&portfolio)) { p } else {
+            ctx.send(
+                poise::CreateReply::default().embed(
+                    serenity::CreateEmbed::new()
+                        .title("Options Sell")
+                        .description(format!("No portfolio named **{portfolio}** found."))
+                        .color(data::EMBED_ERROR),
+                ),
+            )
+            .await?;
+            return Ok(());
         };
 
-        let pos_idx = match find_option_idx(&port.positions, &ticker, strike, expiry_dt, &opt_type, &OptionSide::Long) {
-            Some(i) => i,
-            None => {
-                let type_str = option_type_str(&opt_type);
-                ctx.send(
-                    poise::CreateReply::default().embed(
-                        serenity::CreateEmbed::new()
-                            .title("Options Sell")
-                            .description(format!(
-                                "No **{} {} ${:.2}** exp {} in portfolio **{}**.",
-                                ticker, type_str, strike, expiry, portfolio
-                            ))
-                            .color(data::EMBED_ERROR),
-                    ),
-                )
-                .await?;
-                return Ok(());
-            }
+        let pos_idx = if let Some(i) = find_option_idx(&port.positions, &ticker, strike, expiry_dt, &opt_type, &OptionSide::Long) { i } else {
+            let type_str = option_type_str(&opt_type);
+            ctx.send(
+                poise::CreateReply::default().embed(
+                    serenity::CreateEmbed::new()
+                        .title("Options Sell")
+                        .description(format!(
+                            "No **{ticker} {type_str} ${strike:.2}** exp {expiry} in portfolio **{portfolio}**."
+                        ))
+                        .color(data::EMBED_ERROR),
+                ),
+            )
+            .await?;
+            return Ok(());
         };
 
         let held = if let AssetType::Option(c) = &port.positions[pos_idx].asset_type {
@@ -502,8 +465,7 @@ pub async fn options_sell(
                     serenity::CreateEmbed::new()
                         .title("Options Sell")
                         .description(format!(
-                            "You only hold **{}** contracts but tried to sell **{}**.",
-                            held, contracts
+                            "You only hold **{held}** contracts but tried to sell **{contracts}**."
                         ))
                         .color(data::EMBED_ERROR),
                 ),
@@ -513,14 +475,14 @@ pub async fn options_sell(
         }
 
         let avg_cost = port.positions[pos_idx].avg_cost;
-        let pnl = total_proceeds - avg_cost * contracts as f64;
+        let pnl = avg_cost.mul_add(-f64::from(contracts), total_proceeds);
         port.cash += total_proceeds;
 
         if contracts == held {
             port.positions.remove(pos_idx);
         } else {
             let pos = &mut port.positions[pos_idx];
-            pos.quantity -= contracts as f64;
+            pos.quantity -= f64::from(contracts);
             if let AssetType::Option(c) = &mut pos.asset_type {
                 c.contracts -= contracts;
             }
@@ -533,18 +495,15 @@ pub async fn options_sell(
     let record = TradeRecord {
         portfolio: portfolio.clone(),
         ticker: ticker.clone(),
-        asset_name: format!("{} {} ${:.2} {}", ticker, type_str, strike, expiry),
+        asset_name: format!("{ticker} {type_str} ${strike:.2} {expiry}"),
         action: TradeAction::Sell,
-        quantity: contracts as f64,
+        quantity: f64::from(contracts),
         price_per_unit: proceeds_per_contract,
         total_creds: total_proceeds,
         realized_pnl: Some(pnl),
         timestamp: Utc::now(),
     };
-    user_data.stock.trade_history.push_back(record);
-    if user_data.stock.trade_history.len() > TRADE_HISTORY_LIMIT {
-        user_data.stock.trade_history.pop_front();
-    }
+    user_data.stock.push_trade(record);
 
     let pnl_str = crate::helper::fmt_pnl(pnl);
     let color = if pnl >= 0.0 { data::EMBED_SUCCESS } else { data::EMBED_FAIL };
@@ -591,36 +550,30 @@ pub async fn options_write(
         return Ok(());
     }
 
-    let opt_type = match parse_option_type(&option_type) {
-        Some(t) => t,
-        None => {
-            ctx.send(
-                poise::CreateReply::default().embed(
-                    serenity::CreateEmbed::new()
-                        .title("Options Write")
-                        .description(ERR_INVALID_OPTION_TYPE)
-                        .color(data::EMBED_ERROR),
-                ),
-            )
-            .await?;
-            return Ok(());
-        }
+    let opt_type = if let Some(t) = parse_option_type(&option_type) { t } else {
+        ctx.send(
+            poise::CreateReply::default().embed(
+                serenity::CreateEmbed::new()
+                    .title("Options Write")
+                    .description(ERR_INVALID_OPTION_TYPE)
+                    .color(data::EMBED_ERROR),
+            ),
+        )
+        .await?;
+        return Ok(());
     };
 
-    let expiry_dt = match parse_expiry(&expiry) {
-        Some(d) => d,
-        None => {
-            ctx.send(
-                poise::CreateReply::default().embed(
-                    serenity::CreateEmbed::new()
-                        .title("Options Write")
-                        .description(ERR_INVALID_EXPIRY)
-                        .color(data::EMBED_ERROR),
-                ),
-            )
-            .await?;
-            return Ok(());
-        }
+    let expiry_dt = if let Some(d) = parse_expiry(&expiry) { d } else {
+        ctx.send(
+            poise::CreateReply::default().embed(
+                serenity::CreateEmbed::new()
+                    .title("Options Write")
+                    .description(ERR_INVALID_EXPIRY)
+                    .color(data::EMBED_ERROR),
+            ),
+        )
+        .await?;
+        return Ok(());
     };
 
     if expiry_dt < Utc::now() {
@@ -637,50 +590,43 @@ pub async fn options_write(
     }
 
     let ticker = ticker.to_uppercase();
-    let price_usd = match fetch_price(&ticker).await {
-        Some(p) => p,
-        None => {
-            ctx.send(
-                poise::CreateReply::default().embed(
-                    serenity::CreateEmbed::new()
-                        .title("Options Write")
-                        .description(market_data_err(&ticker))
-                        .color(data::EMBED_ERROR),
-                ),
-            )
-            .await?;
-            return Ok(());
-        }
+    let price_usd = if let Some(p) = fetch_price(&ticker).await { p } else {
+        ctx.send(
+            poise::CreateReply::default().embed(
+                serenity::CreateEmbed::new()
+                    .title("Options Write")
+                    .description(market_data_err(&ticker))
+                    .color(data::EMBED_ERROR),
+            ),
+        )
+        .await?;
+        return Ok(());
     };
 
     let intrinsic = option_intrinsic(&opt_type, price_usd, strike);
     let premium = option_premium_creds(intrinsic, &expiry_dt, contracts);
-    let premium_per_contract = premium / contracts as f64;
+    let premium_per_contract = premium / f64::from(contracts);
 
     let data_ref = &ctx.data().users;
     let u = data_ref.get(&ctx.author().id).unwrap();
     let mut user_data = u.write().await;
 
     {
-        let port = match user_data
+        let port = if let Some(p) = user_data
             .stock
             .portfolios
             .iter_mut()
-            .find(|p| p.name.eq_ignore_ascii_case(&portfolio))
-        {
-            Some(p) => p,
-            None => {
-                ctx.send(
-                    poise::CreateReply::default().embed(
-                        serenity::CreateEmbed::new()
-                            .title("Options Write")
-                            .description(format!("No portfolio named **{}** found.", portfolio))
-                            .color(data::EMBED_ERROR),
-                    ),
-                )
-                .await?;
-                return Ok(());
-            }
+            .find(|p| p.name.eq_ignore_ascii_case(&portfolio)) { p } else {
+            ctx.send(
+                poise::CreateReply::default().embed(
+                    serenity::CreateEmbed::new()
+                        .title("Options Write")
+                        .description(format!("No portfolio named **{portfolio}** found."))
+                        .color(data::EMBED_ERROR),
+                ),
+            )
+            .await?;
+            return Ok(());
         };
 
         let premium_usd = creds_to_price(premium);
@@ -696,7 +642,7 @@ pub async fn options_write(
                     })
                     .map(|p| p.quantity)
                     .sum::<f64>();
-                let required = contracts as f64 * 100.0;
+                let required = f64::from(contracts) * 100.0;
                 if shares_held + 5e-5 < required {
                     let margin_usd = naked_margin_usd(&opt_type, price_usd, strike, contracts, premium_usd);
                     let margin_creds = price_to_creds(margin_usd);
@@ -722,7 +668,7 @@ pub async fn options_write(
                 }
             }
             OptionType::Put => {
-                let required_cash = price_to_creds(strike * contracts as f64 * SHARES_PER_CONTRACT);
+                let required_cash = price_to_creds(strike * f64::from(contracts) * SHARES_PER_CONTRACT);
                 let available = port.cash - port.locked_cash();
                 if available < required_cash {
                     let margin_usd = naked_margin_usd(&opt_type, price_usd, strike, contracts, premium_usd);
@@ -756,9 +702,9 @@ pub async fn options_write(
 
         if let Some(idx) = existing_idx {
             let pos = &mut port.positions[idx];
-            let total_q = pos.quantity + contracts as f64;
+            let total_q = pos.quantity + f64::from(contracts);
             pos.avg_cost =
-                (pos.avg_cost * pos.quantity + premium_per_contract * contracts as f64) / total_q;
+                pos.avg_cost.mul_add(pos.quantity, premium_per_contract * f64::from(contracts)) / total_q;
             pos.quantity = total_q;
             if let AssetType::Option(c) = &mut pos.asset_type {
                 c.contracts += contracts;
@@ -775,7 +721,7 @@ pub async fn options_write(
                     side: OptionSide::Short,
                     collateral: collateral_locked,
                 }),
-                quantity: contracts as f64,
+                quantity: f64::from(contracts),
                 avg_cost: premium_per_contract,
             });
         }
@@ -785,18 +731,15 @@ pub async fn options_write(
     let record = TradeRecord {
         portfolio: portfolio.clone(),
         ticker: ticker.clone(),
-        asset_name: format!("SHORT {} {} ${:.2} {}", ticker, type_str, strike, expiry),
+        asset_name: format!("SHORT {ticker} {type_str} ${strike:.2} {expiry}"),
         action: TradeAction::Sell,
-        quantity: contracts as f64,
+        quantity: f64::from(contracts),
         price_per_unit: premium_per_contract,
         total_creds: premium,
         realized_pnl: None,
         timestamp: Utc::now(),
     };
-    user_data.stock.trade_history.push_back(record);
-    if user_data.stock.trade_history.len() > TRADE_HISTORY_LIMIT {
-        user_data.stock.trade_history.pop_front();
-    }
+    user_data.stock.push_trade(record);
     drop(user_data);
 
     ctx.send(
@@ -840,58 +783,49 @@ pub async fn options_cover(
         return Ok(());
     }
 
-    let opt_type = match parse_option_type(&option_type) {
-        Some(t) => t,
-        None => {
-            ctx.send(
-                poise::CreateReply::default().embed(
-                    serenity::CreateEmbed::new()
-                        .title("Options Cover")
-                        .description(ERR_INVALID_OPTION_TYPE)
-                        .color(data::EMBED_ERROR),
-                ),
-            )
-            .await?;
-            return Ok(());
-        }
+    let opt_type = if let Some(t) = parse_option_type(&option_type) { t } else {
+        ctx.send(
+            poise::CreateReply::default().embed(
+                serenity::CreateEmbed::new()
+                    .title("Options Cover")
+                    .description(ERR_INVALID_OPTION_TYPE)
+                    .color(data::EMBED_ERROR),
+            ),
+        )
+        .await?;
+        return Ok(());
     };
 
-    let expiry_dt = match parse_expiry(&expiry) {
-        Some(d) => d,
-        None => {
-            ctx.send(
-                poise::CreateReply::default().embed(
-                    serenity::CreateEmbed::new()
-                        .title("Options Cover")
-                        .description(ERR_INVALID_EXPIRY)
-                        .color(data::EMBED_ERROR),
-                ),
-            )
-            .await?;
-            return Ok(());
-        }
+    let expiry_dt = if let Some(d) = parse_expiry(&expiry) { d } else {
+        ctx.send(
+            poise::CreateReply::default().embed(
+                serenity::CreateEmbed::new()
+                    .title("Options Cover")
+                    .description(ERR_INVALID_EXPIRY)
+                    .color(data::EMBED_ERROR),
+            ),
+        )
+        .await?;
+        return Ok(());
     };
 
     let ticker = ticker.to_uppercase();
-    let price_usd = match fetch_price(&ticker).await {
-        Some(p) => p,
-        None => {
-            ctx.send(
-                poise::CreateReply::default().embed(
-                    serenity::CreateEmbed::new()
-                        .title("Options Cover")
-                        .description(market_data_err(&ticker))
-                        .color(data::EMBED_ERROR),
-                ),
-            )
-            .await?;
-            return Ok(());
-        }
+    let price_usd = if let Some(p) = fetch_price(&ticker).await { p } else {
+        ctx.send(
+            poise::CreateReply::default().embed(
+                serenity::CreateEmbed::new()
+                    .title("Options Cover")
+                    .description(market_data_err(&ticker))
+                    .color(data::EMBED_ERROR),
+            ),
+        )
+        .await?;
+        return Ok(());
     };
 
     let intrinsic = option_intrinsic(&opt_type, price_usd, strike);
     let cost_to_close = option_premium_creds(intrinsic, &expiry_dt, contracts);
-    let cost_per_contract = cost_to_close / contracts as f64;
+    let cost_per_contract = cost_to_close / f64::from(contracts);
 
     let data_ref = &ctx.data().users;
     let u = data_ref.get(&ctx.author().id).unwrap();
@@ -899,44 +833,36 @@ pub async fn options_cover(
 
     let type_str = option_type_str(&opt_type);
     let (pnl, premium_received) = {
-        let port = match user_data
+        let port = if let Some(p) = user_data
             .stock
             .portfolios
             .iter_mut()
-            .find(|p| p.name.eq_ignore_ascii_case(&portfolio))
-        {
-            Some(p) => p,
-            None => {
-                ctx.send(
-                    poise::CreateReply::default().embed(
-                        serenity::CreateEmbed::new()
-                            .title("Options Cover")
-                            .description(format!("No portfolio named **{}** found.", portfolio))
-                            .color(data::EMBED_ERROR),
-                    ),
-                )
-                .await?;
-                return Ok(());
-            }
+            .find(|p| p.name.eq_ignore_ascii_case(&portfolio)) { p } else {
+            ctx.send(
+                poise::CreateReply::default().embed(
+                    serenity::CreateEmbed::new()
+                        .title("Options Cover")
+                        .description(format!("No portfolio named **{portfolio}** found."))
+                        .color(data::EMBED_ERROR),
+                ),
+            )
+            .await?;
+            return Ok(());
         };
 
-        let pos_idx = match find_option_idx(&port.positions, &ticker, strike, expiry_dt, &opt_type, &OptionSide::Short) {
-            Some(i) => i,
-            None => {
-                ctx.send(
-                    poise::CreateReply::default().embed(
-                        serenity::CreateEmbed::new()
-                            .title("Options Cover")
-                            .description(format!(
-                                "No SHORT **{} {} ${:.2}** exp {} in portfolio **{}**.",
-                                ticker, type_str, strike, expiry, portfolio
-                            ))
-                            .color(data::EMBED_ERROR),
-                    ),
-                )
-                .await?;
-                return Ok(());
-            }
+        let pos_idx = if let Some(i) = find_option_idx(&port.positions, &ticker, strike, expiry_dt, &opt_type, &OptionSide::Short) { i } else {
+            ctx.send(
+                poise::CreateReply::default().embed(
+                    serenity::CreateEmbed::new()
+                        .title("Options Cover")
+                        .description(format!(
+                            "No SHORT **{ticker} {type_str} ${strike:.2}** exp {expiry} in portfolio **{portfolio}**."
+                        ))
+                        .color(data::EMBED_ERROR),
+                ),
+            )
+            .await?;
+            return Ok(());
         };
 
         let (held, collateral_total) = if let AssetType::Option(c) = &port.positions[pos_idx].asset_type {
@@ -951,8 +877,7 @@ pub async fn options_cover(
                     serenity::CreateEmbed::new()
                         .title("Options Cover")
                         .description(format!(
-                            "You only wrote **{}** contracts but tried to cover **{}**.",
-                            held, contracts
+                            "You only wrote **{held}** contracts but tried to cover **{contracts}**."
                         ))
                         .color(data::EMBED_ERROR),
                 ),
@@ -961,7 +886,7 @@ pub async fn options_cover(
             return Ok(());
         }
 
-        let collateral_to_release = collateral_total * (contracts as f64 / held as f64);
+        let collateral_to_release = collateral_total * (f64::from(contracts) / f64::from(held));
         let available = port.cash - port.locked_cash() + collateral_to_release;
 
         if available < cost_to_close {
@@ -982,7 +907,7 @@ pub async fn options_cover(
         }
 
         let avg_cost = port.positions[pos_idx].avg_cost; // premium received per contract
-        let premium_received = avg_cost * contracts as f64;
+        let premium_received = avg_cost * f64::from(contracts);
         let pnl = premium_received - cost_to_close;
         port.cash -= cost_to_close;
 
@@ -990,7 +915,7 @@ pub async fn options_cover(
             port.positions.remove(pos_idx);
         } else {
             let pos = &mut port.positions[pos_idx];
-            pos.quantity -= contracts as f64;
+            pos.quantity -= f64::from(contracts);
             if let AssetType::Option(c) = &mut pos.asset_type {
                 c.contracts -= contracts;
                 c.collateral -= collateral_to_release;
@@ -1004,18 +929,15 @@ pub async fn options_cover(
     let record = TradeRecord {
         portfolio: portfolio.clone(),
         ticker: ticker.clone(),
-        asset_name: format!("SHORT {} {} ${:.2} {}", ticker, type_str, strike, expiry),
+        asset_name: format!("SHORT {ticker} {type_str} ${strike:.2} {expiry}"),
         action: TradeAction::Buy,
-        quantity: contracts as f64,
+        quantity: f64::from(contracts),
         price_per_unit: cost_per_contract,
         total_creds: cost_to_close,
         realized_pnl: Some(pnl),
         timestamp: Utc::now(),
     };
-    user_data.stock.trade_history.push_back(record);
-    if user_data.stock.trade_history.len() > TRADE_HISTORY_LIMIT {
-        user_data.stock.trade_history.pop_front();
-    }
+    user_data.stock.push_trade(record);
 
     let pnl_str = crate::helper::fmt_pnl(pnl);
     let color = if pnl >= 0.0 { data::EMBED_SUCCESS } else { data::EMBED_FAIL };

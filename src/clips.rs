@@ -3,10 +3,10 @@
 //! the organization, submission and facilitation of clip night         !
 //!                                                                     !
 //! Commands:                                                           !
-//!     [x] - submit_clip                                               !
-//!     [x] - server_clips                                              !
-//!     [x] - my_clips                                                  !
-//!     [x] - next_clip                                                 !
+//!     [x] - `submit_clip`                                               !
+//!     [x] - `server_clips`                                              !
+//!     [x] - `my_clips`                                                  !
+//!     [x] - `next_clip`                                                 !
 //!---------------------------------------------------------------------!
 
 use crate::data::{self, ClipData};
@@ -18,7 +18,6 @@ use poise::serenity_prelude::{EditMessage, ReactionType};
 use rand::seq::IteratorRandom;
 use rand::thread_rng;
 use regex::Regex;
-use std::env;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
@@ -52,9 +51,7 @@ pub async fn submit_clip(
     #[description = "the name of your clip"] title: String,
     #[description = "the youtube or medal link of your clip"] link: String,
 ) -> Result<(), Error> {
-    let sub_chat = env::var("SUBMIT").expect("missing SUBMIT id");
-
-    if ctx.channel_id().get().to_string() != sub_chat {
+    if ctx.channel_id().get().to_string() != ctx.data().sub_chat {
         return Ok(());
     }
 
@@ -78,7 +75,7 @@ pub async fn submit_clip(
     let u = data.get_mut(&user.id).unwrap();
     let mut user_data = u.write().await;
 
-    let avatar = user.avatar_url().unwrap_or_default().to_string();
+    let avatar = user.avatar_url().unwrap_or_default().clone();
 
     let desc = format!(
         "Title: \u{3000}**{}**\nLink: \u{3000}**{}**\n",
@@ -132,7 +129,7 @@ pub async fn server_clips(ctx: Context<'_>) -> Result<(), Error> {
 
     let mut all_clips = Vec::new();
 
-    let mut desc = "".to_string();
+    let mut desc = String::new();
     for x in data.iter() {
         let (id, u) = x.pair();
         let u = u.read().await;
@@ -226,7 +223,7 @@ pub async fn server_clips(ctx: Context<'_>) -> Result<(), Error> {
 pub async fn my_clips(ctx: Context<'_>) -> Result<(), Error> {
     let author = ctx.author();
     let id = author.id;
-    let avatar = author.avatar_url().unwrap_or_default().to_string();
+    let avatar = author.avatar_url().unwrap_or_default().clone();
 
     let data = &ctx.data().users;
     let u = data.get(&id).unwrap();
@@ -255,7 +252,7 @@ pub async fn my_clips(ctx: Context<'_>) -> Result<(), Error> {
         let emoji = ReactionType::Unicode(data::NUMBER_EMOJS[i].to_string());
         let button = serenity::CreateButton::new("open_modal")
             .label("")
-            .custom_id(format!("delete-clip-{}", i))
+            .custom_id(format!("delete-clip-{i}"))
             .emoji(emoji)
             .style(poise::serenity_prelude::ButtonStyle::Secondary);
         buttons.push(button);
@@ -269,7 +266,7 @@ pub async fn my_clips(ctx: Context<'_>) -> Result<(), Error> {
                 .embed(
                     serenity::CreateEmbed::default()
                         .title("My Clips")
-                        .description(format!("Ta-da!! Your carefully crafted clips!! (*If you wish to remove a clip, use the emojis below*)\n\n{}", desc))
+                        .description(format!("Ta-da!! Your carefully crafted clips!! (*If you wish to remove a clip, use the emojis below*)\n\n{desc}"))
                         .thumbnail(&avatar)
                         .color(data::EMBED_DEFAULT)
                         .footer(default_footer()),
@@ -336,7 +333,7 @@ pub async fn my_clips(ctx: Context<'_>) -> Result<(), Error> {
                         serenity::CreateEmbed::default()
                             .title("My Clips")
                             .thumbnail(&avatar)
-                            .description(format!("Edit timed out...\n\n{}", desc))
+                            .description(format!("Edit timed out...\n\n{desc}"))
                             .colour(data::EMBED_ERROR)
                             .footer(default_footer()),
                     )
@@ -367,8 +364,7 @@ pub async fn next_clip(ctx: Context<'_>) -> Result<(), Error> {
         let (id, user) = x.pair();
         let u = user.read().await;
 
-        let clips = u.clone().submits;
-        for (idx, c) in clips.iter().enumerate() {
+        for (idx, c) in u.submits.iter().enumerate() {
             if let Some(c) = c {
                 if c.rating.is_none() {
                     all_clips.push((*id, Arc::clone(user), idx));
@@ -402,7 +398,7 @@ pub async fn next_clip(ctx: Context<'_>) -> Result<(), Error> {
         let emoji = ReactionType::Unicode(data::NUMBER_EMOJS[i].to_string());
         let button = serenity::CreateButton::new("open_modal")
             .label("")
-            .custom_id(format!("vote-clip-{}", i))
+            .custom_id(format!("vote-clip-{i}"))
             .emoji(emoji)
             .style(poise::serenity_prelude::ButtonStyle::Secondary);
         buttons.push(button);
@@ -420,10 +416,7 @@ pub async fn next_clip(ctx: Context<'_>) -> Result<(), Error> {
     ];
 
     let user = rand_clip.1.read().await;
-    let clip = match user.submits.get(rand_clip.2).and_then(|c| c.clone()) {
-        Some(c) => c,
-        None => { ctx.say("That clip is no longer available.").await?; return Ok(()); }
-    };
+    let clip = if let Some(c) = user.submits.get(rand_clip.2).and_then(std::clone::Clone::clone) { c } else { ctx.say("That clip is no longer available.").await?; return Ok(()); };
 
     ctx.send(poise::CreateReply::default().content(format!("**{}**\n{}", clip.title, clip.link)))
         .await?;
@@ -507,7 +500,7 @@ pub async fn next_clip(ctx: Context<'_>) -> Result<(), Error> {
             voted_users.insert(user.id, i);
 
             let s: u8 = voted_users.iter().map(|x| *x.pair().1).sum();
-            let s = s as f64 / voted_users.len() as f64;
+            let s = f64::from(s) / voted_users.len() as f64;
             score.store(s, Ordering::Relaxed);
 
             reaction
@@ -568,7 +561,7 @@ pub struct AtomicF64 {
     storage: AtomicU64,
 }
 impl AtomicF64 {
-    pub fn new(value: f64) -> Self {
+    pub const fn new(value: f64) -> Self {
         let as_u64 = value.to_bits();
         Self {
             storage: AtomicU64::new(as_u64),
@@ -576,7 +569,7 @@ impl AtomicF64 {
     }
     pub fn store(&self, value: f64, ordering: Ordering) {
         let as_u64 = value.to_bits();
-        self.storage.store(as_u64, ordering)
+        self.storage.store(as_u64, ordering);
     }
     pub fn load(&self, ordering: Ordering) -> f64 {
         let as_u64 = self.storage.load(ordering);

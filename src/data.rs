@@ -1,3 +1,4 @@
+//! Shared bot state, user data models, and global constants.
 use crate::serenity;
 use chrono::prelude::{DateTime, Utc};
 use dashmap::DashMap;
@@ -22,13 +23,15 @@ pub struct ProfessorMemory {
     pub entries: VecDeque<MemoryEntry>,
 }
 
-// Stock feature constants
+/// Minimum level required to unlock Gold Status and the elevated HYSA rate.
 pub const GOLD_LEVEL_THRESHOLD: i32 = 10;
-pub const BASE_HYSA_RATE: f64 = 0.1;  // annual % for non-gold users
+/// Annual HYSA interest rate (as a fraction) applied to uninvested cash for non-gold users.
+pub const BASE_HYSA_RATE: f64 = 0.1;
+/// Maximum number of trade history records retained per user before oldest entries are dropped.
 pub const TRADE_HISTORY_LIMIT: usize = 500;
+/// Maximum number of pending (queued) orders a user may have at once.
 pub const MAX_PENDING_ORDERS: usize = 20;
 
-// Constants
 pub const NUMBER_EMOJS: [&str; 10] = [
     "\u{0030}\u{FE0F}\u{20E3}",
     "\u{0031}\u{FE0F}\u{20E3}",
@@ -42,16 +45,15 @@ pub const NUMBER_EMOJS: [&str; 10] = [
     "\u{0039}\u{FE0F}\u{20E3}",
 ];
 
-pub const EMBED_DEFAULT: Color = Color::new(16119285); // white - transition color
-pub const EMBED_CYAN: Color = Color::new(6943230); // cyan  - good finish color
+pub const EMBED_DEFAULT: Color = Color::new(16_119_285); // white - transition color
+pub const EMBED_CYAN: Color = Color::new(6_943_230); // cyan  - good finish color
 pub const EMBED_GOLD: Color = Color::GOLD; // gold - cred related color
 pub const EMBED_FAIL: Color = Color::RED; // red - absolute fails
 pub const EMBED_LEVEL: Color = Color::ORANGE; // orange - level/xp related color
-pub const EMBED_SUCCESS: Color = Color::new(65280); // green - major success
-pub const EMBED_ERROR: Color = Color::new(6053215); // grey - soft fails
-pub const EMBED_MOD: Color = Color::new(16749300); // pink - moderator commands
+pub const EMBED_SUCCESS: Color = Color::new(65_280); // green - major success
+pub const EMBED_ERROR: Color = Color::new(6_053_215); // grey - soft fails
+pub const EMBED_MOD: Color = Color::new(16_749_300); // pink - moderator commands
 
-// General Structures
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct ClipData {
     pub title: String,
@@ -62,7 +64,7 @@ pub struct ClipData {
 
 impl ClipData {
     pub fn new(title: String, link: String) -> Self {
-        ClipData {
+        Self {
             title,
             link,
             date: Utc::now(),
@@ -71,7 +73,6 @@ impl ClipData {
     }
 }
 
-// User profile
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct UserData {
     level: i32,
@@ -96,15 +97,11 @@ pub struct UserData {
 }
 
 impl UserData {
-    pub fn update_level(&mut self) {
+    pub const fn update_level(&mut self) {
         self.level += 1;
     }
 
-    pub fn set_level(&mut self, level: i32) {
-        self.level = level;
-    }
-
-    pub fn update_xp(&mut self, xp: i32) -> bool {
+    pub const fn update_xp(&mut self, xp: i32) -> bool {
         if xp < 0 {
             return false;
         }
@@ -126,7 +123,7 @@ impl UserData {
         self.daily_count += 1;
     }
 
-    pub fn add_rolls(&mut self, roll: i32) -> bool {
+    pub const fn add_rolls(&mut self, roll: i32) -> bool {
         if roll < 1 {
             return false;
         }
@@ -144,15 +141,15 @@ impl UserData {
         self.bonus_count = (self.bonus_count + 1).min(3);
     }
 
-    pub fn reset_bonus(&mut self) {
+    pub const fn reset_bonus(&mut self) {
         self.bonus_count = 0;
     }
 
-    pub fn check_claim(&self) -> bool {
+    pub const fn check_claim(&self) -> bool {
         matches!(self.bonus_count, 3)
     }
 
-    pub fn add_creds(&mut self, creds: i32) -> bool {
+    pub const fn add_creds(&mut self, creds: i32) -> bool {
         if creds < 0 {
             return false;
         }
@@ -161,7 +158,7 @@ impl UserData {
         true
     }
 
-    pub fn sub_creds(&mut self, creds: i32) -> bool {
+    pub const fn sub_creds(&mut self, creds: i32) -> bool {
         if creds < 0 {
             return false;
         }
@@ -169,7 +166,7 @@ impl UserData {
         true
     }
 
-    pub fn add_tickets(&mut self, tickets: i32) -> bool {
+    pub const fn add_tickets(&mut self, tickets: i32) -> bool {
         if tickets < 1 {
             return false;
         }
@@ -178,11 +175,11 @@ impl UserData {
         true
     }
 
-    pub fn get_creds(&self) -> i32 {
+    pub const fn get_creds(&self) -> i32 {
         self.creds
     }
 
-    pub fn get_tickets(&self) -> i32 {
+    pub const fn get_tickets(&self) -> i32 {
         self.tickets
     }
 
@@ -208,7 +205,7 @@ impl UserData {
         luck
     }
 
-    pub fn get_luck_score(&self) -> i32 {
+    pub const fn get_luck_score(&self) -> i32 {
         self.rolls / (self.daily_count + 1)
     }
 
@@ -244,19 +241,19 @@ impl UserData {
         }
     }
 
-    pub fn get_bonus(&self) -> i32 {
+    pub const fn get_bonus(&self) -> i32 {
         self.bonus_count
     }
 
-    pub fn get_level(&self) -> i32 {
+    pub const fn get_level(&self) -> i32 {
         self.level
     }
 
-    pub fn get_xp(&self) -> i32 {
+    pub const fn get_xp(&self) -> i32 {
         self.xp
     }
 
-    pub fn get_next_level(&self) -> i32 {
+    pub const fn get_next_level(&self) -> i32 {
         500 + self.get_level() * 80
     }
 
@@ -277,8 +274,8 @@ impl UserData {
     }
 
     pub fn remove_submit(&mut self, submit_index: usize) -> bool {
-        let res = self.submits.remove(submit_index);
-        res.is_some()
+        if submit_index >= self.submits.len() { return false; }
+        self.submits.remove(submit_index).is_some()
     }
 
     pub fn get_submissions(&self, show_score: bool, show_icon: bool) -> Vec<String> {
@@ -286,7 +283,7 @@ impl UserData {
         for (id, clip) in self.submits.iter().enumerate() {
             if let Some(clip) = clip {
                 let score = if let Some(s) = clip.rating {
-                    format!("[{}/5]", s)
+                    format!("[{s}/5]")
                 } else {
                     "[-/5]".to_string()
                 };
@@ -294,9 +291,9 @@ impl UserData {
                     "{} {} **[{}]({})** ({})",
                     if show_icon { NUMBER_EMOJS[id] } else { "" },
                     if show_score {
-                        format!(" {} ", score)
+                        format!(" {score} ")
                     } else {
-                        "".to_string()
+                        String::new()
                     },
                     clip.title,
                     clip.link,
@@ -318,8 +315,8 @@ pub struct VoiceUser {
 }
 
 impl VoiceUser {
-    pub fn new() -> VoiceUser {
-        VoiceUser {
+    pub fn new() -> Self {
+        Self {
             joined: Utc::now(),
             last_reward: None,
             mute: None,
@@ -369,7 +366,6 @@ pub struct Data {
     pub gen_chat: String,
     pub bot_chat: String,
     pub sub_chat: String,
-    pub prof_id: String,
     pub bad_fortune: Vec<String>,
     pub good_fortune: Vec<String>,
     pub hysa_fed_rate: Arc<RwLock<f64>>,
@@ -415,10 +411,16 @@ impl Data {
     }
 
     /// Attempts to load the Data from a file, otherwise return a default
-    pub fn load() -> Data {
+    pub fn load() -> Self {
         let data = fs::read_to_string("data.json").ok();
         let users_data: SaveData = if let Some(file) = data {
-            serde_json::from_str(&file).expect("Old data format?")
+            match serde_json::from_str(&file) {
+                Ok(d) => d,
+                Err(e) => {
+                    tracing::warn!("Failed to deserialize data.json (schema mismatch?): {e}");
+                    SaveData::default()
+                }
+            }
         } else {
             SaveData::default()
         };
@@ -448,9 +450,7 @@ impl Data {
         let gen_chat = env::var("GENERAL").expect("missing GENERAL id");
         let bot_chat = env::var("BOT_CMD").expect("missing BOT_CMD id");
         let sub_chat = env::var("SUBMIT").expect("missing SUBMIT id");
-        let prof_id = env::var("PROFESSOR").expect("missing PROFESSOR id");
-
-        Data {
+        Self {
             users,
             voice_users: Arc::new(DashMap::new()),
             meme,
@@ -461,7 +461,6 @@ impl Data {
             gen_chat,
             bot_chat,
             sub_chat,
-            prof_id,
             bad_fortune,
             good_fortune,
             hysa_fed_rate: Arc::new(RwLock::new(3.35)),
@@ -521,6 +520,15 @@ pub struct StockProfile {
     pub next_order_id: u32,
 }
 
+impl StockProfile {
+    pub fn push_trade(&mut self, record: TradeRecord) {
+        self.trade_history.push_back(record);
+        if self.trade_history.len() > TRADE_HISTORY_LIMIT {
+            self.trade_history.pop_front();
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Portfolio {
     pub name: String,
@@ -532,7 +540,7 @@ pub struct Portfolio {
 
 impl Portfolio {
     pub fn new(name: String) -> Self {
-        Portfolio {
+        Self {
             name,
             cash: 0.0,
             last_interest_credited: Utc::now(),
@@ -569,13 +577,13 @@ pub enum AssetType {
     Option(OptionContract),
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OptionSide {
     Long,
     Short,
 }
 
-fn default_long() -> OptionSide {
+const fn default_long() -> OptionSide {
     OptionSide::Long
 }
 
@@ -592,7 +600,7 @@ pub struct OptionContract {
     pub collateral: f64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OptionType {
     Call,
     Put,
@@ -611,13 +619,13 @@ pub struct TradeRecord {
     pub timestamp: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum TradeAction {
     Buy,
     Sell,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OrderSide {
     Buy,
     Sell,

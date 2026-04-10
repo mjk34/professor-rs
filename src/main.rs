@@ -1,3 +1,22 @@
+//! Entry point: bot setup, task scheduling, and event dispatch.
+// Pedantic/nursery lints that are either intentional or not worth the churn:
+#![allow(clippy::significant_drop_tightening)] // DashMap Ref shard locks; contention is acceptable in this bot's concurrency model
+#![allow(clippy::cast_precision_loss)]         // integer → f64 casts in game math are fine
+#![allow(clippy::cast_possible_truncation)]    // f64 → i32 truncation in cred calculations is intentional
+#![allow(clippy::cast_possible_wrap)]          // small bounded values cast to i32 are safe
+#![allow(clippy::cast_sign_loss)]
+#![allow(clippy::missing_errors_doc)]          // not publishing a public API
+#![allow(clippy::missing_panics_doc)]
+#![allow(clippy::must_use_candidate)]
+#![allow(clippy::wildcard_imports)]
+#![allow(clippy::items_after_statements)]
+#![allow(clippy::too_many_lines)]
+#![allow(clippy::manual_let_else)]             // let...else is too invasive a restructure for existing match/if patterns
+#![allow(clippy::string_add)]                  // format! appended to String is idiomatic for embed building
+#![allow(clippy::option_if_let_else)]          // map_or_else restructure reduces readability in complex closures
+#![allow(clippy::similar_names)]               // short variable names (u, ud, etc.) are conventional in this codebase
+#![allow(clippy::format_push_string)]          // push_str(&format!(...)) is clearer than write!() for embed building
+#![allow(clippy::redundant_else)]              // explicit else after always-continuing if is intentional for readability
 mod api;
 mod basic;
 mod clips;
@@ -75,8 +94,6 @@ async fn main() {
                 clips::next_clip(),
                 mods::give_creds(),
                 mods::take_creds(),
-                mods::test_seed_data(),
-                mods::test_set_level(),
                 trader::portfolio(),
                 stock::search(),
                 // /buy and /sell hidden — users go through /search interface
@@ -90,7 +107,6 @@ async fn main() {
                 options::options_write(),
                 options::options_cover(),
                 professor::professor(),
-                professor::test_professor(),
             ],
             prefix_options: poise::PrefixFrameworkOptions {
                 prefix: Some("~".into()),
@@ -124,7 +140,14 @@ async fn main() {
                      Never exceed 30% of cash per trade. Maximum 3 trades per session.".to_string()
                 });
 
-                if !data.users.contains_key(&bot_user_id) {
+                if data.users.contains_key(&bot_user_id) {
+                    // Refresh core_behavior from file on each restart
+                    let u = data.users.get(&bot_user_id).unwrap();
+                    let mut prof = u.write().await;
+                    if let Some(mem) = prof.professor_memory.as_mut() {
+                        mem.core_behavior = core_behavior;
+                    }
+                } else {
                     let mut prof = data::UserData::default();
                     prof.add_creds(100_000);
                     prof.professor_memory = Some(data::ProfessorMemory {
@@ -134,13 +157,6 @@ async fn main() {
                     let port = data::Portfolio::new("ProfessorPort".to_string());
                     prof.stock.portfolios.push(port);
                     data.users.insert(bot_user_id, Arc::new(RwLock::new(prof)));
-                } else {
-                    // Refresh core_behavior from file on each restart
-                    let u = data.users.get(&bot_user_id).unwrap();
-                    let mut prof = u.write().await;
-                    if let Some(mem) = prof.professor_memory.as_mut() {
-                        mem.core_behavior = core_behavior;
-                    }
                 }
 
                 professor_task(users.clone(), http.clone(), bot_chat.clone(), bot_user_id);
@@ -164,6 +180,7 @@ async fn main() {
     client.unwrap().start().await.unwrap();
 }
 
+#[allow(clippy::unused_async)] // poise requires async fn signature for event handlers
 async fn event_handler(
     _ctx: &serenity::Context,
     event: &serenity::FullEvent,
@@ -173,7 +190,6 @@ async fn event_handler(
     let gen_chat = &data.gen_chat;
     let bot_chat = &data.bot_chat;
     let sub_chat = &data.sub_chat;
-    let prof_id = &data.prof_id;
 
     match event {
         serenity::FullEvent::Ready { data_about_bot, .. } => {
@@ -190,7 +206,7 @@ async fn event_handler(
         }
 
         serenity::FullEvent::Message { new_message } => {
-            if new_message.author.id.to_string() == *prof_id {
+            if new_message.author.id == data.bot_user_id {
                 return Ok(());
             }
 
@@ -301,7 +317,7 @@ fn professor_task(
             // Sleep until the next 19:00 UTC — always sleep first to avoid the boundary
             // case where waking at exactly 19:00 causes secs_until_hm to return 0 and skip.
             let now = chrono::Utc::now();
-            let cur_secs = now.hour() as u64 * 3600 + now.minute() as u64 * 60 + now.second() as u64;
+            let cur_secs = u64::from(now.hour()) * 3600 + u64::from(now.minute()) * 60 + u64::from(now.second());
             let target_secs = 19u64 * 3600;
             let secs_to_fire = if cur_secs < target_secs {
                 target_secs - cur_secs
@@ -338,7 +354,7 @@ fn pending_orders_task(
     });
 }
 
-/// Next weekday (Mon–Fri) at 17:00 UTC after `now`.
+/// Next weekday (Mon–Fri) at 19:00 UTC after `now`.
 fn next_professor_run(now: chrono::DateTime<Utc>) -> chrono::DateTime<Utc> {
     let mut day = now.date_naive();
     if now.hour() >= 19 {
@@ -351,15 +367,4 @@ fn next_professor_run(now: chrono::DateTime<Utc>) -> chrono::DateTime<Utc> {
         day += chrono::Duration::days(1);
     }
     day.and_hms_opt(19, 0, 0).unwrap().and_utc()
-}
-
-/// Seconds until the next occurrence of hour:minute UTC (0 if already past).
-fn secs_until_hm(cur_h: u32, cur_m: u32, target_h: u32, target_m: u32) -> u64 {
-    let cur_secs = cur_h as u64 * 3600 + cur_m as u64 * 60;
-    let target_secs = target_h as u64 * 3600 + target_m as u64 * 60;
-    if target_secs > cur_secs {
-        target_secs - cur_secs
-    } else {
-        0
-    }
 }

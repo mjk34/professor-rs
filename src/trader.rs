@@ -2,7 +2,7 @@
 //! Portfolio, watchlist, and trades commands                           !
 //!---------------------------------------------------------------------!
 
-use crate::api::{fetch_price, fetch_quote_detail, market_data_err};
+use crate::api::{fetch_prices_map, fetch_quote_detail, market_data_err};
 use crate::data::{self, AssetType, PendingOrder, Portfolio, Position, TradeAction, TradeRecord, TRADE_HISTORY_LIMIT};
 use crate::helper::{creds_to_price, default_footer, fmt_qty, option_intrinsic, price_to_creds};
 use crate::{serenity, Context, Error};
@@ -49,7 +49,8 @@ pub struct WithdrawModal {
 
 // ── Trade helpers ─────────────────────────────────────────────────────────────
 
-pub(crate) fn apply_buy(
+#[allow(clippy::too_many_arguments)]
+pub fn apply_buy(
     port: &mut Portfolio,
     history: &mut VecDeque<TradeRecord>,
     ticker: &str,
@@ -67,7 +68,7 @@ pub(crate) fn apply_buy(
     }) {
         let total_qty = existing.quantity + quantity;
         existing.avg_cost =
-            (existing.avg_cost * existing.quantity + total_cost_creds) / total_qty;
+            existing.avg_cost.mul_add(existing.quantity, total_cost_creds) / total_qty;
         existing.quantity = total_qty;
     } else {
         port.positions.push(Position {
@@ -95,7 +96,7 @@ pub(crate) fn apply_buy(
     }
 }
 
-pub(crate) fn apply_sell(
+pub fn apply_sell(
     port: &mut Portfolio,
     history: &mut VecDeque<TradeRecord>,
     ticker: &str,
@@ -111,11 +112,11 @@ pub(crate) fn apply_sell(
 
     let avg_cost = port.positions[pos_idx].avg_cost;
     let proceeds = price_per_unit * quantity;
-    let pnl = proceeds - avg_cost * quantity;
+    let pnl = avg_cost.mul_add(-quantity, proceeds);
 
     port.cash += proceeds;
     port.positions[pos_idx].quantity -= quantity;
-    if port.positions[pos_idx].quantity < 1e-9 {
+    if port.positions[pos_idx].quantity < 1e-9 { // epsilon: treat sub-nanoshare residuals as fully closed
         port.positions.remove(pos_idx);
     }
 
@@ -148,13 +149,11 @@ pub async fn build_portfolio_picker(
     } else {
         let unique_tickers: Vec<String> = {
             let mut seen = std::collections::HashSet::new();
-            portfolios.iter().take(4).flat_map(|p| p.positions.iter().map(|pos| pos.ticker.clone()))
-                .filter(|t| seen.insert(t.clone()))
+            portfolios.iter().take(4).flat_map(|p| p.positions.iter())
+                .filter_map(|pos| if seen.insert(pos.ticker.as_str()) { Some(pos.ticker.clone()) } else { None })
                 .collect()
         };
-        let prices: HashMap<String, f64> = futures::future::join_all(
-            unique_tickers.iter().map(|t| { let t = t.clone(); async move { let p = fetch_price(&t).await.unwrap_or(0.0); (t, p) } })
-        ).await.into_iter().collect();
+        let prices = fetch_prices_map(&unique_tickers).await;
 
         let mut rows = Vec::new();
         for (i, p) in portfolios.iter().take(4).enumerate() {
@@ -182,7 +181,7 @@ pub async fn build_portfolio_picker(
         .take(4)
         .enumerate()
         .map(|(i, _)| {
-            serenity::CreateButton::new(format!("port_{}", i))
+            serenity::CreateButton::new(format!("port_{i}"))
                 .label(format!("{}", i + 1))
                 .style(serenity::ButtonStyle::Primary)
         })
@@ -215,11 +214,9 @@ pub async fn build_portfolio_view_embed(portfolio: &data::Portfolio, pending_ord
 
     let unique_tickers: Vec<String> = {
         let mut seen = std::collections::HashSet::new();
-        portfolio.positions.iter().map(|p| p.ticker.clone()).filter(|t| seen.insert(t.clone())).collect()
+        portfolio.positions.iter().filter_map(|p| if seen.insert(p.ticker.as_str()) { Some(p.ticker.clone()) } else { None }).collect()
     };
-    let price_cache: HashMap<String, f64> = futures::future::join_all(
-        unique_tickers.iter().map(|t| { let t = t.clone(); async move { let p = fetch_price(&t).await.unwrap_or(0.0); (t, p) } })
-    ).await.into_iter().collect();
+    let price_cache = fetch_prices_map(&unique_tickers).await;
     let mut positions_value: f64 = 0.0;
     for pos in &portfolio.positions {
         positions_value += price_to_creds(*price_cache.get(&pos.ticker).unwrap_or(&0.0)) * pos.quantity;
@@ -241,57 +238,54 @@ pub async fn build_portfolio_view_embed(portfolio: &data::Portfolio, pending_ord
             let current_price_usd = price_cache.get(&pos.ticker).copied().unwrap_or(0.0);
             let cost_basis = pos.avg_cost * pos.quantity;
 
-            match &pos.asset_type {
-                AssetType::Option(contract) => {
-                    let intrinsic = option_intrinsic(&contract.option_type, current_price_usd, contract.strike);
-                    let current_premium =
-                        crate::options::option_premium_creds(intrinsic, &contract.expiry, contract.contracts);
-                    let type_str = crate::helper::option_type_str(&contract.option_type);
-                    if contract.side == data::OptionSide::Short {
-                        let pnl = cost_basis - current_premium;
-                        desc += &format!(
-                            "SHORT **{} {} ${:.2}** exp {} — {} contracts\nPremium rcvd: **${:.2}** | Obligation: **${:.2}** | P&L: **${:+.2}**{}\n\n",
-                            pos.ticker, type_str, contract.strike,
-                            contract.expiry.format("%Y-%m-%d"), contract.contracts,
-                            creds_to_price(cost_basis),
-                            creds_to_price(current_premium),
-                            creds_to_price(pnl),
-                            crate::helper::fmt_pct_change(pnl, cost_basis)
-                        );
-                    } else {
-                        let pnl = current_premium - cost_basis;
-                        desc += &format!(
-                            "**{} {} ${:.2}** exp {} — {} contracts\nCost: **${:.2}** | Value: **${:.2}** | P&L: **${:+.2}**{}\n\n",
-                            pos.ticker, type_str, contract.strike,
-                            contract.expiry.format("%Y-%m-%d"), contract.contracts,
-                            creds_to_price(cost_basis),
-                            creds_to_price(current_premium),
-                            creds_to_price(pnl),
-                            crate::helper::fmt_pct_change(pnl, cost_basis)
-                        );
-                    }
-                }
-                _ => {
-                    let current_creds = price_to_creds(current_price_usd);
-                    let current_value = current_creds * pos.quantity;
-                    let pnl = current_value - cost_basis;
-                    let pnl_pct = if cost_basis > 0.0 {
-                        pnl / cost_basis * 100.0
-                    } else {
-                        0.0
-                    };
+            if let AssetType::Option(contract) = &pos.asset_type {
+                let intrinsic = option_intrinsic(&contract.option_type, current_price_usd, contract.strike);
+                let current_premium =
+                    crate::options::option_premium_creds(intrinsic, &contract.expiry, contract.contracts);
+                let type_str = crate::helper::option_type_str(&contract.option_type);
+                if contract.side == data::OptionSide::Short {
+                    let pnl = cost_basis - current_premium;
                     desc += &format!(
-                        "**{}** × {} — Avg: ${:.2} | Now: ${:.2}\nValue: **${:.2}** ({:.0} creds) | P&L: **${:+.2}** ({:+.1}%)\n\n",
-                        pos.ticker,
-                        fmt_qty(pos.quantity),
-                        creds_to_price(pos.avg_cost),
-                        current_price_usd,
-                        creds_to_price(current_value),
-                        current_value,
+                        "SHORT **{} {} ${:.2}** exp {} — {} contracts\nPremium rcvd: **${:.2}** | Obligation: **${:.2}** | P&L: **${:+.2}**{}\n\n",
+                        pos.ticker, type_str, contract.strike,
+                        contract.expiry.format("%Y-%m-%d"), contract.contracts,
+                        creds_to_price(cost_basis),
+                        creds_to_price(current_premium),
                         creds_to_price(pnl),
-                        pnl_pct
+                        crate::helper::fmt_pct_change(pnl, cost_basis)
+                    );
+                } else {
+                    let pnl = current_premium - cost_basis;
+                    desc += &format!(
+                        "**{} {} ${:.2}** exp {} — {} contracts\nCost: **${:.2}** | Value: **${:.2}** | P&L: **${:+.2}**{}\n\n",
+                        pos.ticker, type_str, contract.strike,
+                        contract.expiry.format("%Y-%m-%d"), contract.contracts,
+                        creds_to_price(cost_basis),
+                        creds_to_price(current_premium),
+                        creds_to_price(pnl),
+                        crate::helper::fmt_pct_change(pnl, cost_basis)
                     );
                 }
+            } else {
+                let current_creds = price_to_creds(current_price_usd);
+                let current_value = current_creds * pos.quantity;
+                let pnl = current_value - cost_basis;
+                let pnl_pct = if cost_basis > 0.0 {
+                    pnl / cost_basis * 100.0
+                } else {
+                    0.0
+                };
+                desc += &format!(
+                    "**{}** × {} — Avg: ${:.2} | Now: ${:.2}\nValue: **${:.2}** ({:.0} creds) | P&L: **${:+.2}** ({:+.1}%)\n\n",
+                    pos.ticker,
+                    fmt_qty(pos.quantity),
+                    creds_to_price(pos.avg_cost),
+                    current_price_usd,
+                    creds_to_price(current_value),
+                    current_value,
+                    creds_to_price(pnl),
+                    pnl_pct
+                );
             }
         }
     }
@@ -299,9 +293,7 @@ pub async fn build_portfolio_view_embed(portfolio: &data::Portfolio, pending_ord
     if !pending_orders.is_empty() {
         desc += "\n**Queued:**\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n";
         for (i, order) in pending_orders.iter().take(5).enumerate() {
-            let limit_tag = order.limit_price
-                .map(|lp| format!("limit ${:.2}", lp))
-                .unwrap_or_else(|| "market".to_string());
+            let limit_tag = order.limit_price.map_or_else(|| "market".to_string(), |lp| format!("limit ${lp:.2}"));
             desc += &format!(
                 "{} — {} {} {} | {} | expires: <t:{}:R>\n",
                 data::NUMBER_EMOJS[(i + 1).min(9)],
@@ -337,7 +329,6 @@ pub async fn portfolio(ctx: Context<'_>) -> Result<(), Error> {
         if crate::helper::is_gold(&user_data) { crate::helper::gold_hysa_rate(fed_rate_val) } else { data::BASE_HYSA_RATE }
     };
 
-    // Send the initial picker message (outside the loop — only sent once)
     let init_portfolios = { u.read().await.stock.portfolios.clone() };
     let (init_pe, init_pc) = build_portfolio_picker(&init_portfolios).await;
     let reply = ctx.send(poise::CreateReply::default().embed(init_pe).components(init_pc)).await?;
@@ -376,7 +367,7 @@ pub async fn portfolio(ctx: Context<'_>) -> Result<(), Error> {
                 if ud.stock.portfolios.len() >= 4 {
                     Some("You have reached the maximum of **4** portfolios.".to_string())
                 } else if ud.stock.portfolios.iter().any(|p| p.name.eq_ignore_ascii_case(&name)) {
-                    Some(format!("A portfolio named **{}** already exists.", name))
+                    Some(format!("A portfolio named **{name}** already exists."))
                 } else { None }
             };
 
@@ -395,7 +386,7 @@ pub async fn portfolio(ctx: Context<'_>) -> Result<(), Error> {
 
             let success_embed = serenity::CreateEmbed::new()
                 .title("Portfolio — Create")
-                .description(format!("Portfolio **{}** created!", name))
+                .description(format!("Portfolio **{name}** created!"))
                 .color(data::EMBED_SUCCESS)
                 .footer(default_footer());
             let create_btns = vec![serenity::CreateActionRow::Buttons(vec![
@@ -450,9 +441,9 @@ pub async fn portfolio(ctx: Context<'_>) -> Result<(), Error> {
                     Err(format!("Insufficient creds. You have **{}** but need **{}**.", user_data.get_creds(), amount))
                 } else {
                     match user_data.stock.portfolios.iter_mut().find(|p| p.name == name) {
-                        None => Err(format!("Portfolio **{}** no longer exists.", name)),
+                        None => Err(format!("Portfolio **{name}** no longer exists.")),
                         Some(p) => {
-                            p.cash += amount as f64;
+                            p.cash += f64::from(amount);
                             let new_cash = p.cash;
                             user_data.sub_creds(amount);
                             Ok(new_cash)
@@ -505,7 +496,7 @@ pub async fn portfolio(ctx: Context<'_>) -> Result<(), Error> {
                     reply.edit(ctx, poise::CreateReply::default().embed(
                         serenity::CreateEmbed::new()
                             .title("Portfolio — Delete")
-                            .description(format!("No portfolio named **{}** found.", del_name))
+                            .description(format!("No portfolio named **{del_name}** found."))
                             .color(data::EMBED_ERROR),
                     ).components(vec![])).await?;
                     tokio::time::sleep(Duration::from_secs(2)).await;
@@ -520,11 +511,11 @@ pub async fn portfolio(ctx: Context<'_>) -> Result<(), Error> {
             }
 
             let detail = if has_cash && has_positions {
-                format!("**{}** has **{:.0}** creds cash and **{}** open positions.", del_name, cash, positions_count)
+                format!("**{del_name}** has **{cash:.0}** creds cash and **{positions_count}** open positions.")
             } else if has_cash {
-                format!("**{}** has **{:.0}** creds cash.", del_name, cash)
+                format!("**{del_name}** has **{cash:.0}** creds cash.")
             } else {
-                format!("**{}** has **{}** open positions.", del_name, positions_count)
+                format!("**{del_name}** has **{positions_count}** open positions.")
             };
 
             let confirm_btns = vec![serenity::CreateActionRow::Buttons(vec![
@@ -534,7 +525,7 @@ pub async fn portfolio(ctx: Context<'_>) -> Result<(), Error> {
             reply.edit(ctx, poise::CreateReply::default().embed(
                 serenity::CreateEmbed::new()
                     .title("Portfolio — Delete")
-                    .description(format!("{}\n\nLiquidate all positions at market price and return cash to wallet?", detail))
+                    .description(format!("{detail}\n\nLiquidate all positions at market price and return cash to wallet?"))
                     .color(data::EMBED_FAIL)
                     .footer(default_footer()),
             ).components(confirm_btns)).await?;
@@ -547,7 +538,7 @@ pub async fn portfolio(ctx: Context<'_>) -> Result<(), Error> {
                 .await;
 
             match conf {
-                None => { continue 'picker; }
+                None => {}
                 Some(c) => {
                     c.defer(ctx.http()).await?;
                     if c.data.custom_id != "pdel_yes" {
@@ -560,13 +551,15 @@ pub async fn portfolio(ctx: Context<'_>) -> Result<(), Error> {
                             Some(p) => (p.cash, p.positions.clone()),
                         }
                     };
+                    let tickers_for_fetch: Vec<String> = positions_for_fetch.iter().map(|p| p.ticker.clone()).collect();
+                    let prices = fetch_prices_map(&tickers_for_fetch).await;
                     let mut total_proceeds = portfolio_cash;
                     for pos in &positions_for_fetch {
-                        let price_usd = fetch_price(&pos.ticker).await.unwrap_or(0.0);
+                        let price_usd = prices.get(&pos.ticker).copied().unwrap_or(0.0);
                         let value = match &pos.asset_type {
                             AssetType::Option(contract) => {
                                 let intrinsic = option_intrinsic(&contract.option_type, price_usd, contract.strike);
-                                price_to_creds(intrinsic * 100.0) * contract.contracts as f64
+                                price_to_creds(intrinsic * 100.0) * f64::from(contract.contracts)
                             }
                             _ => price_to_creds(price_usd) * pos.quantity,
                         };
@@ -577,7 +570,6 @@ pub async fn portfolio(ctx: Context<'_>) -> Result<(), Error> {
                         ud.stock.portfolios.retain(|p| !p.name.eq_ignore_ascii_case(&del_name));
                         ud.add_creds(total_proceeds as i32);
                     }
-                    continue 'picker;
                 }
             }
 
@@ -674,9 +666,9 @@ pub async fn portfolio(ctx: Context<'_>) -> Result<(), Error> {
                                 ))
                             } else {
                                 match user_data.stock.portfolios.iter_mut().find(|p| p.name == port_name) {
-                                    None => Err(format!("Portfolio **{}** no longer exists.", port_name)),
+                                    None => Err(format!("Portfolio **{port_name}** no longer exists.")),
                                     Some(p) => {
-                                        p.cash += amount as f64;
+                                        p.cash += f64::from(amount);
                                         let new_cash = p.cash;
                                         user_data.sub_creds(amount);
                                         Ok(new_cash)
@@ -732,13 +724,13 @@ pub async fn portfolio(ctx: Context<'_>) -> Result<(), Error> {
                         let withdraw_result: Result<f64, String> = {
                             let mut user_data = u.write().await;
                             match user_data.stock.portfolios.iter_mut().find(|p| p.name == port_name) {
-                                None => Err(format!("Portfolio **{}** no longer exists.", port_name)),
-                                Some(p) if p.cash < amount as f64 => Err(format!(
+                                None => Err(format!("Portfolio **{port_name}** no longer exists.")),
+                                Some(p) if p.cash < f64::from(amount) => Err(format!(
                                     "Insufficient cash. **{}** has **${:.2}** but tried to withdraw **${:.2}**.",
                                     port_name, creds_to_price(p.cash), dollars
                                 )),
                                 Some(p) => {
-                                    p.cash -= amount as f64;
+                                    p.cash -= f64::from(amount);
                                     let remaining = p.cash;
                                     user_data.add_creds(amount);
                                     Ok(remaining)
@@ -792,11 +784,11 @@ pub async fn portfolio(ctx: Context<'_>) -> Result<(), Error> {
                         }
 
                         let detail = if has_cash && has_positions {
-                            format!("**{}** has **{:.0}** creds cash and **{}** open positions.", port_name, cash, positions_count)
+                            format!("**{port_name}** has **{cash:.0}** creds cash and **{positions_count}** open positions.")
                         } else if has_cash {
-                            format!("**{}** has **{:.0}** creds cash.", port_name, cash)
+                            format!("**{port_name}** has **{cash:.0}** creds cash.")
                         } else {
-                            format!("**{}** has **{}** open positions.", port_name, positions_count)
+                            format!("**{port_name}** has **{positions_count}** open positions.")
                         };
 
                         let confirm_buttons = vec![serenity::CreateActionRow::Buttons(vec![
@@ -806,7 +798,7 @@ pub async fn portfolio(ctx: Context<'_>) -> Result<(), Error> {
                         reply.edit(ctx, poise::CreateReply::default().embed(
                             serenity::CreateEmbed::new()
                                 .title("Portfolio — Delete")
-                                .description(format!("{}\n\nLiquidate all positions at market price and return cash to wallet?", detail))
+                                .description(format!("{detail}\n\nLiquidate all positions at market price and return cash to wallet?"))
                                 .color(data::EMBED_FAIL)
                                 .footer(default_footer()),
                         ).components(confirm_buttons)).await?;
@@ -830,13 +822,15 @@ pub async fn portfolio(ctx: Context<'_>) -> Result<(), Error> {
                                             Some(p) => (p.cash, p.positions.clone()),
                                         }
                                     };
+                                    let tickers_for_fetch: Vec<String> = positions_for_fetch.iter().map(|p| p.ticker.clone()).collect();
+                                    let prices = fetch_prices_map(&tickers_for_fetch).await;
                                     let mut total_proceeds = portfolio_cash;
                                     for pos in &positions_for_fetch {
-                                        let price_usd = fetch_price(&pos.ticker).await.unwrap_or(0.0);
+                                        let price_usd = prices.get(&pos.ticker).copied().unwrap_or(0.0);
                                         let value = match &pos.asset_type {
                                             AssetType::Option(contract) => {
                                                 let intrinsic = option_intrinsic(&contract.option_type, price_usd, contract.strike);
-                                                price_to_creds(intrinsic * 100.0) * contract.contracts as f64
+                                                price_to_creds(intrinsic * 100.0) * f64::from(contract.contracts)
                                             }
                                             _ => price_to_creds(price_usd) * pos.quantity,
                                         };
@@ -848,10 +842,9 @@ pub async fn portfolio(ctx: Context<'_>) -> Result<(), Error> {
                                         ud.add_creds(total_proceeds as i32);
                                     }
                                     continue 'picker;
-                                } else {
-                                    // Cancelled — stay in view
-                                    continue 'view;
                                 }
+                                // Cancelled — stay in view
+                                continue 'view;
                             }
                         }
                     }
@@ -872,7 +865,6 @@ pub async fn portfolio(ctx: Context<'_>) -> Result<(), Error> {
                 }
                 break 'view;
             } // end 'view loop
-            continue 'picker;
         } // end else (numbered portfolio)
     } // end 'picker loop
 }
@@ -907,7 +899,7 @@ pub async fn build_watchlist_embed(
 
         let rows: Vec<String> = results.into_iter().map(|(ticker, quote)| {
             match quote {
-                None => format!("`{}` — fetch failed", ticker),
+                None => format!("`{ticker}` — fetch failed"),
                 Some(q) => {
                     let price_usd = q.regular_market_price.unwrap_or(0.0);
                     let change_pct = q.regular_market_change_percent.unwrap_or(0.0);
@@ -991,7 +983,7 @@ pub async fn watchlist(ctx: Context<'_>) -> Result<(), Error> {
                         let result: Result<(), String> = {
                             let mut ud = u.write().await;
                             if ud.stock.watchlist.contains(&ticker) {
-                                Err(format!("**{}** is already on your watchlist.", ticker))
+                                Err(format!("**{ticker}** is already on your watchlist."))
                             } else if ud.stock.watchlist.len() >= 20 {
                                 Err("Watchlist is full (max 20 tickers).".to_string())
                             } else {
@@ -1028,7 +1020,7 @@ pub async fn watchlist(ctx: Context<'_>) -> Result<(), Error> {
                     reply.edit(ctx, poise::CreateReply::default().embed(
                         serenity::CreateEmbed::new()
                             .title("Watchlist — Remove")
-                            .description(format!("**{}** is not on your watchlist.", ticker))
+                            .description(format!("**{ticker}** is not on your watchlist."))
                             .color(data::EMBED_ERROR),
                     ).components(vec![])).await?;
                     tokio::time::sleep(Duration::from_secs(3)).await;
@@ -1108,8 +1100,7 @@ pub fn build_filtered_embed(trades: &VecDeque<TradeRecord>, gains_only: bool) ->
         .iter()
         .filter(|t| {
             t.realized_pnl
-                .map(|p| if gains_only { p > 0.0 } else { p < 0.0 })
-                .unwrap_or(false)
+                .is_some_and(|p| if gains_only { p > 0.0 } else { p < 0.0 })
         })
         .collect();
 

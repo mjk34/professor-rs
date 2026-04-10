@@ -4,7 +4,6 @@
 
 use crate::data::{
     self, AssetType, OptionContract, OptionSide, OrderSide, PendingOrder, TradeAction, TradeRecord,
-    TRADE_HISTORY_LIMIT,
 };
 use crate::helper::{creds_to_price, fmt_pnl, fmt_qty, option_intrinsic, option_type_str, price_to_creds};
 use crate::serenity;
@@ -124,7 +123,7 @@ impl YfQuote {
             .unwrap_or_else(|| self.symbol.clone())
     }
 
-    pub fn is_market_open(&self) -> bool {
+    pub const fn is_market_open(&self) -> bool {
         self.market_open
     }
 
@@ -136,7 +135,7 @@ impl YfQuote {
         }
     }
 
-    pub fn market_status(&self) -> &'static str {
+    pub const fn market_status(&self) -> &'static str {
         if self.market_open { "Market: Open" } else { "Market: Closed" }
     }
 }
@@ -156,7 +155,7 @@ pub fn is_market_hours() -> bool {
     matches!(
         now_eastern.weekday(),
         Weekday::Mon | Weekday::Tue | Weekday::Wed | Weekday::Thu | Weekday::Fri
-    ) && hour >= 9 && hour < 16
+    ) && (9..16).contains(&hour)
 }
 
 // ── HTTP statics ──────────────────────────────────────────────────────────────
@@ -177,12 +176,17 @@ const FMP_CACHE_TTL: Duration = Duration::from_secs(300);
 pub static FMP_CACHE: LazyLock<DashMap<String, (FmpProfile, Instant)>> =
     LazyLock::new(DashMap::new);
 
+/// How long FMP valuation ratios are cached before re-fetching (15 days — rarely changes).
 const FMP_RATIOS_CACHE_TTL: Duration = Duration::from_secs(60 * 60 * 24 * 15);
 pub static FMP_RATIOS_CACHE: LazyLock<DashMap<String, (FmpRatios, Instant)>> =
     LazyLock::new(DashMap::new);
 
 pub static LOGO_API_KEY: LazyLock<Option<String>> =
     LazyLock::new(|| std::env::var("LOGO_API_KEY").ok());
+pub static FMP_API_KEY: LazyLock<Option<String>> =
+    LazyLock::new(|| std::env::var("FMP_API_KEY").ok());
+pub static FRED_API_KEY: LazyLock<Option<String>> =
+    LazyLock::new(|| std::env::var("FRED_API_KEY").ok());
 
 /// Set to true when Yahoo Finance returns HTTP 429; cleared on next successful response.
 pub static YAHOO_RATE_LIMITED: AtomicBool = AtomicBool::new(false);
@@ -191,17 +195,9 @@ pub static YAHOO_RATE_LIMITED: AtomicBool = AtomicBool::new(false);
 
 pub fn logo_url(ticker: &str) -> Option<String> {
     let key = LOGO_API_KEY.as_deref()?;
-    Some(format!("https://img.logo.dev/ticker/{}?token={}", ticker, key))
+    Some(format!("https://img.logo.dev/ticker/{ticker}?token={key}"))
 }
 
-pub fn market_closed_reply(action: &str, ticker: &str) -> poise::CreateReply {
-    poise::CreateReply::default().embed(
-        serenity::CreateEmbed::new()
-            .title(action)
-            .description(format!("Market is currently closed for **{}**.", ticker))
-            .color(data::EMBED_ERROR),
-    )
-}
 
 /// Returns a user-facing description when market data can't be fetched.
 /// If the Yahoo Finance rate limit was recently hit, tells the user to try again tomorrow.
@@ -209,7 +205,7 @@ pub fn market_data_err(query: &str) -> String {
     if YAHOO_RATE_LIMITED.load(Ordering::Relaxed) {
         "Market data API is rate limited — try again tomorrow when the limit resets.".to_string()
     } else {
-        format!("Could not fetch market data for **{}**.", query)
+        format!("Could not fetch market data for **{query}**.")
     }
 }
 
@@ -275,8 +271,7 @@ pub async fn fetch_quote_detail(ticker: &str) -> Option<YfQuote> {
 
     let http_resp = HTTP_CLIENT
         .get(format!(
-            "https://query2.finance.yahoo.com/v8/finance/chart/{}",
-            ticker
+            "https://query2.finance.yahoo.com/v8/finance/chart/{ticker}"
         ))
         .query(&[("interval", "1d"), ("range", "1d")])
         .send()
@@ -299,11 +294,10 @@ pub async fn fetch_quote_detail(ticker: &str) -> Option<YfQuote> {
 
     let market_open = meta
         .current_trading_period
-        .map(|p| {
+        .is_some_and(|p| {
             let now = Utc::now().timestamp();
             now >= p.regular.start && now < p.regular.end
-        })
-        .unwrap_or(false);
+        });
 
     let quote = YfQuote {
         symbol: meta.symbol,
@@ -325,11 +319,10 @@ pub async fn fetch_fmp_profile(ticker: &str) -> Option<FmpProfile> {
         }
     }
 
-    let api_key = std::env::var("FMP_API_KEY").ok()?;
+    let api_key = FMP_API_KEY.as_deref()?;
     let mut profiles = HTTP_CLIENT
         .get(format!(
-            "https://financialmodelingprep.com/stable/profile?symbol={}&apikey={}",
-            ticker, api_key
+            "https://financialmodelingprep.com/stable/profile?symbol={ticker}&apikey={api_key}"
         ))
         .send()
         .await
@@ -350,11 +343,10 @@ pub async fn fetch_fmp_ratios(ticker: &str) -> Option<FmpRatios> {
         }
     }
 
-    let api_key = std::env::var("FMP_API_KEY").ok()?;
+    let api_key = FMP_API_KEY.as_deref()?;
     let mut list = HTTP_CLIENT
         .get(format!(
-            "https://financialmodelingprep.com/stable/ratios-ttm?symbol={}&apikey={}",
-            ticker, api_key
+            "https://financialmodelingprep.com/stable/ratios-ttm?symbol={ticker}&apikey={api_key}"
         ))
         .send()
         .await
@@ -381,12 +373,12 @@ struct FredObservation {
 }
 
 pub async fn fetch_fed_funds_rate() -> Option<f64> {
-    let api_key = std::env::var("FRED_API_KEY").ok()?;
+    let api_key = FRED_API_KEY.as_deref()?;
     let resp = HTTP_CLIENT
         .get("https://api.stlouisfed.org/fred/series/observations")
         .query(&[
             ("series_id", "DFF"),
-            ("api_key", &api_key),
+            ("api_key", api_key),
             ("sort_order", "desc"),
             ("limit", "1"),
             ("file_type", "json"),
@@ -408,36 +400,24 @@ pub async fn fetch_fed_funds_rate() -> Option<f64> {
 
 pub async fn api_health_check() {
     // FRED
-    match fetch_fed_funds_rate().await {
-        Some(r) => tracing::info!("[API] FRED ✓ — fed funds rate: {:.2}%", r),
-        None    => tracing::warn!("[API] FRED ✗ — failed to fetch fed funds rate"),
-    }
+    if let Some(r) = fetch_fed_funds_rate().await { tracing::info!("[API] FRED ✓ — fed funds rate: {:.2}%", r) } else { tracing::warn!("[API] FRED ✗ — failed to fetch fed funds rate") }
 
     // FMP — probe with a known ticker
-    match fetch_fmp_profile("SPY").await {
-        Some(p) => tracing::info!("[API] FMP ✓ — SPY price: ${:.2}", p.price.unwrap_or(0.0)),
-        None    => tracing::warn!("[API] FMP ✗ — failed to fetch SPY profile"),
-    }
+    if let Some(p) = fetch_fmp_profile("SPY").await { tracing::info!("[API] FMP ✓ — SPY price: ${:.2}", p.price.unwrap_or(0.0)) } else { tracing::warn!("[API] FMP ✗ — failed to fetch SPY profile") }
 
     // FINNHUB — fetch market news
     let news = crate::professor::fetch_market_news().await;
-    if !news.is_empty() {
-        tracing::info!("[API] FINNHUB ✓ — {} headlines fetched", news.len());
-    } else {
+    if news.is_empty() {
         tracing::warn!("[API] FINNHUB ✗ — no headlines returned (check key or rate limit)");
+    } else {
+        tracing::info!("[API] FINNHUB ✓ — {} headlines fetched", news.len());
     }
 
     // CLAUDE — key presence only (no paid call on startup)
-    match std::env::var("CLAUDE_API_KEY") {
-        Ok(_)  => tracing::info!("[API] CLAUDE ✓ — key present"),
-        Err(_) => tracing::warn!("[API] CLAUDE ✗ — CLAUDE_API_KEY not set"),
-    }
+    if std::env::var("CLAUDE_API_KEY").is_ok() { tracing::info!("[API] CLAUDE ✓ — key present") } else { tracing::warn!("[API] CLAUDE ✗ — CLAUDE_API_KEY not set") }
 
     // LOGO.DEV — key presence only (URL-embedded, no HTTP call needed)
-    match std::env::var("LOGO_API_KEY") {
-        Ok(_)  => tracing::info!("[API] LOGO ✓ — key present"),
-        Err(_) => tracing::warn!("[API] LOGO ✗ — LOGO_API_KEY not set (stock thumbnails disabled)"),
-    }
+    if std::env::var("LOGO_API_KEY").is_ok() { tracing::info!("[API] LOGO ✓ — key present") } else { tracing::warn!("[API] LOGO ✗ — LOGO_API_KEY not set (stock thumbnails disabled)") }
 }
 
 // ── Maintenance functions ─────────────────────────────────────────────────────
@@ -531,17 +511,14 @@ pub async fn sweep_expired_options(
                 }
             }
         }
-        // read lock released here
     }
 
     // Phase 2: fetch prices for unique tickers concurrently (no locks held)
     let unique_tickers: Vec<String> = {
         let mut seen = std::collections::HashSet::new();
-        to_process.iter().map(|i| i.ticker.clone()).filter(|t| seen.insert(t.clone())).collect()
+        to_process.iter().filter_map(|i| if seen.insert(i.ticker.as_str()) { Some(i.ticker.clone()) } else { None }).collect()
     };
-    let prices: HashMap<String, f64> = futures::future::join_all(
-        unique_tickers.iter().map(|t| { let t = t.clone(); async move { let p = fetch_price(&t).await.unwrap_or(0.0); (t, p) } })
-    ).await.into_iter().collect();
+    let prices = fetch_prices_map(&unique_tickers).await;
 
     // Phase 3: apply changes under write lock (no await while holding)
     for info in to_process {
@@ -553,7 +530,7 @@ pub async fn sweep_expired_options(
         let price_usd = *prices.get(&info.ticker).unwrap_or(&0.0);
         let intrinsic = option_intrinsic(&info.contract.option_type, price_usd, info.contract.strike);
         let intrinsic_creds =
-            price_to_creds(intrinsic * info.contract.contracts as f64 * 100.0);
+            price_to_creds(intrinsic * f64::from(info.contract.contracts) * 100.0);
         let cost_basis = info.avg_cost * info.quantity; // for long: cost paid; for short: premium received
         let itm = intrinsic > 0.0;
         let type_str = option_type_str(&info.contract.option_type);
@@ -607,6 +584,7 @@ pub async fn sweep_expired_options(
                     if p.ticker != info.ticker {
                         return true;
                     }
+                    #[allow(clippy::float_cmp)] // strike prices are stored/compared as exact values we set
                     if let AssetType::Option(c) = &p.asset_type {
                         !(c.strike == info.contract.strike
                             && c.expiry == info.contract.expiry
@@ -636,11 +614,7 @@ pub async fn sweep_expired_options(
                 realized_pnl: Some(pnl),
                 timestamp: now,
             };
-            user_data.stock.trade_history.push_back(record);
-            if user_data.stock.trade_history.len() > TRADE_HISTORY_LIMIT {
-                user_data.stock.trade_history.pop_front();
-            }
-            // write lock released here
+            user_data.stock.push_trade(record);
         }
 
         let _ = channel
@@ -649,10 +623,17 @@ pub async fn sweep_expired_options(
     }
 }
 
+/// Fetches prices for a list of tickers concurrently and returns a ticker → USD price map.
+/// Tickers that fail to fetch are included with a value of 0.0.
+pub async fn fetch_prices_map(tickers: &[String]) -> HashMap<String, f64> {
+    futures::future::join_all(
+        tickers.iter().map(|t| { let t = t.clone(); async move { let p = fetch_price(&t).await.unwrap_or(0.0); (t, p) } })
+    ).await.into_iter().collect()
+}
+
 pub async fn is_market_open() -> bool {
     fetch_quote_detail("SPY").await
-        .and_then(|q| Some(q.is_market_open()))
-        .unwrap_or(false)
+        .is_some_and(|q| q.is_market_open())
 }
 
 /// Returns the expiry for a new pending order: end of today at 20:00 UTC if market
@@ -714,12 +695,11 @@ pub async fn sweep_pending_orders(
     // ── Phase 2: fetch prices concurrently (no locks held) ──────────────────
     let unique_tickers: Vec<String> = {
         let mut seen = std::collections::HashSet::new();
-        snapshots.iter().map(|s| s.order.ticker.clone()).filter(|t| seen.insert(t.clone())).collect()
+        snapshots.iter().filter_map(|s| if seen.insert(s.order.ticker.as_str()) { Some(s.order.ticker.clone()) } else { None }).collect()
     };
 
-    let prices: std::collections::HashMap<String, f64> = futures::future::join_all(
-        unique_tickers.iter().map(|t| { let t = t.clone(); async move { (t.clone(), fetch_price(&t).await.unwrap_or(0.0)) } })
-    ).await.into_iter().filter(|(_, p)| *p > 0.0).collect();
+    let mut prices = fetch_prices_map(&unique_tickers).await;
+    prices.retain(|_, p| *p > 0.0);
 
     // ── Phase 3: execute or expire under write lock ──────────────────────────
     for snap in &snapshots {
@@ -815,8 +795,7 @@ pub async fn sweep_pending_orders(
                     Some(idx) => {
                         let held = user_data.stock.portfolios[idx].positions.iter()
                             .find(|p| p.ticker == order.ticker && !matches!(&p.asset_type, AssetType::Option(_)))
-                            .map(|p| p.quantity)
-                            .unwrap_or(0.0);
+                            .map_or(0.0, |p| p.quantity);
                         let qty = if (order.quantity - held).abs() < 5e-5 { held } else { order.quantity };
                         if held < qty - 1e-9 {
                             format!(
@@ -858,10 +837,10 @@ pub async fn sweep_pending_orders(
 }
 
 impl OrderSide {
-    pub fn label(&self) -> &'static str {
+    pub const fn label(&self) -> &'static str {
         match self {
-            OrderSide::Buy => "buy",
-            OrderSide::Sell => "sell",
+            Self::Buy => "buy",
+            Self::Sell => "sell",
         }
     }
 }

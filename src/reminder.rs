@@ -1,3 +1,4 @@
+//! Birthday and event reminders: reads/writes `.eventdb` and fires Discord messages.
 use crate::data;
 use crate::helper::default_footer;
 use crate::serenity;
@@ -7,15 +8,13 @@ use std::env;
 use std::fs::{write, File};
 use std::io::{BufRead, BufReader};
 
+/// Path to the flat-file birthday/event database (CSV, one entry per line).
 const EVENT_FILE: &str = ".eventdb";
 
-async fn import_from_file(filename: &str) -> Vec<Vec<String>> {
-    let file = match File::open(filename) {
-        Ok(f) => f,
-        Err(_) => {
-            tracing::warn!("Event file '{}' not found, starting with empty database", filename);
-            return Vec::new();
-        }
+fn import_from_file(filename: &str) -> Vec<Vec<String>> {
+    let file = if let Ok(f) = File::open(filename) { f } else {
+        tracing::warn!("Event file '{}' not found, starting with empty database", filename);
+        return Vec::new();
     };
 
     let mut file_descriptor = BufReader::new(file);
@@ -29,13 +28,13 @@ async fn import_from_file(filename: &str) -> Vec<Vec<String>> {
         .lines()
         .filter_map(|line| {
             let line = line.ok()?;
-            let cells: Vec<String> = line.split(',').map(|cell| cell.to_string()).collect();
+            let cells: Vec<String> = line.split(',').map(std::string::ToString::to_string).collect();
             if cells.len() == 5 { Some(cells) } else { None }
         })
         .collect()
 }
 
-async fn export_to_file(filename: &str, database: Vec<Vec<String>>) {
+fn export_to_file(filename: &str, database: Vec<Vec<String>>) {
     let mut contents = String::new();
     contents += "-\n";
     for line in database {
@@ -52,8 +51,7 @@ async fn export_to_file(filename: &str, database: Vec<Vec<String>>) {
 }
 
 pub async fn check_birthday(http: &serenity::Http) {
-    let mut database: Vec<Vec<String>> = import_from_file(EVENT_FILE).await;
-    let length = database.len();
+    let mut database: Vec<Vec<String>> = import_from_file(EVENT_FILE);
     let tz_offset: i64 = env::var("TZ_OFFSET_HOURS")
         .ok()
         .and_then(|v| v.parse().ok())
@@ -62,7 +60,7 @@ pub async fn check_birthday(http: &serenity::Http) {
     let today = now.date_naive();
     let year = today.year();
 
-    for row in database.iter_mut().take(length) {
+    for row in &mut database {
         let mut date_parts = row[0].split('-');
         let month = match date_parts.next().and_then(|part| part.parse::<u32>().ok()) {
             Some(month) => month,
@@ -111,8 +109,7 @@ pub async fn check_birthday(http: &serenity::Http) {
                 .unwrap();
 
             let desc = format!(
-                "Hey <@&{}>, {}'s Birthday is coming up in 2 weeks! ({})",
-                mod_id, name, next_occurrence
+                "Hey <@&{mod_id}>, {name}'s Birthday is coming up in 2 weeks! ({next_occurrence})"
             );
 
             row[3] = "1".to_string();
@@ -134,8 +131,7 @@ pub async fn check_birthday(http: &serenity::Http) {
 
         if today == date_this_year && !pinged {
             let desc = format!(
-                "Heyyyyyyy, its someone's special day!! It's {}'s (<@{}>) Birthday!!!",
-                name, user_id
+                "Heyyyyyyy, its someone's special day!! It's {name}'s (<@{user_id}>) Birthday!!!"
             );
 
             let gen_chat: u64 = env::var("GENERAL")
@@ -162,5 +158,5 @@ pub async fn check_birthday(http: &serenity::Http) {
 
     }
 
-    export_to_file(EVENT_FILE, database).await;
+    export_to_file(EVENT_FILE, database);
 }
