@@ -29,6 +29,16 @@ cargo zigbuild build --release --target x86_64-unknown-linux-musl --features ven
 
 ---
 
+## Ascent
+
+A three-stage quality gate that carries code from build verification through idiomatic 
+cleanup to a full pre-merge audit, applying fixes inline and leaving the working tree in 
+a shippable state.
+
+Claude Code Run Skills: `/sanity` → `/rust-polish` → `/preflight` → push code
+
+---
+
 ## Features
 
 ### Economy
