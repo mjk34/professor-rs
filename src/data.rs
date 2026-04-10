@@ -483,8 +483,16 @@ pub async fn save_users(
 
     let users_save = SaveData { users: users_save };
 
-    let encoded = serde_json::to_string(&users_save).unwrap();
-    tokio::fs::write("data.json", encoded).await.expect("Failed to write data.json");
+    let encoded = match serde_json::to_string(&users_save) {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!(error = %e, "save: serde_json encode failed — skipping write");
+            return;
+        }
+    };
+    if let Err(e) = tokio::fs::write("data.json", encoded).await {
+        tracing::error!(error = %e, "save: data.json write failed");
+    }
 }
 
 fn read_lines(filename: &str) -> Vec<String> {

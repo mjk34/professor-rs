@@ -276,14 +276,12 @@ pub async fn professor_daily_session(
         return;
     }
 
-    *LAST_SESSION_DATE.write().await = Some(today);
-
     let u = if let Some(u) = users.get(&bot_user_id) { u } else { tracing::warn!("Professor UserData not found"); return; };
 
     // Read MEMORY.txt before acquiring the write lock so blocking I/O doesn't stall the executor
     // while holding the lock. Only reads when not yet initialised.
     let core_memory_init = if u.read().await.professor_memory.is_none() {
-        Some(std::fs::read_to_string("MEMORY.txt").unwrap_or_else(|_| {
+        Some(tokio::fs::read_to_string("MEMORY.txt").await.unwrap_or_else(|_| {
             "You are Professor, a Discord bot managing your own investment portfolio. \
              Prefer diversified long-term holds. Only make HIGH conviction trades. \
              Never exceed 30% of cash per trade. Maximum 3 trades per session.".to_string()
@@ -395,13 +393,7 @@ pub async fn professor_daily_session(
         .collect::<Vec<_>>().join("\n")
     };
 
-    let cash_usd = {
-        let ur = u.read().await;
-        ur.stock.portfolios.iter().find(|p| p.name == PROFESSOR_PORT)
-        .map_or(0.0, |p| creds_to_price(p.cash))
-    };
-
-    let response = trading_session(&entries_str, &pulse, &sentiment, &midday_scores, &portfolio_snapshot, cash_usd, &memory).await;
+    let response = trading_session(&entries_str, &pulse, &sentiment, &midday_scores, &portfolio_snapshot, pre_trade_cash_usd, &memory).await;
 
     // Fetch prices for any trade tickers Claude returned that weren't already in the watch list
     if let Some(ref resp) = response {
@@ -449,8 +441,8 @@ pub async fn professor_daily_session(
     }
 
     if let Some(ref resp) = response {
-        let cash_limit_creds = price_to_creds(cash_usd * MAX_TRADE_CASH_RATIO);
-        tracing::info!(cash_usd = cash_usd, cash_limit_creds = cash_limit_creds, "[Professor] trade budget");
+        let cash_limit_creds = price_to_creds(pre_trade_cash_usd * MAX_TRADE_CASH_RATIO);
+        tracing::info!(cash_usd = pre_trade_cash_usd, cash_limit_creds = cash_limit_creds, "[Professor] trade budget");
         let mut ud = u.write().await;
         let port_idx = if let Some(i) = ud.stock.portfolios.iter().position(|p| p.name == PROFESSOR_PORT) { i } else { tracing::warn!("Professor: ProfessorPort missing at trade execution — skipping trades"); return; };
         for trade in resp.trades.iter().take(3) {
@@ -471,7 +463,7 @@ pub async fn professor_daily_session(
                         continue;
                     }
                     let cost_creds = price_to_creds(amount_usd);
-                    if port.cash < cost_creds || cost_creds.round() > cash_limit_creds.round() {
+                    if port.cash < cost_creds || cost_creds > cash_limit_creds {
                         tracing::warn!(ticker = %trade.ticker, cost_creds = cost_creds, cash = port.cash, limit = cash_limit_creds, "[Professor] BUY skipped — insufficient funds");
                         continue;
                     }
@@ -510,6 +502,10 @@ pub async fn professor_daily_session(
             }
         }
     }
+
+    // Mark today as done only after trades and memory are persisted — a crash before
+    // this point will allow a retry rather than silently skipping the day.
+    *LAST_SESSION_DATE.write().await = Some(today);
 
 
     let trade_lines = if executed.is_empty() {

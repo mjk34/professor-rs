@@ -12,6 +12,8 @@ use std::io::{BufRead, BufReader};
 const EVENT_FILE: &str = ".eventdb";
 /// Number of days in advance to send a birthday reminder to the mod channel.
 const BIRTHDAY_REMINDER_DAYS_AHEAD: i64 = 14;
+/// Default timezone offset from UTC when `TZ_OFFSET_HOURS` is unset — EDT (UTC-4).
+const DEFAULT_TZ_OFFSET_HOURS: i64 = -4;
 
 fn import_from_file(filename: &str) -> Vec<Vec<String>> {
     let file = if let Ok(f) = File::open(filename) { f } else {
@@ -57,7 +59,7 @@ pub async fn check_birthday(http: &serenity::Http) {
     let tz_offset: i64 = env::var("TZ_OFFSET_HOURS")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or(-4);
+        .unwrap_or(DEFAULT_TZ_OFFSET_HOURS);
     let now = Utc::now() - TimeDelta::hours(tz_offset);
     let today = now.date_naive();
     let year = today.year();
@@ -100,15 +102,14 @@ pub async fn check_birthday(http: &serenity::Http) {
         let days_until = (next_occurrence - today).num_days();
 
         if (0..=BIRTHDAY_REMINDER_DAYS_AHEAD).contains(&days_until) && !reminded {
-            let mod_chat: u64 = env::var("MOD_CHAT")
-                .expect("Failed to load MODERATOR chat id")
-                .parse()
-                .expect("MOD_CHAT must be a valid u64");
-
-            let mod_id: u64 = env::var("MOD_ID")
-                .expect("Failed to load MODERATOR ping id")
-                .parse()
-                .expect("MOD_ID must be a valid u64");
+            let Ok(mod_chat) = env::var("MOD_CHAT").unwrap_or_default().parse::<u64>() else {
+                tracing::warn!("reminder: MOD_CHAT unset or invalid — skipping birthday reminder");
+                continue;
+            };
+            let Ok(mod_id) = env::var("MOD_ID").unwrap_or_default().parse::<u64>() else {
+                tracing::warn!("reminder: MOD_ID unset or invalid — skipping birthday reminder");
+                continue;
+            };
 
             let desc = format!(
                 "Hey <@&{mod_id}>, {name}'s Birthday is coming up in 2 weeks! ({next_occurrence})"
@@ -138,10 +139,10 @@ pub async fn check_birthday(http: &serenity::Http) {
                 "Heyyyyyyy, its someone's special day!! It's {name}'s (<@{user_id}>) Birthday!!!"
             );
 
-            let gen_chat: u64 = env::var("GENERAL")
-                .expect("Failed to load GENERAL chat id")
-                .parse()
-                .expect("GENERAL must be a valid u64");
+            let Ok(gen_chat) = env::var("GENERAL").unwrap_or_default().parse::<u64>() else {
+                tracing::warn!("reminder: GENERAL unset or invalid — skipping birthday ping");
+                continue;
+            };
 
             row[4] = "1".to_string();
 

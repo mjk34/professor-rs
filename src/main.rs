@@ -40,8 +40,8 @@ use tokio::sync::RwLock;
 type Error = Box<dyn std::error::Error + Send + Sync>;
 type Context<'a> = poise::Context<'a, data::Data, Error>;
 
-/// Professor daily session trigger time (UTC hour). 19 = testing; restore to 17 (1 PM EDT) for production.
-const PROFESSOR_TRIGGER_HOUR_UTC: u32 = 19;
+/// Professor daily session trigger time (UTC hour). 17 = 1 PM EDT (production); 19 for testing.
+const PROFESSOR_TRIGGER_HOUR_UTC: u32 = 17;
 /// Days of month on which the HYSA fed rate is refreshed from FRED (1st and 16th = semi-monthly).
 const INTEREST_REFRESH_DAYS: &[u32] = &[1, 16];
 /// How often the maintenance task runs (12 h): saves data, checks birthdays, sweeps expired options.
@@ -274,11 +274,11 @@ fn background_task(
                     let (id, vu) = x.pair_mut();
                     let joined = vu.joined;
 
-                    let user_data = users.get_mut(id);
-                    if user_data.is_none() {
+                    // Clone the Arc out of the DashMap so the shard lock is released
+                    // before any .await below — prevents stalling the users map.
+                    let Some(user_arc) = users.get(id).map(|e| Arc::clone(e.value())) else {
                         continue;
-                    }
-                    let user_data = user_data.unwrap();
+                    };
 
                     let should_reward = if let Some(last) = vu.last_reward {
                         (now - last).num_minutes() >= CRED_TIME
@@ -287,7 +287,7 @@ fn background_task(
                     };
 
                     if should_reward {
-                        let mut user_data = user_data.write().await;
+                        let mut user_data = user_arc.write().await;
                         user_data.add_creds(REWARD_CREDITS);
                         user_data.update_xp(REWARD_XP);
                         vu.last_reward = Some(now);

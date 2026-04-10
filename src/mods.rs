@@ -13,13 +13,19 @@ use tokio::sync::RwLock;
 /// Maximum cred amount a moderator may transfer in a single give/take operation.
 const MAX_CRED_TRANSFER: u32 = 100_000;
 
+#[derive(Copy, Clone)]
+enum CreditOp { Give, Take }
+
 async fn modify_creds(
     ctx: Context<'_>,
     mentioned: String,
     dollars: u32,
-    is_give: bool,
+    op: CreditOp,
 ) -> Result<(), Error> {
-    let title = if is_give { "Give Creds" } else { "Take Creds" };
+    let title = match op {
+        CreditOp::Give => "Give Creds",
+        CreditOp::Take => "Take Creds",
+    };
 
     if dollars == 0 || dollars > MAX_CRED_TRANSFER {
         ctx.send(
@@ -87,10 +93,9 @@ async fn modify_creds(
         let u = data.get(&user_id).unwrap();
         let mut user_data = u.write().await;
 
-        if is_give {
-            user_data.add_creds(amount);
-        } else {
-            user_data.sub_creds(amount);
+        match op {
+            CreditOp::Give => { user_data.add_creds(amount); }
+            CreditOp::Take => { user_data.sub_creds(amount); }
         }
         processed_list.push(parsed_id);
     }
@@ -100,12 +105,14 @@ async fn modify_creds(
     let mut desc = String::new();
 
     if processed_list.is_empty() {
-        desc += if is_give { "No one got creds..." } else { "No one lost creds..." };
+        desc += match op {
+            CreditOp::Give => "No one got creds...",
+            CreditOp::Take => "No one lost creds...",
+        };
     } else {
-        let action = if is_give {
-            format!("Moderator <@{}> gave ${} to ", ctx.author().id, dollars)
-        } else {
-            format!("Moderator <@{}> took ${} from ", ctx.author().id, dollars)
+        let action = match op {
+            CreditOp::Give => format!("Moderator <@{}> gave ${} to ", ctx.author().id, dollars),
+            CreditOp::Take => format!("Moderator <@{}> took ${} from ", ctx.author().id, dollars),
         };
         desc += &action;
         for id in processed_list {
@@ -114,10 +121,9 @@ async fn modify_creds(
         }
     }
 
-    let image = if is_give {
-        "https://cdn.discordapp.com/attachments/1196582162057662484/1205685388157653022/zVdLFbp.gif?ex=65d94505&is=65c6d005&hm=690faecbed4018602cc94a5f7a9db1ff6527d4202a71ba80f27d912d36de3c7e&"
-    } else {
-        "https://cdn.discordapp.com/attachments/1196582162057662484/1205689656268824596/7Z7b-ezgif.com-video-to-gif-converter.gif?ex=65d948fe&is=65c6d3fe&hm=d3ac81f31552010a87cb5bb894ebef6af6f2e3fc73c223abff1b19ab712c0ae8&"
+    let image = match op {
+        CreditOp::Give => "https://cdn.discordapp.com/attachments/1196582162057662484/1205685388157653022/zVdLFbp.gif?ex=65d94505&is=65c6d005&hm=690faecbed4018602cc94a5f7a9db1ff6527d4202a71ba80f27d912d36de3c7e&",
+        CreditOp::Take => "https://cdn.discordapp.com/attachments/1196582162057662484/1205689656268824596/7Z7b-ezgif.com-video-to-gif-converter.gif?ex=65d948fe&is=65c6d3fe&hm=d3ac81f31552010a87cb5bb894ebef6af6f2e3fc73c223abff1b19ab712c0ae8&",
     };
 
     ctx.send(
@@ -135,17 +141,14 @@ async fn modify_creds(
     .await?;
 
     if process_size != mentioned_size {
-        let note = if is_give {
-            format!(
-                "**(!) NOTE** <@{}>\n     **{}** @Mentions did not get processed... double check who did \n     not get creds.\n",
-                ctx.author().id, mentioned_size - process_size
-            )
-        } else {
-            format!(
-                "**(!) NOTE** <@{}>\n     **{}** @Mentions did not get processed... double check who did \n     not lose creds.\n",
-                ctx.author().id, mentioned_size - process_size
-            )
+        let verb = match op {
+            CreditOp::Give => "get",
+            CreditOp::Take => "lose",
         };
+        let note = format!(
+            "**(!) NOTE** <@{}>\n     **{}** @Mentions did not get processed... double check who did \n     not {} creds.\n",
+            ctx.author().id, mentioned_size - process_size, verb
+        );
         ctx.send(poise::CreateReply::default().content(note)).await?;
     }
 
@@ -159,7 +162,7 @@ pub async fn give_creds(
     #[description = "@username | example: @UwUntu @Rustybamboo"] mentioned: String,
     #[description = "dollar amount to give (max: $100,000)"] dollars: u32,
 ) -> Result<(), Error> {
-    modify_creds(ctx, mentioned, dollars, true).await
+    modify_creds(ctx, mentioned, dollars, CreditOp::Give).await
 }
 
 /// [!] MODERATOR - take creds from a user
@@ -169,7 +172,7 @@ pub async fn take_creds(
     #[description = "@username | example: @UwUntu @Rustybamboo"] mentioned: String,
     #[description = "dollar amount to take (max: $100,000)"] dollars: u32,
 ) -> Result<(), Error> {
-    modify_creds(ctx, mentioned, dollars, false).await
+    modify_creds(ctx, mentioned, dollars, CreditOp::Take).await
 }
 
 

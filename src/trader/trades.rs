@@ -3,7 +3,7 @@
 use crate::data::{self, TradeAction, TradeRecord};
 use crate::helper::{creds_to_price, default_footer, fmt_qty};
 use crate::{serenity, Context, Error};
-use poise::serenity_prelude::{futures::StreamExt, EditMessage};
+use poise::serenity_prelude::EditMessage;
 use std::collections::{HashMap, VecDeque};
 use std::time::Duration;
 
@@ -167,69 +167,55 @@ fn trade_buttons() -> Vec<serenity::CreateActionRow> {
 /// View your trade history and P&L summary
 #[poise::command(slash_command)]
 pub async fn trades(ctx: Context<'_>) -> Result<(), Error> {
-    let data_ref = &ctx.data().users;
-    let u = data_ref.get(&ctx.author().id).unwrap();
     let trade_history = {
-        let user_data = u.read().await;
-        user_data.stock.trade_history.clone()
+        ctx.data().users
+            .get(&ctx.author().id)
+            .unwrap()
+            .read()
+            .await
+            .stock
+            .trade_history
+            .clone()
     };
 
-    let embed = build_summary_embed(&trade_history);
-
-    let reply = ctx
-        .send(
-            poise::CreateReply::default()
-                .embed(embed)
-                .components(trade_buttons()),
-        )
+    let reply = ctx.send(poise::CreateReply::default()
+        .embed(build_summary_embed(&trade_history))
+        .components(trade_buttons()))
         .await?;
 
     let mut msg = reply.into_message().await?;
-    let ctx_serenity = ctx.serenity_context().clone();
-    let author_id = ctx.author().id;
+    let serenity_ctx = ctx.serenity_context().clone();
+    let mut current_embed = build_summary_embed(&trade_history);
 
-    tokio::spawn(async move {
-        let mut interactions = msg
-            .await_component_interactions(&ctx_serenity)
-            .author_id(author_id)
-            .stream();
-
-        let mut last_embed = build_summary_embed(&trade_history);
-
-        while let Ok(Some(interaction)) = tokio::time::timeout(Duration::from_secs(5 * 60), interactions.next()).await {
-            let embed = match interaction.data.custom_id.as_str() {
-                "trades-summary" => build_summary_embed(&trade_history),
-                "trades-gains" => build_filtered_embed(&trade_history, true),
-                "trades-losses" => build_filtered_embed(&trade_history, false),
-                "trades-all" => build_all_trades_embed(&trade_history),
-                _ => continue,
-            };
-
-            interaction
-                .create_response(
-                    &ctx_serenity,
-                    serenity::CreateInteractionResponse::Acknowledge,
-                )
-                .await
-                .ok();
-
-            msg.edit(
-                    &ctx_serenity,
-                    EditMessage::default()
-                        .embed(embed.clone())
-                        .components(trade_buttons()),
-                )
-                .await
-                .ok();
-
-            last_embed = embed;
-        }
-
-        // timeout — strip buttons and grey out last active embed
-        msg.edit(&ctx_serenity, EditMessage::default().embed(last_embed.color(data::EMBED_ERROR)).components(Vec::new()))
+    loop {
+        let Some(press) = msg
+            .await_component_interaction(&serenity_ctx)
+            .author_id(ctx.author().id)
+            .timeout(Duration::from_secs(5 * 60))
             .await
-            .ok();
-    });
+        else {
+            msg.edit(&serenity_ctx, EditMessage::default()
+                .embed(current_embed.color(data::EMBED_ERROR))
+                .components(vec![]))
+                .await.ok();
+            break;
+        };
+
+        press.create_response(&serenity_ctx, serenity::CreateInteractionResponse::Acknowledge).await.ok();
+
+        current_embed = match press.data.custom_id.as_str() {
+            "trades-summary" => build_summary_embed(&trade_history),
+            "trades-gains"   => build_filtered_embed(&trade_history, true),
+            "trades-losses"  => build_filtered_embed(&trade_history, false),
+            "trades-all"     => build_all_trades_embed(&trade_history),
+            _                => continue,
+        };
+
+        msg.edit(&serenity_ctx, EditMessage::default()
+            .embed(current_embed.clone())
+            .components(trade_buttons()))
+            .await.ok();
+    }
 
     Ok(())
 }

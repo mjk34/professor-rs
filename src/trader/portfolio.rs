@@ -4,7 +4,23 @@ use crate::api::{fetch_prices_map};
 use crate::data::{self, AssetType, PendingOrder, Portfolio, BASE_HYSA_RATE};
 use crate::helper::{creds_to_price, default_footer, fmt_qty, option_intrinsic, price_to_creds};
 use crate::{serenity, Context, Error};
+use std::collections::HashMap;
 use std::time::Duration;
+
+/// Compute total liquidation value (cash + all positions at current market prices) for a portfolio.
+fn liquidation_value(port: &Portfolio, prices: &HashMap<String, f64>) -> f64 {
+    let positions_value: f64 = port.positions.iter().map(|pos| {
+        let price_usd = prices.get(&pos.ticker).copied().unwrap_or(0.0);
+        match &pos.asset_type {
+            AssetType::Option(contract) => {
+                let intrinsic = option_intrinsic(&contract.option_type, price_usd, contract.strike);
+                price_to_creds(intrinsic * 100.0) * f64::from(contract.contracts)
+            }
+            _ => price_to_creds(price_usd) * pos.quantity,
+        }
+    }).sum();
+    port.cash + positions_value
+}
 
 pub const NUM_EMOJI: [&str; 4] = ["1️⃣", "2️⃣", "3️⃣", "4️⃣"];
 
@@ -26,20 +42,98 @@ pub struct DeletePortfolioModal {
     pub name: String,
 }
 
-#[derive(Debug, poise::Modal)]
-#[name = "Fund Portfolio"]
-pub struct FundModal {
-    #[name = "Dollar amount to deposit (e.g. $100)"]
-    #[placeholder = "e.g. 100"]
-    pub dollars: String,
+/// Walks a modal's components and returns the `dollars` input text field, or empty.
+fn read_dollars_field(data: &serenity::ModalInteractionData) -> String {
+    for row in &data.components {
+        for comp in &row.components {
+            if let serenity::ActionRowComponent::InputText(t) = comp {
+                if t.custom_id == "dollars" {
+                    return t.value.clone().unwrap_or_default();
+                }
+            }
+        }
+    }
+    String::new()
 }
 
-#[derive(Debug, poise::Modal)]
-#[name = "Withdraw from Portfolio"]
-pub struct WithdrawModal {
-    #[name = "Dollar amount to withdraw (e.g. $100)"]
-    #[placeholder = "e.g. 100"]
+#[derive(Debug)]
+pub struct FundModal {
     pub dollars: String,
+    /// Read-only display: wallet balance available to deposit.
+    pub available_info: String,
+}
+
+impl poise::Modal for FundModal {
+    fn create(defaults: Option<Self>, custom_id: String) -> serenity::CreateInteractionResponse {
+        let available = defaults.as_ref().map_or("", |d| d.available_info.as_str());
+        let mut components = vec![];
+        if !available.is_empty() {
+            components.push(serenity::CreateActionRow::InputText(
+                serenity::CreateInputText::new(
+                    serenity::InputTextStyle::Short,
+                    "Total Available Cash for Depositing",
+                    "available_info",
+                )
+                .value(available)
+                .required(false),
+            ));
+        }
+        components.push(serenity::CreateActionRow::InputText(
+            serenity::CreateInputText::new(
+                serenity::InputTextStyle::Short,
+                "Dollar amount to deposit",
+                "dollars",
+            )
+            .placeholder("e.g. 100"),
+        ));
+        serenity::CreateInteractionResponse::Modal(
+            serenity::CreateModal::new(custom_id, "Fund Portfolio").components(components),
+        )
+    }
+
+    fn parse(data: serenity::ModalInteractionData) -> Result<Self, &'static str> {
+        Ok(Self { dollars: read_dollars_field(&data), available_info: String::new() })
+    }
+}
+
+#[derive(Debug)]
+pub struct WithdrawModal {
+    pub dollars: String,
+    /// Read-only display: portfolio cash available to withdraw.
+    pub available_info: String,
+}
+
+impl poise::Modal for WithdrawModal {
+    fn create(defaults: Option<Self>, custom_id: String) -> serenity::CreateInteractionResponse {
+        let available = defaults.as_ref().map_or("", |d| d.available_info.as_str());
+        let mut components = vec![];
+        if !available.is_empty() {
+            components.push(serenity::CreateActionRow::InputText(
+                serenity::CreateInputText::new(
+                    serenity::InputTextStyle::Short,
+                    "Total Available Cash to Withdraw",
+                    "available_info",
+                )
+                .value(available)
+                .required(false),
+            ));
+        }
+        components.push(serenity::CreateActionRow::InputText(
+            serenity::CreateInputText::new(
+                serenity::InputTextStyle::Short,
+                "Dollar amount to withdraw",
+                "dollars",
+            )
+            .placeholder("e.g. 100"),
+        ));
+        serenity::CreateInteractionResponse::Modal(
+            serenity::CreateModal::new(custom_id, "Withdraw from Portfolio").components(components),
+        )
+    }
+
+    fn parse(data: serenity::ModalInteractionData) -> Result<Self, &'static str> {
+        Ok(Self { dollars: read_dollars_field(&data), available_info: String::new() })
+    }
 }
 
 // ── Embed builders ────────────────────────────────────────────────────────────
@@ -206,11 +300,6 @@ pub async fn portfolio(ctx: Context<'_>) -> Result<(), Error> {
     let data = &ctx.data().users;
     let u = data.get(&ctx.author().id).unwrap();
 
-    let annual_rate = {
-        let user_data = u.read().await;
-        if crate::helper::is_gold(&user_data) { crate::helper::gold_hysa_rate(fed_rate_val) } else { BASE_HYSA_RATE }
-    };
-
     let init_portfolios = { u.read().await.stock.portfolios.clone() };
     let (init_pe, init_pc) = build_portfolio_picker(&init_portfolios).await;
     let reply = ctx.send(poise::CreateReply::default().embed(init_pe).components(init_pc)).await?;
@@ -255,8 +344,14 @@ pub async fn portfolio(ctx: Context<'_>) -> Result<(), Error> {
                 reply.edit(ctx, poise::CreateReply::default().embed(
                     serenity::CreateEmbed::new()
                         .title("Portfolio — Create").description(err_msg).color(data::EMBED_ERROR),
-                ).components(vec![])).await?;
-                tokio::time::sleep(Duration::from_secs(3)).await;
+                ).components(vec![serenity::CreateActionRow::Buttons(vec![
+                    serenity::CreateButton::new("port_err_back").label("↩ Back").style(serenity::ButtonStyle::Secondary),
+                ])])).await?;
+                let _ = reply.message().await?
+                    .await_component_interaction(ctx.serenity_context())
+                    .author_id(ctx.author().id)
+                    .timeout(Duration::from_secs(30))
+                    .await;
                 continue 'picker;
             }
 
@@ -289,8 +384,14 @@ pub async fn portfolio(ctx: Context<'_>) -> Result<(), Error> {
                 continue 'picker;
             }
 
+            let wallet_dollars = {
+                let ud = u.read().await;
+                creds_to_price(f64::from(ud.get_creds()))
+            };
             let Some(fund_modal) = poise::execute_modal_on_component_interaction::<FundModal>(
-                ctx, press2, None, Some(Duration::from_secs(30)),
+                ctx, press2,
+                Some(FundModal { dollars: String::new(), available_info: format!("${wallet_dollars:.2}") }),
+                Some(Duration::from_secs(30)),
             ).await? else { continue 'picker; };
 
             let dollars: f64 = match fund_modal.dollars.trim().trim_start_matches('$').replace(',', "").parse() {
@@ -380,27 +481,18 @@ pub async fn portfolio(ctx: Context<'_>) -> Result<(), Error> {
             if let Some(c) = conf {
                 c.defer(ctx.http()).await?;
                 if c.data.custom_id == "pdel_yes" {
-                    let (portfolio_cash, positions_for_fetch) = {
+                    let port_clone = {
                         let ud = u.read().await;
-                        match ud.stock.portfolios.iter().find(|p| p.name.eq_ignore_ascii_case(&del_name)) {
-                            None => (0.0, vec![]),
-                            Some(p) => (p.cash, p.positions.clone()),
-                        }
+                        ud.stock.portfolios.iter().find(|p| p.name.eq_ignore_ascii_case(&del_name)).cloned()
                     };
-                    let prices = fetch_prices_map(&positions_for_fetch.iter().map(|p| p.ticker.clone()).collect::<Vec<_>>()).await;
-                    let mut total_proceeds = portfolio_cash;
-                    for pos in &positions_for_fetch {
-                        let price_usd = prices.get(&pos.ticker).copied().unwrap_or(0.0);
-                        let value = match &pos.asset_type {
-                            AssetType::Option(contract) => {
-                                let intrinsic = option_intrinsic(&contract.option_type, price_usd, contract.strike);
-                                price_to_creds(intrinsic * 100.0) * f64::from(contract.contracts)
-                            }
-                            _ => price_to_creds(price_usd) * pos.quantity,
-                        };
-                        total_proceeds += value;
+                    if let Some(port) = port_clone {
+                        let tickers: Vec<String> = port.positions.iter().map(|p| p.ticker.clone()).collect();
+                        let prices = fetch_prices_map(&tickers).await;
+                        let total_proceeds = liquidation_value(&port, &prices);
+                        let mut ud = u.write().await;
+                        ud.stock.portfolios.retain(|p| !p.name.eq_ignore_ascii_case(&del_name));
+                        ud.add_creds(total_proceeds as i32);
                     }
-                    { let mut ud = u.write().await; ud.stock.portfolios.retain(|p| !p.name.eq_ignore_ascii_case(&del_name)); ud.add_creds(total_proceeds as i32); }
                 }
             }
 
@@ -423,6 +515,10 @@ pub async fn portfolio(ctx: Context<'_>) -> Result<(), Error> {
                 };
                 let Some(port) = port_opt else { continue 'picker; };
 
+                let annual_rate = {
+                    let ud = u.read().await;
+                    if crate::helper::is_gold(&ud) { crate::helper::gold_hysa_rate(fed_rate_val) } else { BASE_HYSA_RATE }
+                };
                 let embed = build_portfolio_view_embed(&port, &port_orders, annual_rate).await;
                 let mut view_btns = vec![
                     serenity::CreateButton::new("pv_back").label("↩ Back").style(serenity::ButtonStyle::Secondary),
@@ -457,7 +553,15 @@ pub async fn portfolio(ctx: Context<'_>) -> Result<(), Error> {
                     "pv_back" => { action.defer(ctx.http()).await?; continue 'picker; }
 
                     "pv_fund" => {
-                        let Some(modal) = poise::execute_modal_on_component_interaction::<FundModal>(ctx, action, None, Some(Duration::from_secs(30))).await? else { return Ok(()); };
+                        let wallet_dollars = {
+                            let ud = u.read().await;
+                            creds_to_price(f64::from(ud.get_creds()))
+                        };
+                        let Some(modal) = poise::execute_modal_on_component_interaction::<FundModal>(
+                            ctx, action,
+                            Some(FundModal { dollars: String::new(), available_info: format!("${wallet_dollars:.2}") }),
+                            Some(Duration::from_secs(30)),
+                        ).await? else { return Ok(()); };
                         let dollars: f64 = match modal.dollars.trim().trim_start_matches('$').replace(',', "").parse() {
                             Ok(v) if v > 0.0 && v <= 100_000.0 => v,
                             _ => { reply.edit(ctx, poise::CreateReply::default().embed(serenity::CreateEmbed::new().title("Portfolio — Fund").description("Amount must be between $0.01 and $100,000.00.").color(data::EMBED_ERROR)).components(vec![])).await?; return Ok(()); }
@@ -482,7 +586,17 @@ pub async fn portfolio(ctx: Context<'_>) -> Result<(), Error> {
                     }
 
                     "pv_withdraw" => {
-                        let Some(modal) = poise::execute_modal_on_component_interaction::<WithdrawModal>(ctx, action, None, Some(Duration::from_secs(30))).await? else { return Ok(()); };
+                        let port_cash_dollars = {
+                            let ud = u.read().await;
+                            ud.stock.portfolios.iter()
+                                .find(|p| p.name == port_name)
+                                .map_or(0.0, |p| creds_to_price(p.cash))
+                        };
+                        let Some(modal) = poise::execute_modal_on_component_interaction::<WithdrawModal>(
+                            ctx, action,
+                            Some(WithdrawModal { dollars: String::new(), available_info: format!("${port_cash_dollars:.2}") }),
+                            Some(Duration::from_secs(30)),
+                        ).await? else { return Ok(()); };
                         let dollars: f64 = match modal.dollars.trim().trim_start_matches('$').replace(',', "").parse() {
                             Ok(v) if v > 0.0 && v <= 100_000.0 => v,
                             _ => { reply.edit(ctx, poise::CreateReply::default().embed(serenity::CreateEmbed::new().title("Portfolio — Withdraw").description("Amount must be between $0.01 and $100,000.00.").color(data::EMBED_ERROR)).components(vec![])).await?; return Ok(()); }
@@ -537,24 +651,18 @@ pub async fn portfolio(ctx: Context<'_>) -> Result<(), Error> {
                             Some(c) => {
                                 c.defer(ctx.http()).await?;
                                 if c.data.custom_id == "del_yes" {
-                                    let (portfolio_cash, positions_for_fetch) = {
+                                    let port_clone = {
                                         let ud = u.read().await;
-                                        match ud.stock.portfolios.iter().find(|p| p.name == port_name) {
-                                            None => (0.0, vec![]),
-                                            Some(p) => (p.cash, p.positions.clone()),
-                                        }
+                                        ud.stock.portfolios.iter().find(|p| p.name == port_name).cloned()
                                     };
-                                    let prices = fetch_prices_map(&positions_for_fetch.iter().map(|p| p.ticker.clone()).collect::<Vec<_>>()).await;
-                                    let mut total_proceeds = portfolio_cash;
-                                    for pos in &positions_for_fetch {
-                                        let price_usd = prices.get(&pos.ticker).copied().unwrap_or(0.0);
-                                        let value = match &pos.asset_type {
-                                            AssetType::Option(contract) => { let intrinsic = option_intrinsic(&contract.option_type, price_usd, contract.strike); price_to_creds(intrinsic * 100.0) * f64::from(contract.contracts) }
-                                            _ => price_to_creds(price_usd) * pos.quantity,
-                                        };
-                                        total_proceeds += value;
+                                    if let Some(port) = port_clone {
+                                        let tickers: Vec<String> = port.positions.iter().map(|p| p.ticker.clone()).collect();
+                                        let prices = fetch_prices_map(&tickers).await;
+                                        let total_proceeds = liquidation_value(&port, &prices);
+                                        let mut ud = u.write().await;
+                                        ud.stock.portfolios.retain(|p| p.name != port_name);
+                                        ud.add_creds(total_proceeds as i32);
                                     }
-                                    { let mut ud = u.write().await; ud.stock.portfolios.retain(|p| p.name != port_name); ud.add_creds(total_proceeds as i32); }
                                     continue 'picker;
                                 }
                                 continue 'view;

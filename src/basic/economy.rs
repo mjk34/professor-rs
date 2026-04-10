@@ -2,12 +2,11 @@
 
 use crate::{data, serenity, Context, Error};
 use crate::helper::default_footer;
-use poise::serenity_prelude::{EditMessage, futures::StreamExt, ReactionType};
+use poise::serenity_prelude::{EditMessage, ReactionType};
 use rand::seq::SliceRandom;
 use rand::{thread_rng, Rng};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::RwLock;
 
 async fn send_gold_unlock(ctx: Context<'_>) -> Result<(), Error> {
     let user = ctx.author();
@@ -29,8 +28,7 @@ async fn send_gold_unlock(ctx: Context<'_>) -> Result<(), Error> {
 #[poise::command(slash_command)]
 pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
     let user = ctx.author();
-    let data = &ctx.data().users;
-    let u = data.get(&user.id).unwrap();
+    let u = Arc::clone(ctx.data().users.get(&user.id).unwrap().value());
 
     {
         let user_data = u.read().await;
@@ -145,8 +143,7 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
 #[poise::command(slash_command)]
 pub async fn claim_bonus(ctx: Context<'_>) -> Result<(), Error> {
     let user = ctx.author();
-    let data = &ctx.data().users;
-    let u = data.get_mut(&user.id).unwrap();
+    let u = Arc::clone(ctx.data().users.get(&user.id).unwrap().value());
 
     let (bonus, can_claim) = {
         let user_data = u.read().await;
@@ -236,14 +233,15 @@ pub async fn claim_bonus(ctx: Context<'_>) -> Result<(), Error> {
 #[poise::command(slash_command)]
 pub async fn buy_tickets(ctx: Context<'_>) -> Result<(), Error> {
     let user = ctx.author();
-    let data = &ctx.data().users;
-    let u = data.get(&user.id).unwrap();
-    let user_data = u.read().await;
+    let u = Arc::clone(ctx.data().users.get(&user.id).unwrap().value());
+    let serenity_ctx = ctx.serenity_context().clone();
 
-    let tickets = user_data.get_tickets();
-    let creds = user_data.get_creds();
+    let (tickets, creds) = {
+        let ud = u.read().await;
+        (ud.get_tickets(), ud.get_creds())
+    };
 
-    let tkcost1 = 2000 + 300 * (tickets);
+    let tkcost1 = 2000 + 300 * tickets;
     let tkcost2 = (2000 + 300 * (tickets + 1)) + tkcost1;
     let tkcost3 = (2000 + 300 * (tickets + 2)) + tkcost2;
 
@@ -260,121 +258,102 @@ pub async fn buy_tickets(ctx: Context<'_>) -> Result<(), Error> {
         "Welcome to the Shop, buy tickets here to participate in the Server's Battle Pass Raffle! (Total: {creds})\n\n"
     );
 
-    let mut buttons = Vec::new();
-    for i in 0..5 {
-        if i == 0 {
-            buttons.push(
-                serenity::CreateButton::new("open_modal")
-                    .label("None")
-                    .custom_id("buy-none".to_string())
-                    .style(poise::serenity_prelude::ButtonStyle::Secondary),
-            );
-        } else if i == 4 {
-            if tkcount > 0 {
-                buttons.push(
-                    serenity::CreateButton::new("open_modal")
-                        .label("MAX")
-                        .custom_id("buy-max".to_string())
-                        .style(poise::serenity_prelude::ButtonStyle::Danger),
-                );
-                desc += format!("\nBuy **MAX** ({tkcount} Tickets) . . . {tkcostmax}\n").as_str();
-            }
-        } else if i == 1 && tkcost1 <= creds
-            || i == 2 && tkcost2 <= creds
-            || i == 3 && tkcost3 <= creds
-        {
+    let mut buttons = vec![
+        serenity::CreateButton::new("buy-none")
+            .label("None")
+            .style(serenity::ButtonStyle::Secondary),
+    ];
+
+    for (i, cost) in [(1, tkcost1), (2, tkcost2), (3, tkcost3)] {
+        if cost <= creds {
             let emoji = ReactionType::Unicode(data::NUMBER_EMOJS[i].to_string());
             buttons.push(
-                serenity::CreateButton::new("open_modal")
+                serenity::CreateButton::new(format!("buy-{i}"))
                     .label("")
-                    .custom_id(format!("buy-{i}"))
                     .emoji(emoji)
-                    .style(poise::serenity_prelude::ButtonStyle::Primary),
+                    .style(serenity::ButtonStyle::Primary),
             );
-            if i == 1 {
-                desc += format!("Buy **{i}** Ticket.............. . . . {tkcost1}\n").as_str();
-            } else if i == 2 {
-                desc += format!("Buy **{i}** Ticket.............. . . . {tkcost2}\n").as_str();
-            } else if i == 3 {
-                desc += format!("Buy **{i}** Ticket.............. . . . {tkcost3}\n").as_str();
-            }
-        } else if i == 1 {
-            desc += format!("~~Buy **{i}** Ticket~~.............. . . . {tkcost1}\n").as_str();
-        } else if i == 2 {
-            desc += format!("~~Buy **{i}** Ticket~~.............. . . . {tkcost2}\n").as_str();
-        } else if i == 3 {
-            desc += format!("~~Buy **{i}** Ticket~~.............. . . . {tkcost3}\n").as_str();
+            desc += &format!("Buy **{i}** Ticket.............. . . . {cost}\n");
+        } else {
+            desc += &format!("~~Buy **{i}** Ticket~~.............. . . . {cost}\n");
         }
     }
 
-    let components = vec![serenity::CreateActionRow::Buttons(buttons)];
+    if tkcount > 0 {
+        buttons.push(
+            serenity::CreateButton::new("buy-max")
+                .label("MAX")
+                .style(serenity::ButtonStyle::Danger),
+        );
+        desc += &format!("\nBuy **MAX** ({tkcount} Tickets) . . . {tkcostmax}\n");
+    }
+
     let reply = ctx.send(poise::CreateReply::default()
         .embed(serenity::CreateEmbed::default()
-            .title("Buy Tickets".to_string())
+            .title("Buy Tickets")
             .description(&desc)
             .colour(data::EMBED_DEFAULT)
             .footer(default_footer()))
-        .components(components)
+        .components(vec![serenity::CreateActionRow::Buttons(buttons)])
     ).await?;
 
-    let msg_og = Arc::new(RwLock::new(reply.into_message().await?));
-    let msg = Arc::clone(&msg_og);
-    let mut reactions = msg.read().await.await_component_interactions(ctx).stream();
-    let ctx = ctx.serenity_context().clone();
-    let user_id = user.id;
-    let u = Arc::clone(&u);
+    let mut msg = reply.into_message().await?;
 
-    tokio::spawn(async move {
-        while let Ok(Some(reaction)) = tokio::time::timeout(Duration::new(60, 0), reactions.next()).await {
-            let react_id = reaction.member.clone().unwrap_or_default().user.id;
-            if react_id != user_id {
-                continue;
-            }
-
-            let (bought_tickets, purchase_cost) = match reaction.data.custom_id.as_str() {
-                "buy-1"   => (1, tkcost1),
-                "buy-2"   => (2, tkcost2),
-                "buy-3"   => (3, tkcost3),
-                "buy-max" => (tkcount, tkcostmax),
-                _ => {
-                    msg.write().await.edit(&ctx, EditMessage::default()
-                        .embed(serenity::CreateEmbed::default()
-                            .title("Buy Tickets".to_string())
-                            .description(&desc)
-                            .thumbnail("https://cdn.discordapp.com/attachments/1260223476766343188/1262203993245876244/tumblr_inline_pamkf7AfPf1s2a9fg_500.gif?ex=6695be92&is=66946d12&hm=49948cee0fd647192a40c9e88ad890cbbcb63724c460ee61964c99594c9c3a53&")
-                            .colour(data::EMBED_ERROR)
-                            .footer(default_footer()))
-                        .components(Vec::new())
-                    ).await.unwrap();
-                    return;
-                }
-            };
-
-            msg.write().await.edit(&ctx, EditMessage::default()
-                .embed(serenity::CreateEmbed::new()
-                    .title("Buy Tickets".to_string())
-                    .description(format!("You purchased **{bought_tickets}** ticket(s)! Ganbatte!! (-{purchase_cost} creds)"))
-                    .image("https://cdn.discordapp.com/attachments/1260223476766343188/1262202607980777662/tumblr_n8dtwljTrx1tt5tk6o1_500.gif?ex=6695bd48&is=66946bc8&hm=da981bf028647549f958bb60e30c9c2f5d4635b6b597c50fb58f50b1618f7619&")
-                    .color(data::EMBED_CYAN)
+    loop {
+        let Some(press) = msg
+            .await_component_interaction(&serenity_ctx)
+            .author_id(user.id)
+            .timeout(Duration::from_secs(60))
+            .await
+        else {
+            msg.edit(&serenity_ctx, EditMessage::default()
+                .embed(serenity::CreateEmbed::default()
+                    .title("Buy Tickets")
+                    .description(&desc)
+                    .colour(data::EMBED_ERROR)
                     .footer(default_footer()))
-                .components(Vec::new())
-            ).await.unwrap();
+                .components(vec![]))
+                .await.ok();
+            break;
+        };
 
-            let mut user_data = u.write().await;
-            user_data.sub_creds(purchase_cost);
-            user_data.add_tickets(bought_tickets);
-            return;
-        }
+        press.create_response(&serenity_ctx, serenity::CreateInteractionResponse::Acknowledge).await.ok();
 
-        msg.write().await.edit(&ctx, EditMessage::default()
-            .embed(serenity::CreateEmbed::default()
-                .title("Buy Tickets".to_string())
-                .description(&desc)
-                .colour(data::EMBED_ERROR)
+        let (bought, cost) = match press.data.custom_id.as_str() {
+            "buy-1"    => (1, tkcost1),
+            "buy-2"    => (2, tkcost2),
+            "buy-3"    => (3, tkcost3),
+            "buy-max"  => (tkcount, tkcostmax),
+            "buy-none" => {
+                msg.edit(&serenity_ctx, EditMessage::default()
+                    .embed(serenity::CreateEmbed::default()
+                        .title("Buy Tickets")
+                        .description(&desc)
+                        .thumbnail("https://cdn.discordapp.com/attachments/1260223476766343188/1262203993245876244/tumblr_inline_pamkf7AfPf1s2a9fg_500.gif?ex=6695be92&is=66946d12&hm=49948cee0fd647192a40c9e88ad890cbbcb63724c460ee61964c99594c9c3a53&")
+                        .colour(data::EMBED_ERROR)
+                        .footer(default_footer()))
+                    .components(vec![]))
+                    .await.ok();
+                break;
+            }
+            _ => continue,
+        };
+
+        msg.edit(&serenity_ctx, EditMessage::default()
+            .embed(serenity::CreateEmbed::new()
+                .title("Buy Tickets")
+                .description(format!("You purchased **{bought}** ticket(s)! Ganbatte!! (-{cost} creds)"))
+                .image("https://cdn.discordapp.com/attachments/1260223476766343188/1262202607980777662/tumblr_n8dtwljTrx1tt5tk6o1_500.gif?ex=6695bd48&is=66946bc8&hm=da981bf028647549f958bb60e30c9c2f5d4635b6b597c50fb58f50b1618f7619&")
+                .color(data::EMBED_CYAN)
                 .footer(default_footer()))
-            .components(Vec::new())
-        ).await.unwrap();
-    });
+            .components(vec![]))
+            .await.ok();
+
+        let mut ud = u.write().await;
+        ud.sub_creds(cost);
+        ud.add_tickets(bought);
+        break;
+    }
 
     Ok(())
 }

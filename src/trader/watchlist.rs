@@ -2,7 +2,8 @@
 
 use crate::api::{fetch_quote_detail, market_data_err};
 use crate::{data, serenity, Context, Error};
-use poise::serenity_prelude::futures;
+use poise::serenity_prelude::{futures, EditMessage};
+use std::sync::Arc;
 use std::time::Duration;
 use crate::helper::default_footer;
 
@@ -77,23 +78,23 @@ pub async fn build_watchlist_embed(
 /// View and manage your watchlist
 #[poise::command(slash_command)]
 pub async fn watchlist(ctx: Context<'_>) -> Result<(), Error> {
-    let data_ref = &ctx.data().users;
-    let u = data_ref.get(&ctx.author().id).unwrap();
+    let u = Arc::clone(ctx.data().users.get(&ctx.author().id).unwrap().value());
+    let serenity_ctx = ctx.serenity_context().clone();
 
     let tickers = { u.read().await.stock.watchlist.clone() };
-    let (mut embed, mut components) = build_watchlist_embed(&tickers).await;
-    let reply = ctx.send(poise::CreateReply::default().embed(embed.clone()).components(components.clone())).await?;
+    let (embed, components) = build_watchlist_embed(&tickers).await;
+    let reply = ctx.send(poise::CreateReply::default().embed(embed).components(components)).await?;
+    let mut msg = reply.into_message().await?;
 
     loop {
-        let msg = reply.message().await?;
         let Some(press) = msg
-            .await_component_interaction(ctx.serenity_context())
+            .await_component_interaction(&serenity_ctx)
             .author_id(ctx.author().id)
             .timeout(Duration::from_secs(60))
             .await
         else {
-            reply.edit(ctx, poise::CreateReply::default().embed(embed).components(vec![])).await?;
-            return Ok(());
+            msg.edit(&serenity_ctx, EditMessage::default().components(vec![])).await.ok();
+            break;
         };
 
         match press.data.custom_id.as_str() {
@@ -103,39 +104,37 @@ pub async fn watchlist(ctx: Context<'_>) -> Result<(), Error> {
                 ).await? else { continue; };
 
                 let query = modal.ticker.trim().to_string();
-                match crate::api::resolve_ticker(&query).await {
-                    None => {
-                        reply.edit(ctx, poise::CreateReply::default().embed(
-                            serenity::CreateEmbed::new()
-                                .title("Watchlist — Add")
-                                .description(market_data_err(&query))
-                                .color(data::EMBED_ERROR),
-                        ).components(vec![])).await?;
-                        tokio::time::sleep(Duration::from_secs(3)).await;
-                    }
+                let err: Option<String> = match crate::api::resolve_ticker(&query).await {
+                    None => Some(market_data_err(&query)),
                     Some(quote) => {
-                        let ticker = quote.symbol.clone();
-                        let result: Result<(), String> = {
-                            let mut ud = u.write().await;
-                            if ud.stock.watchlist.contains(&ticker) {
-                                Err(format!("**{ticker}** is already on your watchlist."))
-                            } else if ud.stock.watchlist.len() >= 20 {
-                                Err("Watchlist is full (max 20 tickers).".to_string())
-                            } else {
-                                ud.stock.watchlist.push(ticker.clone());
-                                Ok(())
-                            }
-                        };
-                        if let Err(msg) = result {
-                            reply.edit(ctx, poise::CreateReply::default().embed(
-                                serenity::CreateEmbed::new()
-                                    .title("Watchlist — Add")
-                                    .description(msg)
-                                    .color(data::EMBED_ERROR),
-                            ).components(vec![])).await?;
-                            tokio::time::sleep(Duration::from_secs(3)).await;
+                        let ticker = quote.symbol;
+                        let mut ud = u.write().await;
+                        if ud.stock.watchlist.contains(&ticker) {
+                            Some(format!("**{ticker}** is already on your watchlist."))
+                        } else if ud.stock.watchlist.len() >= 20 {
+                            Some("Watchlist is full (max 20 tickers).".to_string())
+                        } else {
+                            ud.stock.watchlist.push(ticker);
+                            None
                         }
                     }
+                };
+                if let Some(desc) = err {
+                    msg.edit(&serenity_ctx, EditMessage::default()
+                        .embed(serenity::CreateEmbed::new()
+                            .title("Watchlist — Add")
+                            .description(desc)
+                            .color(data::EMBED_ERROR))
+                        .components(vec![serenity::CreateActionRow::Buttons(vec![
+                            serenity::CreateButton::new("wl_back")
+                                .label("↩ Back")
+                                .style(serenity::ButtonStyle::Secondary),
+                        ])]))
+                        .await.ok();
+                    let _ = msg.await_component_interaction(&serenity_ctx)
+                        .author_id(ctx.author().id)
+                        .timeout(Duration::from_secs(30))
+                        .await;
                 }
             }
 
@@ -152,26 +151,36 @@ pub async fn watchlist(ctx: Context<'_>) -> Result<(), Error> {
                     ud.stock.watchlist.len() < before
                 };
                 if !removed {
-                    reply.edit(ctx, poise::CreateReply::default().embed(
-                        serenity::CreateEmbed::new()
+                    msg.edit(&serenity_ctx, EditMessage::default()
+                        .embed(serenity::CreateEmbed::new()
                             .title("Watchlist — Remove")
                             .description(format!("**{ticker}** is not on your watchlist."))
-                            .color(data::EMBED_ERROR),
-                    ).components(vec![])).await?;
-                    tokio::time::sleep(Duration::from_secs(3)).await;
+                            .color(data::EMBED_ERROR))
+                        .components(vec![serenity::CreateActionRow::Buttons(vec![
+                            serenity::CreateButton::new("wl_back")
+                                .label("↩ Back")
+                                .style(serenity::ButtonStyle::Secondary),
+                        ])]))
+                        .await.ok();
+                    let _ = msg.await_component_interaction(&serenity_ctx)
+                        .author_id(ctx.author().id)
+                        .timeout(Duration::from_secs(30))
+                        .await;
                 }
             }
 
             "wl_clear" => {
-                press.defer(ctx.http()).await?;
-                { let mut ud = u.write().await; ud.stock.watchlist.clear(); }
+                press.create_response(&serenity_ctx, serenity::CreateInteractionResponse::Acknowledge).await.ok();
+                u.write().await.stock.watchlist.clear();
             }
 
             _ => continue,
         }
 
         let tickers = { u.read().await.stock.watchlist.clone() };
-        (embed, components) = build_watchlist_embed(&tickers).await;
-        reply.edit(ctx, poise::CreateReply::default().embed(embed.clone()).components(components.clone())).await?;
+        let (embed, components) = build_watchlist_embed(&tickers).await;
+        msg.edit(&serenity_ctx, EditMessage::default().embed(embed).components(components)).await.ok();
     }
+
+    Ok(())
 }

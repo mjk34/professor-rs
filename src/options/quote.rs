@@ -36,6 +36,7 @@ pub async fn options_quote(
         return Ok(());
     }
 
+    ctx.defer().await?;
     let ticker = ticker.to_uppercase();
     let price_usd = if let Some(p) = fetch_price(&ticker).await { p } else {
         ctx.send(poise::CreateReply::default().embed(

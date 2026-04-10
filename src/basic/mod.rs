@@ -71,6 +71,7 @@ pub async fn wallet(ctx: Context<'_>) -> Result<(), Error> {
 #[poise::command(slash_command, guild_only)]
 pub async fn voice_status(ctx: Context<'_>) -> Result<(), Error> {
     use crate::data::VoiceUser;
+    use poise::serenity_prelude::futures;
     let data = &ctx.data().voice_users;
 
     let mut out: Vec<(UserId, VoiceUser)> = data.iter().map(|x| (*x.key(), x.value().clone())).collect();
@@ -84,33 +85,37 @@ pub async fn voice_status(ctx: Context<'_>) -> Result<(), Error> {
             .description("No one in voice")
             .color(data::EMBED_ERROR)
     } else {
+        let users = futures::future::join_all(
+            out.iter().map(|(id, _)| id.to_user(&ctx))
+        ).await;
+
         let mut embed = serenity::CreateEmbed::new()
             .title("Voice Status")
             .color(Color::GOLD)
             .thumbnail(ctx.guild().unwrap().icon_url().unwrap_or_default());
 
-        for (a, b) in &out {
-            let u = a.to_user(&ctx).await?;
-            let diff = now - b.joined;
+        for ((_, vu), user_result) in out.iter().zip(users) {
+            let name = user_result.map_or_else(|_| "Unknown".to_string(), |u| u.name);
+            let diff = now - vu.joined;
             let minutes = ((diff.num_seconds()) / 60) % 60;
             let hours = (diff.num_seconds() / 60) / 60;
 
             let mut user_info = format!("{hours:0>2}:{minutes:0>2}");
 
-            if let Some(mute_time) = b.mute {
+            if let Some(mute_time) = vu.mute {
                 let mute_duration = now - mute_time;
                 let mute_minutes = ((mute_duration.num_seconds()) / 60) % 60;
                 let mute_hours = (mute_duration.num_seconds() / 60) / 60;
                 user_info += &format!(" | Mute: {mute_hours:0>2}:{mute_minutes:0>2}");
             }
-            if let Some(deaf_time) = b.deaf {
+            if let Some(deaf_time) = vu.deaf {
                 let deaf_duration = now - deaf_time;
                 let deaf_minutes = ((deaf_duration.num_seconds()) / 60) % 60;
                 let deaf_hours = (deaf_duration.num_seconds() / 60) / 60;
                 user_info += &format!(" | Deaf: {deaf_hours:0>2}:{deaf_minutes:0>2}");
             }
 
-            embed = embed.field(u.name, user_info, false);
+            embed = embed.field(name, user_info, false);
         }
 
         embed

@@ -375,7 +375,7 @@ pub async fn search(
                 user_data.stock.next_order_id = id.wrapping_add(1);
                 user_data.stock.pending_orders.push(PendingOrder {
                     id, side: OrderSide::Sell, ticker: ticker.clone(),
-                    asset_name: display_name.clone(), asset_type: AssetType::Stock,
+                    asset_name: display_name.clone(), asset_type,
                     portfolio_name: port_name.clone(), quantity: qty, limit_price, expiry,
                 });
                 drop(user_data);
