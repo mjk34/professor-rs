@@ -18,7 +18,7 @@ use crate::data::{AssetType, Portfolio, UserData};
 use crate::serenity;
 
 /// Shared state passed to all axum handlers.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct WebState {
     pub users: Arc<DashMap<serenity::UserId, Arc<RwLock<UserData>>>>,
     pub http: Arc<serenity::Http>,
@@ -102,26 +102,31 @@ async fn get_user(
     Path(discord_id): Path<u64>,
 ) -> Result<impl IntoResponse, StatusCode> {
     let arc = resolve_user(&state, discord_id)?;
-    let u = arc.read().await;
+
+    // Collect fields under the read guard, then drop it before the HTTP call
+    let profile = {
+        let u = arc.read().await;
+        ProfileDto {
+            username: None,
+            avatar_url: None,
+            creds: u.get_creds(),
+            level: u.get_level(),
+            xp: u.get_xp(),
+            xp_next: u.get_next_level(),
+            rolls: u.get_rolls(),
+            daily_count: u.get_daily_count(),
+            tickets: u.get_tickets(),
+            bonus_count: u.get_bonus(),
+            luck: u.get_luck(),
+        }
+    };
 
     let (username, avatar_url) = match state.http.get_user(serenity::UserId::new(discord_id)).await {
         Ok(user) => (Some(user.name.clone()), Some(user.face())),
         Err(_) => (None, None),
     };
 
-    Ok(Json(ProfileDto {
-        username,
-        avatar_url,
-        creds: u.get_creds(),
-        level: u.get_level(),
-        xp: u.get_xp(),
-        xp_next: u.get_next_level(),
-        rolls: u.get_rolls(),
-        daily_count: u.get_daily_count(),
-        tickets: u.get_tickets(),
-        bonus_count: u.get_bonus(),
-        luck: u.get_luck(),
-    }))
+    Ok(Json(ProfileDto { username, avatar_url, ..profile }))
 }
 
 async fn get_portfolio(
@@ -145,7 +150,7 @@ fn portfolio_entry(p: &Portfolio) -> PortfolioEntry {
 
 // ── Leaderboard ──────────────────────────────────────────────────────────────
 
-#[derive(Default, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "lowercase")]
 enum LeaderboardSort {
     #[default]
@@ -157,7 +162,7 @@ enum LeaderboardSort {
     DailyCount,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 struct LeaderboardQuery {
     #[serde(default)]
     sort: LeaderboardSort,
@@ -271,7 +276,7 @@ async fn get_positions(
 
 // ── Trades ───────────────────────────────────────────────────────────────────
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 struct TradesQuery {
     limit: Option<usize>,
 }
@@ -359,7 +364,7 @@ async fn get_clips(
 
 // ── Discord User Lookup ──────────────────────────────────────────────────────
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 struct DiscordUsersQuery {
     ids: String,
 }
