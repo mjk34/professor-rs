@@ -1,7 +1,7 @@
 //! /leaderboard command — creds, fortune, and investment rankings with pagination.
 
 use crate::{data, serenity, Context, Error};
-use crate::helper::default_footer;
+use crate::helper::{creds_to_price, default_footer};
 use poise::serenity_prelude::{EditMessage, futures, UserId};
 use std::sync::Arc;
 use std::time::Duration;
@@ -161,7 +161,7 @@ pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
 
         if *pnl != 0.0 {
             let pct   = if *cost > 0.0 { pnl / cost * 100.0 } else { 0.0 };
-            let label = format!("{} ({:+.1}%)", fmt_pnl_short(pnl / 100.0), pct);
+            let label = format!("{} ({:+.1}%)", fmt_pnl_short(creds_to_price(*pnl)), pct);
             invest_info.push((*id, *pnl as i64, label, name.clone()));
         }
     }

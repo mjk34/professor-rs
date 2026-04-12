@@ -125,6 +125,7 @@ pub async fn buy(
             let mut user_data = u.write().await;
 
             if !user_data.stock.portfolios.iter().any(|p| p.name.eq_ignore_ascii_case(&portfolio)) {
+                drop(user_data);
                 reply.edit(ctx, poise::CreateReply::default()
                     .embed(serenity::CreateEmbed::new().title("Queue Failed")
                         .description(format!("No portfolio named **{portfolio}** found."))
@@ -132,7 +133,11 @@ pub async fn buy(
                     .components(vec![])).await?;
                 return Ok(());
             }
-            if user_data.stock.pending_orders.len() >= MAX_PENDING_ORDERS {
+            if !user_data.stock.queue_order(PendingOrder {
+                id: 0, side: OrderSide::Buy, ticker: ticker.clone(), asset_name: asset_name.clone(),
+                asset_type, portfolio_name: portfolio.clone(), quantity, limit_price, expiry,
+            }) {
+                drop(user_data);
                 reply.edit(ctx, poise::CreateReply::default()
                     .embed(serenity::CreateEmbed::new().title("Queue Failed")
                         .description(format!("You have reached the limit of **{MAX_PENDING_ORDERS}** pending orders. Cancel some in `/portfolio`."))
@@ -140,12 +145,6 @@ pub async fn buy(
                     .components(vec![])).await?;
                 return Ok(());
             }
-            let id = user_data.stock.next_order_id;
-            user_data.stock.next_order_id = id.wrapping_add(1);
-            user_data.stock.pending_orders.push(PendingOrder {
-                id, side: OrderSide::Buy, ticker: ticker.clone(), asset_name: asset_name.clone(),
-                asset_type, portfolio_name: portfolio.clone(), quantity, limit_price, expiry,
-            });
         }
 
         reply.edit(ctx, poise::CreateReply::default()
@@ -164,7 +163,8 @@ pub async fn buy(
     let u = data_ref.get(&ctx.author().id).unwrap();
     let mut user_data = u.write().await;
 
-    let port_idx = if let Some(i) = user_data.stock.portfolios.iter().position(|p| p.name.eq_ignore_ascii_case(&portfolio)) { i } else {
+    let port_idx = if let Some(i) = user_data.stock.find_portfolio_idx(&portfolio) { i } else {
+        drop(user_data);
         ctx.send(poise::CreateReply::default().embed(
             serenity::CreateEmbed::new().title("Buy")
                 .description(format!("No portfolio named **{portfolio}** found."))
@@ -174,13 +174,14 @@ pub async fn buy(
     };
 
     if user_data.stock.portfolios[port_idx].cash < total_cost {
+        let cash = user_data.stock.portfolios[port_idx].cash;
+        drop(user_data);
         ctx.send(poise::CreateReply::default().embed(
             serenity::CreateEmbed::new().title("Buy")
                 .description(format!(
                     "Insufficient cash. Need **${:.2}** ({:.0} creds) but **{}** has **${:.2}** ({:.0} creds).",
                     creds_to_price(total_cost), total_cost, portfolio,
-                    creds_to_price(user_data.stock.portfolios[port_idx].cash),
-                    user_data.stock.portfolios[port_idx].cash
+                    creds_to_price(cash), cash
                 ))
                 .color(data::EMBED_ERROR),
         )).await?;
@@ -254,7 +255,7 @@ pub async fn sell(
         let u = data_ref.get(&ctx.author().id).unwrap();
         let user_data = u.read().await;
 
-        let port_idx = if let Some(i) = user_data.stock.portfolios.iter().position(|p| p.name.eq_ignore_ascii_case(&portfolio)) { i } else {
+        let port_idx = if let Some(i) = user_data.stock.find_portfolio_idx(&portfolio) { i } else {
             drop(user_data);
             ctx.send(poise::CreateReply::default().embed(
                 serenity::CreateEmbed::new().title("Sell")
@@ -349,7 +350,12 @@ pub async fn sell(
             let u = data_ref.get(&ctx.author().id).unwrap();
             let mut user_data = u.write().await;
 
-            if user_data.stock.pending_orders.len() >= MAX_PENDING_ORDERS {
+            if !user_data.stock.queue_order(PendingOrder {
+                id: 0, side: OrderSide::Sell, ticker: ticker.clone(), asset_name: asset_name.clone(),
+                asset_type, portfolio_name: port_name_normalized.clone(),
+                quantity, limit_price, expiry,
+            }) {
+                drop(user_data);
                 reply.edit(ctx, poise::CreateReply::default()
                     .embed(serenity::CreateEmbed::new().title("Queue Failed")
                         .description(format!("You have reached the limit of **{MAX_PENDING_ORDERS}** pending orders. Cancel some in `/portfolio`."))
@@ -357,13 +363,6 @@ pub async fn sell(
                     .components(vec![])).await?;
                 return Ok(());
             }
-            let id = user_data.stock.next_order_id;
-            user_data.stock.next_order_id = id.wrapping_add(1);
-            user_data.stock.pending_orders.push(PendingOrder {
-                id, side: OrderSide::Sell, ticker: ticker.clone(), asset_name: asset_name.clone(),
-                asset_type, portfolio_name: port_name_normalized.clone(),
-                quantity, limit_price, expiry,
-            });
         }
 
         reply.edit(ctx, poise::CreateReply::default()
@@ -382,7 +381,7 @@ pub async fn sell(
     let u = data_ref.get(&ctx.author().id).unwrap();
     let mut user_data = u.write().await;
 
-    let port_idx = user_data.stock.portfolios.iter().position(|p| p.name == port_name_normalized).unwrap();
+    let port_idx = user_data.stock.find_portfolio_idx(&port_name_normalized).expect("portfolio validated earlier in sell flow");
 
     let (proceeds, pnl) = {
         let stock = &mut user_data.stock;
@@ -390,8 +389,7 @@ pub async fn sell(
         (price_per_unit * quantity, pnl)
     };
 
-    let pnl_str = if pnl >= 0.0 { format!("▲ +${:.2} ({:.0} creds)", creds_to_price(pnl), pnl) }
-                  else           { format!("▼ -${:.2} ({:.0} creds)", creds_to_price(pnl.abs()), pnl) };
+    let pnl_str = crate::helper::fmt_pnl(pnl);
     let color = if pnl >= 0.0 { data::EMBED_SUCCESS } else { data::EMBED_FAIL };
     drop(user_data);
 

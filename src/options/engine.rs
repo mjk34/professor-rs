@@ -13,7 +13,6 @@ pub const CALL_MARGIN_RATIO: f64 = 0.20;
 /// Margin requirement as a fraction of notional value for a naked put position.
 pub const PUT_MARGIN_RATIO: f64 = 0.10;
 
-pub const ERR_INVALID_OPTION_TYPE: &str = "Option type must be `call` or `put`.";
 pub const ERR_INVALID_EXPIRY: &str = "Invalid expiry date. Use YYYY-MM-DD format.";
 pub const ERR_EXPIRY_PAST: &str = "Expiry date is in the past.";
 pub const ERR_MIN_CONTRACTS: &str = "Contracts must be at least 1.";
@@ -24,7 +23,7 @@ pub fn option_premium_creds(intrinsic_usd: f64, expiry: &DateTime<Utc>, contract
     price_to_creds(per_contract_usd * f64::from(contracts) * SHARES_PER_CONTRACT)
 }
 
-pub fn naked_margin_usd(opt_type: &OptionType, price_usd: f64, strike: f64, contracts: u32, premium_usd: f64) -> f64 {
+pub fn naked_margin_usd(opt_type: OptionType, price_usd: f64, strike: f64, contracts: u32, premium_usd: f64) -> f64 {
     let notional = SHARES_PER_CONTRACT * f64::from(contracts);
     let otm_usd = match opt_type {
         OptionType::Call => (strike - price_usd).max(0.0),
@@ -45,7 +44,7 @@ pub fn find_option_idx(
     ticker: &str,
     strike: f64,
     expiry: DateTime<Utc>,
-    opt_type: &OptionType,
+    opt_type: OptionType,
     side: &OptionSide,
 ) -> Option<usize> {
     positions.iter().position(|p| {
@@ -54,7 +53,7 @@ pub fn find_option_idx(
         }
         #[expect(clippy::float_cmp, reason = "strike prices are stored/compared as exact values we set")]
         if let AssetType::Option(c) = &p.asset_type {
-            c.strike == strike && c.expiry == expiry && c.option_type == *opt_type && c.side == *side
+            c.strike == strike && c.expiry == expiry && c.option_type == opt_type && c.side == *side
         } else {
             false
         }

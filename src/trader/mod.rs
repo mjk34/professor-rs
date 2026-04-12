@@ -6,7 +6,7 @@ mod trades;
 mod watchlist;
 
 // Re-export engine functions so professor.rs and stock/ can use the same path
-#[doc(inline)] pub use engine::{apply_buy, apply_sell};
-#[doc(inline)] pub use portfolio::portfolio;
-#[doc(inline)] pub use trades::trades;
-#[doc(inline)] pub use watchlist::watchlist;
+#[doc(inline)] pub(crate) use engine::{apply_buy, apply_sell};
+#[doc(inline)] pub(crate) use portfolio::portfolio;
+#[doc(inline)] pub(crate) use trades::trades;
+#[doc(inline)] pub(crate) use watchlist::watchlist;

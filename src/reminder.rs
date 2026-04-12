@@ -5,8 +5,7 @@ use crate::serenity;
 use chrono::{Datelike, NaiveDate, TimeDelta, Utc};
 use poise::serenity_prelude::{ChannelId, CreateMessage};
 use std::env;
-use std::fs::{write, File};
-use std::io::{BufRead, BufReader};
+use tokio::io::{AsyncBufReadExt, BufReader};
 
 /// Path to the flat-file birthday/event database (CSV, one entry per line).
 const EVENT_FILE: &str = ".eventdb";
@@ -15,30 +14,34 @@ const BIRTHDAY_REMINDER_DAYS_AHEAD: i64 = 14;
 /// Default timezone offset from UTC when `TZ_OFFSET_HOURS` is unset — EDT (UTC-4).
 const DEFAULT_TZ_OFFSET_HOURS: i64 = -4;
 
-fn import_from_file(filename: &str) -> Vec<Vec<String>> {
-    let file = if let Ok(f) = File::open(filename) { f } else {
-        tracing::warn!(file = %filename, "event file not found — starting with empty database");
-        return Vec::new();
+async fn import_from_file(filename: &str) -> Vec<Vec<String>> {
+    let file = match tokio::fs::File::open(filename).await {
+        Ok(f) => f,
+        Err(_) => {
+            tracing::warn!(file = %filename, "event file not found — starting with empty database");
+            return Vec::new();
+        }
     };
 
-    let mut file_descriptor = BufReader::new(file);
-    let mut buffer = String::new();
+    let reader = BufReader::new(file);
+    let mut lines = reader.lines();
 
-    if file_descriptor.read_line(&mut buffer).is_err() {
+    // First line is a dash placeholder header — skip it
+    if lines.next_line().await.is_err() {
         return Vec::new();
     }
 
-    file_descriptor
-        .lines()
-        .filter_map(|line| {
-            let line = line.ok()?;
-            let cells: Vec<String> = line.split(',').map(std::string::ToString::to_string).collect();
-            if cells.len() == 5 { Some(cells) } else { None }
-        })
-        .collect()
+    let mut result = Vec::new();
+    while let Ok(Some(line)) = lines.next_line().await {
+        let cells: Vec<String> = line.split(',').map(std::string::ToString::to_string).collect();
+        if cells.len() == 5 {
+            result.push(cells);
+        }
+    }
+    result
 }
 
-fn export_to_file(filename: &str, database: Vec<Vec<String>>) {
+async fn export_to_file(filename: &str, database: Vec<Vec<String>>) {
     let mut contents = String::new();
     contents += "-\n";
     for line in database {
@@ -51,11 +54,11 @@ fn export_to_file(filename: &str, database: Vec<Vec<String>>) {
 
     contents.pop();
 
-    let _ = write(filename, contents);
+    let _ = tokio::fs::write(filename, contents).await;
 }
 
-pub async fn check_birthday(http: &serenity::Http) {
-    let mut database: Vec<Vec<String>> = import_from_file(EVENT_FILE);
+pub(crate) async fn check_birthday(http: &serenity::Http) {
+    let mut database: Vec<Vec<String>> = import_from_file(EVENT_FILE).await;
     let tz_offset: i64 = env::var("TZ_OFFSET_HOURS")
         .ok()
         .and_then(|v| v.parse().ok())
@@ -165,5 +168,5 @@ pub async fn check_birthday(http: &serenity::Http) {
 
     }
 
-    export_to_file(EVENT_FILE, database);
+    export_to_file(EVENT_FILE, database).await;
 }

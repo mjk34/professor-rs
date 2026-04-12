@@ -13,7 +13,7 @@ fn liquidation_value(port: &Portfolio, prices: &HashMap<String, f64>) -> f64 {
         let price_usd = prices.get(&pos.ticker).copied().unwrap_or(0.0);
         match &pos.asset_type {
             AssetType::Option(contract) => {
-                let intrinsic = option_intrinsic(&contract.option_type, price_usd, contract.strike);
+                let intrinsic = option_intrinsic(contract.option_type, price_usd, contract.strike);
                 price_to_creds(intrinsic * 100.0) * f64::from(contract.contracts)
             }
             _ => price_to_creds(price_usd) * pos.quantity,
@@ -22,13 +22,13 @@ fn liquidation_value(port: &Portfolio, prices: &HashMap<String, f64>) -> f64 {
     port.cash + positions_value
 }
 
-pub const NUM_EMOJI: [&str; 4] = ["1️⃣", "2️⃣", "3️⃣", "4️⃣"];
+pub(crate) const NUM_EMOJI: [&str; 4] = ["1️⃣", "2️⃣", "3️⃣", "4️⃣"];
 
 // ── Portfolio modals ──────────────────────────────────────────────────────────
 
 #[derive(Debug, poise::Modal)]
 #[name = "Create Portfolio"]
-pub struct CreatePortfolioModal {
+pub(crate) struct CreatePortfolioModal {
     #[name = "Portfolio name (max 32 characters)"]
     #[placeholder = "e.g. Tech Stocks"]
     pub name: String,
@@ -36,7 +36,7 @@ pub struct CreatePortfolioModal {
 
 #[derive(Debug, poise::Modal)]
 #[name = "Delete Portfolio"]
-pub struct DeletePortfolioModal {
+pub(crate) struct DeletePortfolioModal {
     #[name = "Portfolio name"]
     #[placeholder = "Enter the exact portfolio name"]
     pub name: String,
@@ -57,7 +57,7 @@ fn read_dollars_field(data: &serenity::ModalInteractionData) -> String {
 }
 
 #[derive(Debug)]
-pub struct FundModal {
+pub(crate) struct FundModal {
     pub dollars: String,
     /// Read-only display: wallet balance available to deposit.
     pub available_info: String,
@@ -97,7 +97,7 @@ impl poise::Modal for FundModal {
 }
 
 #[derive(Debug)]
-pub struct WithdrawModal {
+pub(crate) struct WithdrawModal {
     pub dollars: String,
     /// Read-only display: portfolio cash available to withdraw.
     pub available_info: String,
@@ -136,25 +136,68 @@ impl poise::Modal for WithdrawModal {
     }
 }
 
+// ── Shared helpers ────────────────────────────────────────────────────────────
+
+/// Parse a dollar string ("$1,234.56" → 1234.56), returning None if out of range.
+fn parse_dollar_input(raw: &str) -> Option<f64> {
+    let v: f64 = raw.trim().trim_start_matches('$').replace(',', "").parse().ok()?;
+    if v > 0.0 && v <= data::MAX_FUND_USD { Some(v) } else { None }
+}
+
+/// Transfer creds from wallet into a named portfolio. Returns new cash balance or error.
+fn try_fund(user_data: &mut data::UserData, port_name: &str, dollars: f64) -> Result<f64, String> {
+    let amount = price_to_creds(dollars) as i32;
+    if user_data.get_creds() < amount {
+        return Err(format!("Insufficient creds. You have **{}** but need **{}**.", user_data.get_creds(), amount));
+    }
+    match user_data.stock.portfolios.iter_mut().find(|p| p.name.eq_ignore_ascii_case(port_name)) {
+        None => Err(format!("Portfolio **{port_name}** no longer exists.")),
+        Some(p) => {
+            p.cash += f64::from(amount);
+            let new_cash = p.cash;
+            user_data.sub_creds(amount);
+            Ok(new_cash)
+        }
+    }
+}
+
+/// Transfer creds from a named portfolio back to wallet. Returns remaining cash or error.
+fn try_withdraw(user_data: &mut data::UserData, port_name: &str, dollars: f64) -> Result<f64, String> {
+    let amount = price_to_creds(dollars) as i32;
+    match user_data.stock.portfolios.iter_mut().find(|p| p.name.eq_ignore_ascii_case(port_name)) {
+        None => Err(format!("Portfolio **{port_name}** no longer exists.")),
+        Some(p) if p.cash < f64::from(amount) => Err(format!(
+            "Insufficient cash. **{}** has **${:.2}** but tried to withdraw **${:.2}**.",
+            port_name, creds_to_price(p.cash), dollars
+        )),
+        Some(p) => {
+            p.cash -= f64::from(amount);
+            let remaining = p.cash;
+            user_data.add_creds(amount);
+            Ok(remaining)
+        }
+    }
+}
+
 // ── Embed builders ────────────────────────────────────────────────────────────
 
-pub async fn build_portfolio_picker(
+pub(crate) async fn build_portfolio_picker(
     portfolios: &[Portfolio],
 ) -> (serenity::CreateEmbed, Vec<serenity::CreateActionRow>) {
-    let at_cap = portfolios.len() >= 4;
+    let at_cap = portfolios.len() >= data::MAX_PORTFOLIOS;
     let list = if portfolios.is_empty() {
         "*No portfolios yet. Press **+ Create** to get started.*".to_string()
     } else {
         let unique_tickers: Vec<String> = {
             let mut seen = std::collections::HashSet::new();
-            portfolios.iter().take(4).flat_map(|p| p.positions.iter())
+            portfolios.iter().take(data::MAX_PORTFOLIOS).flat_map(|p| p.positions.iter())
                 .filter_map(|pos| if seen.insert(pos.ticker.as_str()) { Some(pos.ticker.clone()) } else { None })
                 .collect()
         };
         let prices = fetch_prices_map(&unique_tickers).await;
 
         let mut rows = Vec::new();
-        for (i, p) in portfolios.iter().take(4).enumerate() {
+        for (i, p) in portfolios.iter().take(data::MAX_PORTFOLIOS).enumerate() {
             let mut positions_value: f64 = 0.0;
             let mut cost_basis: f64 = 0.0;
             for pos in &p.positions {
@@ -175,7 +218,7 @@ pub async fn build_portfolio_picker(
         rows.join("\n")
     };
 
-    let mut buttons: Vec<serenity::CreateButton> = portfolios.iter().take(4).enumerate()
+    let mut buttons: Vec<serenity::CreateButton> = portfolios.iter().take(data::MAX_PORTFOLIOS).enumerate()
         .map(|(i, _)| serenity::CreateButton::new(format!("port_{i}"))
             .label(format!("{}", i + 1))
             .style(serenity::ButtonStyle::Primary))
@@ -195,7 +238,7 @@ pub async fn build_portfolio_picker(
     (embed, vec![serenity::CreateActionRow::Buttons(buttons)])
 }
 
-pub async fn build_portfolio_view_embed(
+pub(crate) async fn build_portfolio_view_embed(
     portfolio: &Portfolio,
     pending_orders: &[PendingOrder],
     annual_rate: f64,
@@ -230,9 +273,9 @@ pub async fn build_portfolio_view_embed(
             let cost_basis = pos.avg_cost * pos.quantity;
 
             if let AssetType::Option(contract) = &pos.asset_type {
-                let intrinsic = option_intrinsic(&contract.option_type, current_price_usd, contract.strike);
+                let intrinsic = option_intrinsic(contract.option_type, current_price_usd, contract.strike);
                 let current_premium = crate::options::option_premium_creds(intrinsic, &contract.expiry, contract.contracts);
-                let type_str = crate::helper::option_type_str(&contract.option_type);
+                let type_str = crate::helper::option_type_str(contract.option_type);
                 if contract.side == data::OptionSide::Short {
                     let pnl = cost_basis - current_premium;
                     desc += &format!(
@@ -329,12 +372,12 @@ pub async fn portfolio(ctx: Context<'_>) -> Result<(), Error> {
             let name = modal.name.trim().to_string();
             let err = if name.is_empty() {
                 Some("Portfolio name cannot be empty.".to_string())
-            } else if name.len() > 32 {
+            } else if name.len() > data::MAX_PORTFOLIO_NAME_LEN {
                 Some("Portfolio name must be 32 characters or fewer.".to_string())
             } else {
                 let ud = u.read().await;
-                if ud.stock.portfolios.len() >= 4 {
-                    Some("You have reached the maximum of **4** portfolios.".to_string())
+                if ud.stock.portfolios.len() >= data::MAX_PORTFOLIOS {
+                    Some(format!("You have reached the maximum of **{}** portfolios.", data::MAX_PORTFOLIOS))
                 } else if ud.stock.portfolios.iter().any(|p| p.name.eq_ignore_ascii_case(&name)) {
                     Some(format!("A portfolio named **{name}** already exists."))
                 } else { None }
@@ -394,30 +437,15 @@ pub async fn portfolio(ctx: Context<'_>) -> Result<(), Error> {
                 Some(Duration::from_secs(30)),
             ).await? else { continue 'picker; };
 
-            let dollars: f64 = match fund_modal.dollars.trim().trim_start_matches('$').replace(',', "").parse() {
-                Ok(v) if v > 0.0 && v <= 100_000.0 => v,
-                _ => {
-                    reply.edit(ctx, poise::CreateReply::default().embed(
-                        serenity::CreateEmbed::new()
-                            .title("Portfolio — Fund").description("Amount must be between $0.01 and $100,000.00.").color(data::EMBED_ERROR),
-                    ).components(vec![])).await?;
-                    return Ok(());
-                }
+            let Some(dollars) = parse_dollar_input(&fund_modal.dollars) else {
+                reply.edit(ctx, poise::CreateReply::default().embed(
+                    serenity::CreateEmbed::new()
+                        .title("Portfolio — Fund").description(format!("Amount must be between $0.01 and ${:.2}.", data::MAX_FUND_USD)).color(data::EMBED_ERROR),
+                ).components(vec![])).await?;
+                return Ok(());
             };
 
-            let amount = price_to_creds(dollars) as i32;
-            let fund_result: Result<f64, String> = {
-                let mut user_data = u.write().await;
-                if user_data.get_creds() < amount {
-                    Err(format!("Insufficient creds. You have **{}** but need **{}**.", user_data.get_creds(), amount))
-                } else {
-                    match user_data.stock.portfolios.iter_mut().find(|p| p.name == name) {
-                        None => Err(format!("Portfolio **{name}** no longer exists.")),
-                        Some(p) => { p.cash += f64::from(amount); let new_cash = p.cash; user_data.sub_creds(amount); Ok(new_cash) }
-                    }
-                }
-            };
-
+            let fund_result = { let mut ud = u.write().await; try_fund(&mut ud, &name, dollars) };
             match fund_result {
                 Err(msg) => { reply.edit(ctx, poise::CreateReply::default().embed(serenity::CreateEmbed::new().title("Portfolio — Fund").description(msg).color(data::EMBED_ERROR)).components(vec![])).await?; }
                 Ok(new_cash) => { reply.edit(ctx, poise::CreateReply::default().embed(serenity::CreateEmbed::new().title("Portfolio — Fund").description(format!("Deposited **${:.2}** into **{}**.\nNew cash balance: **${:.2}**.", dollars, name, creds_to_price(new_cash))).color(data::EMBED_SUCCESS).footer(default_footer())).components(vec![])).await?; }
@@ -562,22 +590,11 @@ pub async fn portfolio(ctx: Context<'_>) -> Result<(), Error> {
                             Some(FundModal { dollars: String::new(), available_info: format!("${wallet_dollars:.2}") }),
                             Some(Duration::from_secs(30)),
                         ).await? else { return Ok(()); };
-                        let dollars: f64 = match modal.dollars.trim().trim_start_matches('$').replace(',', "").parse() {
-                            Ok(v) if v > 0.0 && v <= 100_000.0 => v,
-                            _ => { reply.edit(ctx, poise::CreateReply::default().embed(serenity::CreateEmbed::new().title("Portfolio — Fund").description("Amount must be between $0.01 and $100,000.00.").color(data::EMBED_ERROR)).components(vec![])).await?; return Ok(()); }
+                        let Some(dollars) = parse_dollar_input(&modal.dollars) else {
+                            reply.edit(ctx, poise::CreateReply::default().embed(serenity::CreateEmbed::new().title("Portfolio — Fund").description(format!("Amount must be between $0.01 and ${:.2}.", data::MAX_FUND_USD)).color(data::EMBED_ERROR)).components(vec![])).await?;
+                            return Ok(());
                         };
-                        let amount = price_to_creds(dollars) as i32;
-                        let fund_result: Result<f64, String> = {
-                            let mut user_data = u.write().await;
-                            if user_data.get_creds() < amount {
-                                Err(format!("Insufficient wallet balance. You have **{:.0}** creds but need **{:.0}**.", user_data.get_creds(), amount))
-                            } else {
-                                match user_data.stock.portfolios.iter_mut().find(|p| p.name == port_name) {
-                                    None => Err(format!("Portfolio **{port_name}** no longer exists.")),
-                                    Some(p) => { p.cash += f64::from(amount); let new_cash = p.cash; user_data.sub_creds(amount); Ok(new_cash) }
-                                }
-                            }
-                        };
+                        let fund_result = { let mut ud = u.write().await; try_fund(&mut ud, &port_name, dollars) };
                         match fund_result {
                             Err(msg) => { reply.edit(ctx, poise::CreateReply::default().embed(serenity::CreateEmbed::new().title("Portfolio — Fund").description(msg).color(data::EMBED_ERROR)).components(vec![])).await?; }
                             Ok(new_cash) => { reply.edit(ctx, poise::CreateReply::default().embed(serenity::CreateEmbed::new().title("Portfolio — Fund").description(format!("Deposited **${:.2}** into **{}**.\nNew cash balance: **${:.2}**.", dollars, port_name, creds_to_price(new_cash))).color(data::EMBED_SUCCESS).footer(default_footer())).components(vec![])).await?; }
@@ -597,19 +614,11 @@ pub async fn portfolio(ctx: Context<'_>) -> Result<(), Error> {
                             Some(WithdrawModal { dollars: String::new(), available_info: format!("${port_cash_dollars:.2}") }),
                             Some(Duration::from_secs(30)),
                         ).await? else { return Ok(()); };
-                        let dollars: f64 = match modal.dollars.trim().trim_start_matches('$').replace(',', "").parse() {
-                            Ok(v) if v > 0.0 && v <= 100_000.0 => v,
-                            _ => { reply.edit(ctx, poise::CreateReply::default().embed(serenity::CreateEmbed::new().title("Portfolio — Withdraw").description("Amount must be between $0.01 and $100,000.00.").color(data::EMBED_ERROR)).components(vec![])).await?; return Ok(()); }
+                        let Some(dollars) = parse_dollar_input(&modal.dollars) else {
+                            reply.edit(ctx, poise::CreateReply::default().embed(serenity::CreateEmbed::new().title("Portfolio — Withdraw").description(format!("Amount must be between $0.01 and ${:.2}.", data::MAX_FUND_USD)).color(data::EMBED_ERROR)).components(vec![])).await?;
+                            return Ok(());
                         };
-                        let amount = price_to_creds(dollars) as i32;
-                        let withdraw_result: Result<f64, String> = {
-                            let mut user_data = u.write().await;
-                            match user_data.stock.portfolios.iter_mut().find(|p| p.name == port_name) {
-                                None => Err(format!("Portfolio **{port_name}** no longer exists.")),
-                                Some(p) if p.cash < f64::from(amount) => Err(format!("Insufficient cash. **{}** has **${:.2}** but tried to withdraw **${:.2}**.", port_name, creds_to_price(p.cash), dollars)),
-                                Some(p) => { p.cash -= f64::from(amount); let remaining = p.cash; user_data.add_creds(amount); Ok(remaining) }
-                            }
-                        };
+                        let withdraw_result = { let mut ud = u.write().await; try_withdraw(&mut ud, &port_name, dollars) };
                         match withdraw_result {
                             Err(msg) => { reply.edit(ctx, poise::CreateReply::default().embed(serenity::CreateEmbed::new().title("Portfolio — Withdraw").description(msg).color(data::EMBED_ERROR)).components(vec![])).await?; }
                             Ok(remaining) => { reply.edit(ctx, poise::CreateReply::default().embed(serenity::CreateEmbed::new().title("Portfolio — Withdraw").description(format!("Withdrew **${:.2}** from **{}** to your wallet.\nRemaining cash: **${:.2}**.", dollars, port_name, creds_to_price(remaining))).color(data::EMBED_SUCCESS).footer(default_footer())).components(vec![])).await?; }

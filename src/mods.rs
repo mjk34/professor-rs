@@ -2,7 +2,7 @@
 
 use crate::clips::check_mod;
 use crate::data::{self, Portfolio, StockProfile, TradeAction, TradeRecord, UserData};
-use crate::helper::{default_footer, parse_user_mention};
+use crate::helper::{default_footer, parse_user_mention, price_to_creds};
 use crate::{serenity, Context, Error};
 use chrono::Utc;
 use poise::serenity_prelude::UserId;
@@ -230,7 +230,7 @@ pub async fn test_seed_data(
                 let trade_count = rng.gen_range(3usize..=6);
                 for _ in 0..trade_count {
                     let (ticker, price_usd) = TICKERS[rng.gen_range(0..TICKERS.len())];
-                    let price_creds = price_usd * 100.0;
+                    let price_creds = price_to_creds(price_usd);
                     let quantity: f64 = rng.gen_range(1.0f64..=10.0);
                     let proceeds = price_creds * quantity;
                     let pnl_pct: f64 = rng.gen_range(-0.30f64..=0.50);

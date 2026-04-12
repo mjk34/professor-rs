@@ -34,6 +34,44 @@ pub const MAX_PENDING_ORDERS: usize = 20;
 /// Starting cred balance for every newly registered user (100,000 creds = $1,000 notional).
 pub const NEW_USER_STARTING_CREDS: i32 = 100_000;
 
+// ── Economy roll constants ────────────────────────────────────────────────────
+/// Daily roll: d20 range (1..=20).
+pub const D20_RANGE: std::ops::Range<i32> = 1..21;
+/// DC check range for daily/bonus rolls.
+pub const DC_CHECK_RANGE: std::ops::Range<i32> = 6..15;
+/// Daily fortune: base creds added before DC scaling.
+pub const DAILY_FORTUNE_BASE: i32 = 2_000;
+/// Daily fortune: creds per DC step.
+pub const DAILY_FORTUNE_STEP: i32 = 600;
+/// Bonus fortune: base creds added before DC scaling.
+pub const BONUS_FORTUNE_BASE: i32 = 3_000;
+/// Bonus fortune: creds per DC step.
+pub const BONUS_FORTUNE_STEP: i32 = 900;
+/// Crit success (nat 20) creds range for daily roll.
+pub const DAILY_CRIT_SUCCESS: std::ops::Range<i32> = 50_000..200_000;
+/// Crit fail (nat 1) creds range for daily roll (subtracted).
+pub const DAILY_CRIT_FAIL: std::ops::Range<i32> = 15_000..40_000;
+/// Crit success creds range for bonus roll.
+pub const BONUS_CRIT_SUCCESS: std::ops::Range<i32> = 35_000..120_000;
+/// XP awarded per daily roll.
+pub const DAILY_XP: i32 = 500;
+/// XP awarded per bonus claim.
+pub const BONUS_XP: i32 = 150;
+/// Ticket base cost.
+pub const TICKET_BASE_COST: i32 = 2_000;
+/// Ticket cost increment per ticket already owned.
+pub const TICKET_COST_STEP: i32 = 300;
+/// Maximum portfolio name length.
+pub const MAX_PORTFOLIO_NAME_LEN: usize = 32;
+/// Maximum number of portfolios per user.
+pub const MAX_PORTFOLIOS: usize = 4;
+/// Maximum tickers on a watchlist.
+pub const MAX_WATCHLIST: usize = 20;
+/// Maximum fund/withdraw amount in USD.
+pub const MAX_FUND_USD: f64 = 100_000.0;
+/// Maximum tickets purchasable in one `/buy_tickets` transaction.
+pub const MAX_TICKET_PURCHASE: i32 = 100;
+
 /// Discord keycap digit emoji 0–9, indexed by digit value. Used for ticket shop buttons.
 pub const NUMBER_EMOJS: [&str; 10] = [
     "\u{0030}\u{FE0F}\u{20E3}",
@@ -531,6 +569,23 @@ impl StockProfile {
             self.trade_history.pop_front();
         }
     }
+
+    pub fn find_portfolio_idx(&self, name: &str) -> Option<usize> {
+        self.portfolios.iter().position(|p| p.name.eq_ignore_ascii_case(name))
+    }
+
+    /// Queues a pending order, assigning the next order ID.
+    /// Returns `false` if `MAX_PENDING_ORDERS` is reached.
+    pub fn queue_order(&mut self, mut order: PendingOrder) -> bool {
+        if self.pending_orders.len() >= MAX_PENDING_ORDERS {
+            return false;
+        }
+        let id = self.next_order_id;
+        self.next_order_id = id.wrapping_add(1);
+        order.id = id;
+        self.pending_orders.push(order);
+        true
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -604,7 +659,7 @@ pub struct OptionContract {
     pub collateral: f64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, poise::ChoiceParameter)]
 pub enum OptionType {
     Call,
     Put,

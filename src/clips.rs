@@ -28,7 +28,7 @@ static MEDAL_REGEX: LazyLock<Regex> =
 
 pub async fn check_mod(ctx: Context<'_>) -> Result<bool, Error> {
     let mod_id = ctx.data().mod_id;
-    let guild_id = ctx.guild_id().unwrap();
+    let Some(guild_id) = ctx.guild_id() else { return Ok(false); };
     if let Ok(b) = ctx.author().has_role(ctx, guild_id, mod_id).await {
         if b {
             return Ok(true);

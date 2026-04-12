@@ -44,17 +44,17 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
         }
     }
 
-    let d20 = thread_rng().gen_range(1..21);
-    let check = thread_rng().gen_range(6..15);
+    let d20 = thread_rng().gen_range(data::D20_RANGE);
+    let check = thread_rng().gen_range(data::DC_CHECK_RANGE);
 
-    let low = 2_000 + (check - 1) * 600;
-    let high = 2_000 + check * 600;
+    let low = data::DAILY_FORTUNE_BASE + (check - 1) * data::DAILY_FORTUNE_STEP;
+    let high = data::DAILY_FORTUNE_BASE + check * data::DAILY_FORTUNE_STEP;
     let fortune = thread_rng().gen_range(low..high);
 
     let (total, roll_str, roll_context, roll_color): (i32, String, String, serenity::Color) = if d20 == 20 {
-        (thread_rng().gen_range(50_000..200_000), "**Critical Success!!**".to_string(), "+".to_string(), data::EMBED_GOLD)
+        (thread_rng().gen_range(data::DAILY_CRIT_SUCCESS), "**Critical Success!!**".to_string(), "+".to_string(), data::EMBED_GOLD)
     } else if d20 == 1 {
-        (thread_rng().gen_range(15_000..40_000), "**Critical Failure!**".to_string(), "-".to_string(), data::EMBED_FAIL)
+        (thread_rng().gen_range(data::DAILY_CRIT_FAIL), "**Critical Failure!**".to_string(), "-".to_string(), data::EMBED_FAIL)
     } else if d20 >= check {
         (fortune, "Yippee, you passed.".to_string(), "+".to_string(), data::EMBED_SUCCESS)
     } else {
@@ -114,7 +114,7 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
         user_data.add_creds(total);
     }
 
-    let levelup = user_data.update_xp(500);
+    let levelup = user_data.update_xp(data::DAILY_XP);
     user_data.add_rolls(d20);
     user_data.push_roll(d20);
     user_data.add_bonus();
@@ -151,8 +151,8 @@ pub async fn claim_bonus(ctx: Context<'_>) -> Result<(), Error> {
     };
 
     if can_claim {
-        let d20: i32 = thread_rng().gen_range(1..21);
-        let check: i32 = thread_rng().gen_range(6..15);
+        let d20: i32 = thread_rng().gen_range(data::D20_RANGE);
+        let check: i32 = thread_rng().gen_range(data::DC_CHECK_RANGE);
         let base_ref = ctx.data().d20f.get(28).map_or("", std::string::String::as_str);
 
         let reply = ctx.send(poise::CreateReply::default().embed(
@@ -168,12 +168,12 @@ pub async fn claim_bonus(ctx: Context<'_>) -> Result<(), Error> {
         tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
         let fortune: i32 = if d20 == 20 {
-            thread_rng().gen_range(35_000..120_000)
+            thread_rng().gen_range(data::BONUS_CRIT_SUCCESS)
         } else if d20 == 1 {
             1
         } else {
-            let low  = 3_000 + (check - 1) * 900;
-            let high = 3_000 + check * 900;
+            let low  = data::BONUS_FORTUNE_BASE + (check - 1) * data::BONUS_FORTUNE_STEP;
+            let high = data::BONUS_FORTUNE_BASE + check * data::BONUS_FORTUNE_STEP;
             let v = thread_rng().gen_range(low..high);
             if d20 >= check { v } else { v / 2 }
         };
@@ -195,7 +195,7 @@ pub async fn claim_bonus(ctx: Context<'_>) -> Result<(), Error> {
         user_data.add_creds(fortune);
         user_data.reset_bonus();
 
-        let levelup = user_data.update_xp(150);
+        let levelup = user_data.update_xp(data::BONUS_XP);
         if levelup {
             let new_level = user_data.get_level();
             ctx.send(poise::CreateReply::default().embed(
@@ -241,16 +241,19 @@ pub async fn buy_tickets(ctx: Context<'_>) -> Result<(), Error> {
         (ud.get_tickets(), ud.get_creds())
     };
 
-    let tkcost1 = 2000 + 300 * tickets;
-    let tkcost2 = (2000 + 300 * (tickets + 1)) + tkcost1;
-    let tkcost3 = (2000 + 300 * (tickets + 2)) + tkcost2;
+    let ticket_cost = |n: i32| data::TICKET_BASE_COST + data::TICKET_COST_STEP * n;
+
+    let tkcost1 = ticket_cost(tickets);
+    let tkcost2 = ticket_cost(tickets + 1) + tkcost1;
+    let tkcost3 = ticket_cost(tickets + 2) + tkcost2;
 
     let mut tkcostmax = 0;
     let mut tkcount = 0;
     let mut tkcreds = creds;
-    while 2000 + 300 * (tickets + tkcount) <= tkcreds {
-        tkcreds -= 2000 + 300 * (tickets + tkcount);
-        tkcostmax += 2000 + 300 * (tickets + tkcount);
+    while ticket_cost(tickets + tkcount) <= tkcreds && tkcount < data::MAX_TICKET_PURCHASE {
+        let c = ticket_cost(tickets + tkcount);
+        tkcreds -= c;
+        tkcostmax += c;
         tkcount += 1;
     }
 
@@ -366,16 +369,16 @@ pub async fn buy_tickets(ctx: Context<'_>) -> Result<(), Error> {
 /// Returns creds awarded (negative on critical failure, 0 if cooldown not met).
 pub fn simulate_uwu(user_data: &mut data::UserData) -> i32 {
     if !user_data.check_daily() { return 0; }
-    let d20: i32 = thread_rng().gen_range(1..21);
-    let check: i32 = thread_rng().gen_range(6..15);
-    let low = 2_000 + (check - 1) * 600;
-    let high = 2_000 + check * 600;
+    let d20: i32 = thread_rng().gen_range(data::D20_RANGE);
+    let check: i32 = thread_rng().gen_range(data::DC_CHECK_RANGE);
+    let low = data::DAILY_FORTUNE_BASE + (check - 1) * data::DAILY_FORTUNE_STEP;
+    let high = data::DAILY_FORTUNE_BASE + check * data::DAILY_FORTUNE_STEP;
     let fortune: i32 = thread_rng().gen_range(low..high);
 
     let total: i32 = if d20 == 20 {
-        thread_rng().gen_range(50_000..200_000)
+        thread_rng().gen_range(data::DAILY_CRIT_SUCCESS)
     } else if d20 == 1 {
-        -thread_rng().gen_range(15_000..40_000)
+        -thread_rng().gen_range(data::DAILY_CRIT_FAIL)
     } else if d20 >= check {
         fortune
     } else {
@@ -387,7 +390,7 @@ pub fn simulate_uwu(user_data: &mut data::UserData) -> i32 {
     } else {
         user_data.add_creds(total);
     }
-    user_data.update_xp(500);
+    user_data.update_xp(data::DAILY_XP);
     user_data.add_rolls(d20);
     user_data.push_roll(d20);
     user_data.add_bonus();
@@ -399,20 +402,20 @@ pub fn simulate_uwu(user_data: &mut data::UserData) -> i32 {
 /// Returns creds awarded (0 if `bonus_count` < 3).
 pub fn simulate_claim(user_data: &mut data::UserData) -> i32 {
     if !user_data.check_claim() { return 0; }
-    let d20: i32 = thread_rng().gen_range(1..21);
-    let check: i32 = thread_rng().gen_range(6..15);
+    let d20: i32 = thread_rng().gen_range(data::D20_RANGE);
+    let check: i32 = thread_rng().gen_range(data::DC_CHECK_RANGE);
     let fortune: i32 = if d20 == 20 {
-        thread_rng().gen_range(35_000..120_000)
+        thread_rng().gen_range(data::BONUS_CRIT_SUCCESS)
     } else if d20 == 1 {
         1
     } else {
-        let low  = 3_000 + (check - 1) * 900;
-        let high = 3_000 + check * 900;
+        let low  = data::BONUS_FORTUNE_BASE + (check - 1) * data::BONUS_FORTUNE_STEP;
+        let high = data::BONUS_FORTUNE_BASE + check * data::BONUS_FORTUNE_STEP;
         let v = thread_rng().gen_range(low..high);
         if d20 >= check { v } else { v / 2 }
     };
     user_data.add_creds(fortune);
-    user_data.update_xp(150);
+    user_data.update_xp(data::BONUS_XP);
     user_data.reset_bonus();
     fortune
 }

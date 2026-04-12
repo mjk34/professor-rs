@@ -12,6 +12,11 @@ use poise::serenity_prelude::UserId;
 use serenity::Color;
 use std::collections::HashMap;
 
+fn fmt_hhmm(d: chrono::TimeDelta) -> String {
+    let total_min = d.num_seconds() / 60;
+    format!("{:0>2}:{:0>2}", total_min / 60, total_min % 60)
+}
+
 /// ping the bot to see if its alive or to play ping pong
 #[poise::command(slash_command)]
 pub async fn ping(ctx: Context<'_>) -> Result<(), Error> {
@@ -96,23 +101,12 @@ pub async fn voice_status(ctx: Context<'_>) -> Result<(), Error> {
 
         for ((_, vu), user_result) in out.iter().zip(users) {
             let name = user_result.map_or_else(|_| "Unknown".to_string(), |u| u.name);
-            let diff = now - vu.joined;
-            let minutes = ((diff.num_seconds()) / 60) % 60;
-            let hours = (diff.num_seconds() / 60) / 60;
-
-            let mut user_info = format!("{hours:0>2}:{minutes:0>2}");
-
+            let mut user_info = fmt_hhmm(now - vu.joined);
             if let Some(mute_time) = vu.mute {
-                let mute_duration = now - mute_time;
-                let mute_minutes = ((mute_duration.num_seconds()) / 60) % 60;
-                let mute_hours = (mute_duration.num_seconds() / 60) / 60;
-                user_info += &format!(" | Mute: {mute_hours:0>2}:{mute_minutes:0>2}");
+                user_info += &format!(" | Mute: {}", fmt_hhmm(now - mute_time));
             }
             if let Some(deaf_time) = vu.deaf {
-                let deaf_duration = now - deaf_time;
-                let deaf_minutes = ((deaf_duration.num_seconds()) / 60) % 60;
-                let deaf_hours = (deaf_duration.num_seconds() / 60) / 60;
-                user_info += &format!(" | Deaf: {deaf_hours:0>2}:{deaf_minutes:0>2}");
+                user_info += &format!(" | Deaf: {}", fmt_hhmm(now - deaf_time));
             }
 
             embed = embed.field(name, user_info, false);

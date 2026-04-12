@@ -15,13 +15,15 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
 
-pub const PROFESSOR_PORT: &str = "ProfessorPort";
+pub(crate) const PROFESSOR_PORT: &str = "ProfessorPort";
 /// Maximum fraction of available portfolio cash the professor may deploy in a single trade.
 const MAX_TRADE_CASH_RATIO: f64 = 0.30;
 /// Minimum USD notional value for any professor-initiated trade (avoids dust trades).
 const MIN_TRADE_USD: f64 = 50.0;
 /// Maximum number of memory entries retained in the professor's rolling context window.
 const MAX_MEMORY_ENTRIES: usize = 30;
+/// Claude model used for all Professor AI calls.
+const CLAUDE_MODEL: &str = "claude-sonnet-4-6";
 
 /// Daily cache for `morning_pulse` — reused within the same UTC day to avoid redundant Claude calls.
 pub static PULSE_CACHE: LazyLock<tokio::sync::RwLock<Option<(chrono::NaiveDate, String)>>> =
@@ -43,20 +45,20 @@ pub static LAST_SESSION_DATE: LazyLock<tokio::sync::RwLock<Option<chrono::NaiveD
 // ── Finnhub / Claude structs ──────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
-pub struct FinnhubNewsItem {
+pub(crate) struct FinnhubNewsItem {
     pub headline: String,
     pub source: String,
     pub datetime: i64,
 }
 
 #[derive(Debug, Serialize)]
-pub struct ClaudeMessage {
+pub(crate) struct ClaudeMessage {
     pub role: String,
     pub content: String,
 }
 
 #[derive(Debug, Serialize)]
-pub struct ClaudeRequest {
+pub(crate) struct ClaudeRequest {
     pub model: String,
     pub max_tokens: u32,
     pub system: String,
@@ -64,17 +66,17 @@ pub struct ClaudeRequest {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct ClaudeContent {
+pub(crate) struct ClaudeContent {
     pub text: String,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct ClaudeResponse {
+pub(crate) struct ClaudeResponse {
     pub content: Vec<ClaudeContent>,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct TradeCall {
+pub(crate) struct TradeCall {
     #[serde(rename = "fn")]
     pub func: String,
     pub ticker: String,
@@ -85,14 +87,14 @@ pub struct TradeCall {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct ProfessorResponse {
+pub(crate) struct ProfessorResponse {
     pub reason: String,
     pub trades: Vec<TradeCall>,
 }
 
 // ── Market news ───────────────────────────────────────────────────────────────
 
-pub async fn fetch_market_news() -> Vec<String> {
+pub(crate) async fn fetch_market_news() -> Vec<String> {
     let Some(api_key) = FINNHUB_API_KEY.as_deref() else { tracing::warn!("FINNHUB_API_KEY not set"); return vec![]; };
     let resp = HTTP_CLIENT
         .get("https://finnhub.io/api/v1/news")
@@ -113,10 +115,10 @@ pub async fn fetch_market_news() -> Vec<String> {
     items.into_iter().take(15).map(|n| format!("{} — {}", n.headline, n.source)).collect()
 }
 
-pub async fn call_claude(system: &str, user: &str) -> String {
+pub(crate) async fn call_claude(system: &str, user: &str) -> String {
     let Some(api_key) = CLAUDE_API_KEY.as_deref() else { tracing::warn!("CLAUDE_API_KEY not set"); return String::new(); };
     let body = ClaudeRequest {
-        model: "claude-sonnet-4-6".to_string(),
+        model: CLAUDE_MODEL.to_string(),
         max_tokens: 1024,
         system: system.to_string(),
         messages: vec![ClaudeMessage { role: "user".to_string(), content: user.to_string() }],
@@ -141,7 +143,7 @@ pub async fn call_claude(system: &str, user: &str) -> String {
     parsed.content.into_iter().next().map(|c| c.text).unwrap_or_default()
 }
 
-pub async fn morning_pulse(headlines: &[String], memory: &ProfessorMemory) -> String {
+pub(crate) async fn morning_pulse(headlines: &[String], memory: &ProfessorMemory) -> String {
     let today = Utc::now().date_naive();
     {
         let cache = PULSE_CACHE.read().await;
@@ -168,7 +170,7 @@ pub async fn morning_pulse(headlines: &[String], memory: &ProfessorMemory) -> St
     result
 }
 
-pub async fn midday_check(pulse: &str, positions_str: &str, memory: &ProfessorMemory) -> String {
+pub(crate) async fn midday_check(pulse: &str, positions_str: &str, memory: &ProfessorMemory) -> String {
     let today = Utc::now().date_naive();
     {
         let cache = MIDDAY_CACHE.read().await;
@@ -194,7 +196,7 @@ pub async fn midday_check(pulse: &str, positions_str: &str, memory: &ProfessorMe
     result
 }
 
-pub fn parse_watch_tickers(pulse: &str) -> Vec<String> {
+pub(crate) fn parse_watch_tickers(pulse: &str) -> Vec<String> {
     for line in pulse.lines() {
         if line.trim_start().starts_with("WATCH:") {
             let s = line.trim_start_matches("WATCH:").trim();
@@ -204,7 +206,7 @@ pub fn parse_watch_tickers(pulse: &str) -> Vec<String> {
     vec![]
 }
 
-pub fn parse_sentiment(pulse: &str) -> String {
+pub(crate) fn parse_sentiment(pulse: &str) -> String {
     for line in pulse.lines() {
         if line.trim_start().starts_with("SENTIMENT:") {
             return line.trim_start_matches("SENTIMENT:").trim().to_string();
@@ -213,7 +215,7 @@ pub fn parse_sentiment(pulse: &str) -> String {
     "neutral".to_string()
 }
 
-pub async fn trading_session(
+pub(crate) async fn trading_session(
     entries_str: &str,
     pulse: &str,
     sentiment: &str,
@@ -253,7 +255,7 @@ pub async fn trading_session(
     }
 }
 
-pub async fn professor_daily_session(
+pub(crate) async fn professor_daily_session(
     users: &UsersMap,
     http: &Arc<serenity::Http>,
     bot_chat: &str,
@@ -428,12 +430,16 @@ pub async fn professor_daily_session(
         Some(r) => {
             tracing::info!(reason = %r.reason, "[Professor] Claude reason");
             if r.trades.is_empty() {
-                tracing::info!("[Professor] Claude trades: [] (hold)");
+                tracing::info!("Claude trades: [] (hold)");
             } else {
                 for (i, t) in r.trades.iter().enumerate() {
                     tracing::info!(
-                        "[Professor] trade[{}]: fn={} ticker={} amount_usd={:?} sell_pct={:?}",
-                        i, t.func, t.ticker, t.amount_usd, t.sell_pct
+                        idx = i,
+                        func = %t.func,
+                        ticker = %t.ticker,
+                        amount_usd = ?t.amount_usd,
+                        sell_pct = ?t.sell_pct,
+                        "professor trade"
                     );
                 }
             }
@@ -444,7 +450,7 @@ pub async fn professor_daily_session(
         let cash_limit_creds = price_to_creds(pre_trade_cash_usd * MAX_TRADE_CASH_RATIO);
         tracing::info!(cash_usd = pre_trade_cash_usd, cash_limit_creds = cash_limit_creds, "[Professor] trade budget");
         let mut ud = u.write().await;
-        let port_idx = if let Some(i) = ud.stock.portfolios.iter().position(|p| p.name == PROFESSOR_PORT) { i } else { tracing::warn!("Professor: ProfessorPort missing at trade execution — skipping trades"); return; };
+        let port_idx = if let Some(i) = ud.stock.find_portfolio_idx(PROFESSOR_PORT) { i } else { tracing::warn!("Professor: ProfessorPort missing at trade execution — skipping trades"); return; };
         for trade in resp.trades.iter().take(3) {
             let Some((price_usd, asset_name, asset_type)) = prices.get(&trade.ticker).map(|(p,n,at)| (*p, n.clone(), at.clone())) else {
                 tracing::warn!(ticker = %trade.ticker, "[Professor] trade skipped — no price data");

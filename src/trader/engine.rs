@@ -7,7 +7,7 @@ use chrono::Utc;
 use std::collections::VecDeque;
 
 #[expect(clippy::too_many_arguments, reason = "apply_buy mirrors the full trade record — all fields are required")]
-pub fn apply_buy(
+pub(crate) fn apply_buy(
     port: &mut Portfolio,
     history: &mut VecDeque<TradeRecord>,
     ticker: &str,
@@ -51,7 +51,7 @@ pub fn apply_buy(
     }
 }
 
-pub fn apply_sell(
+pub(crate) fn apply_sell(
     port: &mut Portfolio,
     history: &mut VecDeque<TradeRecord>,
     ticker: &str,

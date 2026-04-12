@@ -17,6 +17,8 @@
 #![expect(clippy::similar_names,               reason = "short variable names (u, ud, etc.) are conventional in this codebase")]
 #![expect(clippy::format_push_string,          reason = "push_str(&format!(...)) is clearer than write!() for embed building")]
 #![allow(clippy::redundant_else)]              // explicit else after always-continuing if is intentional for readability
+#![allow(clippy::redundant_pub_crate)]         // pub(crate) documents intent even in private modules
+#![allow(clippy::single_match_else)]           // match with one arm + else is clearer than if-let for early-return error patterns
 mod api;
 mod basic;
 mod clips;
@@ -142,7 +144,7 @@ async fn main() {
                 let bot_user_id = ctx.cache.current_user().id;
                 data.bot_user_id = bot_user_id;
 
-                let core_behavior = std::fs::read_to_string("MEMORY.txt").unwrap_or_else(|_| {
+                let core_behavior = tokio::fs::read_to_string("MEMORY.txt").await.unwrap_or_else(|_| {
                     tracing::warn!("MEMORY.txt not found — using default core behavior");
                     "You are Professor, a Discord bot managing your own investment portfolio. \
                      Prefer diversified long-term holds. Only make HIGH conviction trades. \
@@ -329,11 +331,11 @@ fn professor_task(
 ) {
     tokio::spawn(async move {
         loop {
-            // Sleep until the next 19:00 UTC — always sleep first to avoid the boundary
-            // case where waking at exactly 19:00 causes secs_until_hm to return 0 and skip.
+            // Sleep until the next trigger hour — always sleep first to avoid the boundary
+            // case where waking at the exact trigger time causes secs_until_hm to return 0 and skip.
             let now = chrono::Utc::now();
             let cur_secs = u64::from(now.hour()) * 3600 + u64::from(now.minute()) * 60 + u64::from(now.second());
-            let target_secs = 19u64 * 3600;
+            let target_secs = u64::from(PROFESSOR_TRIGGER_HOUR_UTC) * 3600;
             let secs_to_fire = if cur_secs < target_secs {
                 target_secs - cur_secs
             } else {
@@ -369,10 +371,10 @@ fn pending_orders_task(
     });
 }
 
-/// Next weekday (Mon–Fri) at 19:00 UTC after `now`.
+/// Next weekday (Mon–Fri) at `PROFESSOR_TRIGGER_HOUR_UTC` after `now`.
 fn next_professor_run(now: chrono::DateTime<Utc>) -> chrono::DateTime<Utc> {
     let mut day = now.date_naive();
-    if now.hour() >= 19 {
+    if now.hour() >= PROFESSOR_TRIGGER_HOUR_UTC {
         day += chrono::Duration::days(1);
     }
     loop {
@@ -393,31 +395,33 @@ mod tests {
         Utc.with_ymd_and_hms(y, mo, d, h, m, 0).unwrap()
     }
 
+    const H: u32 = PROFESSOR_TRIGGER_HOUR_UTC;
+
     #[test]
     fn next_run_same_day_before_19() {
-        // Monday 09:00 — should fire Monday 19:00
+        // Monday 09:00 — should fire same day at trigger hour
         let result = next_professor_run(utc(2026, 4, 6, 9, 0));
-        assert_eq!(result, utc(2026, 4, 6, 19, 0));
+        assert_eq!(result, utc(2026, 4, 6, H, 0));
     }
 
     #[test]
     fn next_run_same_day_after_19() {
-        // Monday 20:00 — should fire Tuesday 19:00
+        // Monday 20:00 — should fire Tuesday at trigger hour
         let result = next_professor_run(utc(2026, 4, 6, 20, 0));
-        assert_eq!(result, utc(2026, 4, 7, 19, 0));
+        assert_eq!(result, utc(2026, 4, 7, H, 0));
     }
 
     #[test]
     fn next_run_skips_weekend() {
-        // Friday 20:00 — should skip Sat/Sun, fire Monday 19:00
+        // Friday 20:00 — should skip Sat/Sun, fire Monday at trigger hour
         let result = next_professor_run(utc(2026, 4, 10, 20, 0));
-        assert_eq!(result, utc(2026, 4, 13, 19, 0));
+        assert_eq!(result, utc(2026, 4, 13, H, 0));
     }
 
     #[test]
     fn next_run_saturday_before_19() {
-        // Saturday 10:00 — should fire Monday 19:00
+        // Saturday 10:00 — should fire Monday at trigger hour
         let result = next_professor_run(utc(2026, 4, 11, 10, 0));
-        assert_eq!(result, utc(2026, 4, 13, 19, 0));
+        assert_eq!(result, utc(2026, 4, 13, H, 0));
     }
 }

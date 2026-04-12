@@ -9,7 +9,7 @@ use crate::helper::default_footer;
 
 #[derive(Debug, poise::Modal)]
 #[name = "Add to Watchlist"]
-pub struct WatchlistAddModal {
+pub(crate) struct WatchlistAddModal {
     #[name = "Ticker symbol (e.g. AAPL, BTC-USD)"]
     #[placeholder = "AAPL"]
     pub ticker: String,
@@ -17,13 +17,13 @@ pub struct WatchlistAddModal {
 
 #[derive(Debug, poise::Modal)]
 #[name = "Remove from Watchlist"]
-pub struct WatchlistRemoveModal {
+pub(crate) struct WatchlistRemoveModal {
     #[name = "Ticker symbol to remove"]
     #[placeholder = "AAPL"]
     pub ticker: String,
 }
 
-pub async fn build_watchlist_embed(
+pub(crate) async fn build_watchlist_embed(
     tickers: &[String],
 ) -> (serenity::CreateEmbed, Vec<serenity::CreateActionRow>) {
     let description = if tickers.is_empty() {
@@ -111,8 +111,8 @@ pub async fn watchlist(ctx: Context<'_>) -> Result<(), Error> {
                         let mut ud = u.write().await;
                         if ud.stock.watchlist.contains(&ticker) {
                             Some(format!("**{ticker}** is already on your watchlist."))
-                        } else if ud.stock.watchlist.len() >= 20 {
-                            Some("Watchlist is full (max 20 tickers).".to_string())
+                        } else if ud.stock.watchlist.len() >= data::MAX_WATCHLIST {
+                            Some(format!("Watchlist is full (max {} tickers).", data::MAX_WATCHLIST))
                         } else {
                             ud.stock.watchlist.push(ticker);
                             None

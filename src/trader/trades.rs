@@ -7,7 +7,10 @@ use poise::serenity_prelude::EditMessage;
 use std::collections::{HashMap, VecDeque};
 use std::time::Duration;
 
-pub fn build_summary_embed(trades: &VecDeque<TradeRecord>) -> serenity::CreateEmbed {
+#[derive(Clone, Copy)]
+pub(crate) enum TradeFilter { Gains, Losses }
+
+pub(crate) fn build_summary_embed(trades: &VecDeque<TradeRecord>) -> serenity::CreateEmbed {
     // (gains, losses, count, cost_basis)
     let mut map: HashMap<&str, (f64, f64, u32, f64)> = HashMap::new();
     for t in trades {
@@ -54,29 +57,21 @@ pub fn build_summary_embed(trades: &VecDeque<TradeRecord>) -> serenity::CreateEm
         .footer(default_footer())
 }
 
-pub fn build_filtered_embed(trades: &VecDeque<TradeRecord>, gains_only: bool) -> serenity::CreateEmbed {
-    let title = if gains_only {
-        "Trade History — Gains"
-    } else {
-        "Trade History — Losses"
+pub(crate) fn build_filtered_embed(trades: &VecDeque<TradeRecord>, filter: TradeFilter) -> serenity::CreateEmbed {
+    let (title, color, pred): (&str, _, fn(f64) -> bool) = match filter {
+        TradeFilter::Gains  => ("Trade History — Gains",  data::EMBED_SUCCESS, |p| p > 0.0),
+        TradeFilter::Losses => ("Trade History — Losses", data::EMBED_FAIL,    |p| p < 0.0),
     };
     let filtered: Vec<_> = trades
         .iter()
-        .filter(|t| {
-            t.realized_pnl
-                .is_some_and(|p| if gains_only { p > 0.0 } else { p < 0.0 })
-        })
+        .filter(|t| t.realized_pnl.is_some_and(pred))
         .collect();
 
     if filtered.is_empty() {
         return serenity::CreateEmbed::new()
             .title(title)
             .description("No trades match this filter.")
-            .color(if gains_only {
-                data::EMBED_SUCCESS
-            } else {
-                data::EMBED_FAIL
-            });
+            .color(color);
     }
 
     let mut desc = String::new();
@@ -97,15 +92,11 @@ pub fn build_filtered_embed(trades: &VecDeque<TradeRecord>, gains_only: bool) ->
     serenity::CreateEmbed::new()
         .title(title)
         .description(desc)
-        .color(if gains_only {
-            data::EMBED_SUCCESS
-        } else {
-            data::EMBED_FAIL
-        })
+        .color(color)
         .footer(default_footer())
 }
 
-pub fn build_all_trades_embed(trades: &VecDeque<TradeRecord>) -> serenity::CreateEmbed {
+pub(crate) fn build_all_trades_embed(trades: &VecDeque<TradeRecord>) -> serenity::CreateEmbed {
     if trades.is_empty() {
         return serenity::CreateEmbed::new()
             .title("Trade History — All Trades")
@@ -205,8 +196,8 @@ pub async fn trades(ctx: Context<'_>) -> Result<(), Error> {
 
         current_embed = match press.data.custom_id.as_str() {
             "trades-summary" => build_summary_embed(&trade_history),
-            "trades-gains"   => build_filtered_embed(&trade_history, true),
-            "trades-losses"  => build_filtered_embed(&trade_history, false),
+            "trades-gains"   => build_filtered_embed(&trade_history, TradeFilter::Gains),
+            "trades-losses"  => build_filtered_embed(&trade_history, TradeFilter::Losses),
             "trades-all"     => build_all_trades_embed(&trade_history),
             _                => continue,
         };
@@ -267,7 +258,7 @@ mod tests {
         trades.push_back(make_trade("P", TradeAction::Sell, 1.0, 100.0, Some(50.0)));
         trades.push_back(make_trade("P", TradeAction::Sell, 1.0, 100.0, Some(-30.0)));
 
-        let embed = build_filtered_embed(&trades, true);
+        let embed = build_filtered_embed(&trades, TradeFilter::Gains);
         let _ = embed;
     }
 
@@ -277,7 +268,7 @@ mod tests {
         trades.push_back(make_trade("P", TradeAction::Sell, 1.0, 100.0, Some(50.0)));
         trades.push_back(make_trade("P", TradeAction::Sell, 1.0, 100.0, Some(-30.0)));
 
-        let embed = build_filtered_embed(&trades, false);
+        let embed = build_filtered_embed(&trades, TradeFilter::Losses);
         let _ = embed;
     }
 

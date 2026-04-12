@@ -16,12 +16,12 @@ use std::sync::{Arc, LazyLock, atomic::{AtomicBool, Ordering}};
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 
-pub type UsersMap = Arc<DashMap<serenity::UserId, Arc<RwLock<crate::data::UserData>>>>;
+pub(crate) type UsersMap = Arc<DashMap<serenity::UserId, Arc<RwLock<crate::data::UserData>>>>;
 
 // ── FMP API structs ───────────────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize, Clone)]
-pub struct FmpProfile {
+pub(crate) struct FmpProfile {
     pub price: Option<f64>,
     #[serde(rename = "marketCap")]
     pub market_cap: Option<f64>,
@@ -39,7 +39,7 @@ pub struct FmpProfile {
 }
 
 #[derive(Debug, Deserialize, Clone)]
-pub struct FmpRatios {
+pub(crate) struct FmpRatios {
     #[serde(rename = "priceToEarningsRatioTTM")]
     pub pe_ratio: Option<f64>,
 }
@@ -47,43 +47,43 @@ pub struct FmpRatios {
 // ── Yahoo Finance API structs ─────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
-pub struct YfSearchResponse {
+pub(crate) struct YfSearchResponse {
     pub quotes: Vec<YfSearchQuote>,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct YfSearchQuote {
+pub(crate) struct YfSearchQuote {
     pub symbol: String,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct YfChartResponse {
+pub(crate) struct YfChartResponse {
     pub chart: YfChartOuter,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct YfChartOuter {
+pub(crate) struct YfChartOuter {
     pub result: Option<Vec<YfChartEntry>>,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct YfChartEntry {
+pub(crate) struct YfChartEntry {
     pub meta: YfChartMeta,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct YfTradingSession {
+pub(crate) struct YfTradingSession {
     pub start: i64,
     pub end: i64,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct YfCurrentTradingPeriod {
+pub(crate) struct YfCurrentTradingPeriod {
     pub regular: YfTradingSession,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct YfChartMeta {
+pub(crate) struct YfChartMeta {
     pub symbol: String,
     #[serde(rename = "longName")]
     pub long_name: Option<String>,
@@ -100,7 +100,7 @@ pub struct YfChartMeta {
 }
 
 #[derive(Debug, Deserialize, Clone)]
-pub struct YfQuote {
+pub(crate) struct YfQuote {
     pub symbol: String,
     #[serde(rename = "longName")]
     pub long_name: Option<String>,
@@ -116,7 +116,7 @@ pub struct YfQuote {
 }
 
 impl YfQuote {
-    pub fn display_name(&self) -> String {
+    pub(crate) fn display_name(&self) -> String {
         self.long_name
             .clone()
             .or_else(|| self.short_name.clone())
@@ -127,7 +127,7 @@ impl YfQuote {
         self.market_open
     }
 
-    pub fn asset_type(&self) -> AssetType {
+    pub(crate) fn asset_type(&self) -> AssetType {
         match self.quote_type.as_deref() {
             Some("ETF") => AssetType::ETF,
             Some("CRYPTOCURRENCY") => AssetType::Crypto,
@@ -135,7 +135,7 @@ impl YfQuote {
         }
     }
 
-    pub const fn market_status(&self) -> &'static str {
+    pub(crate) const fn market_status(&self) -> &'static str {
         if self.market_open { "Market: Open" } else { "Market: Closed" }
     }
 }
@@ -151,7 +151,7 @@ pub static TZ_OFFSET: LazyLock<i64> = LazyLock::new(|| {
         .unwrap_or(-4)
 });
 
-pub fn is_market_hours() -> bool {
+pub(crate) fn is_market_hours() -> bool {
     let now_eastern = Utc::now() + chrono::Duration::hours(*TZ_OFFSET);
     let hour = now_eastern.hour();
     matches!(
@@ -198,7 +198,7 @@ pub static YAHOO_RATE_LIMITED: AtomicBool = AtomicBool::new(false);
 
 // ── Logo / embed helpers ──────────────────────────────────────────────────────
 
-pub fn logo_url(ticker: &str) -> Option<String> {
+pub(crate) fn logo_url(ticker: &str) -> Option<String> {
     let key = LOGO_API_KEY.as_deref()?;
     Some(format!("https://img.logo.dev/ticker/{ticker}?token={key}"))
 }
@@ -206,7 +206,7 @@ pub fn logo_url(ticker: &str) -> Option<String> {
 
 /// Returns a user-facing description when market data can't be fetched.
 /// If the Yahoo Finance rate limit was recently hit, tells the user to try again tomorrow.
-pub fn market_data_err(query: &str) -> String {
+pub(crate) fn market_data_err(query: &str) -> String {
     if YAHOO_RATE_LIMITED.load(Ordering::Relaxed) {
         "Market data API is rate limited — try again tomorrow when the limit resets.".to_string()
     } else {
@@ -214,14 +214,14 @@ pub fn market_data_err(query: &str) -> String {
     }
 }
 
-pub fn with_logo(embed: serenity::CreateEmbed, ticker: &str) -> serenity::CreateEmbed {
+pub(crate) fn with_logo(embed: serenity::CreateEmbed, ticker: &str) -> serenity::CreateEmbed {
     match logo_url(ticker) {
         Some(url) => embed.thumbnail(url),
         None => embed,
     }
 }
 
-pub fn looks_like_ticker(s: &str) -> bool {
+pub(crate) fn looks_like_ticker(s: &str) -> bool {
     !s.is_empty()
         && s.chars()
             .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '-' || c == '.')
@@ -230,7 +230,7 @@ pub fn looks_like_ticker(s: &str) -> bool {
 
 // ── Ticker resolution ─────────────────────────────────────────────────────────
 
-pub async fn resolve_ticker(query: &str) -> Option<YfQuote> {
+pub(crate) async fn resolve_ticker(query: &str) -> Option<YfQuote> {
     let upper = query.trim().to_uppercase();
 
     let ticker = if looks_like_ticker(&upper) {
@@ -255,13 +255,13 @@ pub async fn resolve_ticker(query: &str) -> Option<YfQuote> {
     fetch_quote_detail(&ticker).await
 }
 
-pub async fn fetch_price(ticker: &str) -> Option<f64> {
+pub(crate) async fn fetch_price(ticker: &str) -> Option<f64> {
     fetch_quote_detail(ticker)
         .await
         .and_then(|q| q.regular_market_price)
 }
 
-pub async fn fetch_quote_detail(ticker: &str) -> Option<YfQuote> {
+pub(crate) async fn fetch_quote_detail(ticker: &str) -> Option<YfQuote> {
     // Validate ticker before interpolating into URL — guards against SSRF from user or AI input
     if ticker.is_empty() || ticker.len() > 20 || !ticker.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.') {
         tracing::warn!(ticker = ?ticker, "fetch_quote_detail: rejected invalid ticker");
@@ -317,7 +317,7 @@ pub async fn fetch_quote_detail(ticker: &str) -> Option<YfQuote> {
     Some(quote)
 }
 
-pub async fn fetch_fmp_profile(ticker: &str) -> Option<FmpProfile> {
+pub(crate) async fn fetch_fmp_profile(ticker: &str) -> Option<FmpProfile> {
     if let Some(entry) = FMP_CACHE.get(ticker) {
         if !is_market_hours() || entry.1.elapsed() < FMP_CACHE_TTL {
             return Some(entry.0.clone());
@@ -341,7 +341,7 @@ pub async fn fetch_fmp_profile(ticker: &str) -> Option<FmpProfile> {
     Some(profile)
 }
 
-pub async fn fetch_fmp_ratios(ticker: &str) -> Option<FmpRatios> {
+pub(crate) async fn fetch_fmp_ratios(ticker: &str) -> Option<FmpRatios> {
     if let Some(entry) = FMP_RATIOS_CACHE.get(ticker) {
         if !is_market_hours() || entry.1.elapsed() < FMP_RATIOS_CACHE_TTL {
             return Some(entry.0.clone());
@@ -377,7 +377,7 @@ struct FredObservation {
     value: String,
 }
 
-pub async fn fetch_fed_funds_rate() -> Option<f64> {
+pub(crate) async fn fetch_fed_funds_rate() -> Option<f64> {
     let api_key = FRED_API_KEY.as_deref()?;
     let resp = HTTP_CLIENT
         .get("https://api.stlouisfed.org/fred/series/observations")
@@ -403,7 +403,7 @@ pub async fn fetch_fed_funds_rate() -> Option<f64> {
 
 // ── API health checks ─────────────────────────────────────────────────────────
 
-pub async fn api_health_check() {
+pub(crate) async fn api_health_check() {
     // FRED
     if let Some(r) = fetch_fed_funds_rate().await { tracing::info!(rate = r, "[API] FRED ✓") } else { tracing::warn!("[API] FRED ✗ — failed to fetch fed funds rate") }
 
@@ -427,7 +427,7 @@ pub async fn api_health_check() {
 
 // ── Maintenance functions ─────────────────────────────────────────────────────
 
-pub async fn refresh_market_rate(rate: &Arc<RwLock<f64>>) {
+pub(crate) async fn refresh_market_rate(rate: &Arc<RwLock<f64>>) {
     if let Some(r_val) = fetch_fed_funds_rate().await {
         let mut r = rate.write().await;
         *r = r_val;
@@ -437,7 +437,7 @@ pub async fn refresh_market_rate(rate: &Arc<RwLock<f64>>) {
     }
 }
 
-pub async fn apply_monthly_interest(users: &UsersMap, rate: &Arc<RwLock<f64>>) {
+pub(crate) async fn apply_monthly_interest(users: &UsersMap, rate: &Arc<RwLock<f64>>) {
     let now = Utc::now();
     if now.day() != 1 {
         return;
@@ -466,15 +466,15 @@ pub async fn apply_monthly_interest(users: &UsersMap, rate: &Arc<RwLock<f64>>) {
             portfolio.cash += interest;
             portfolio.last_interest_credited = now;
             tracing::info!(
-                "Credited {:.2} interest to portfolio '{}'",
-                interest,
-                portfolio.name
+                interest = format_args!("{interest:.2}"),
+                portfolio = %portfolio.name,
+                "credited HYSA interest",
             );
         }
     }
 }
 
-pub async fn sweep_expired_options(
+pub(crate) async fn sweep_expired_options(
     users: &UsersMap,
     http: &Arc<serenity::Http>,
     bot_chat: &str,
@@ -533,12 +533,12 @@ pub async fn sweep_expired_options(
         };
 
         let price_usd = *prices.get(&info.ticker).unwrap_or(&0.0);
-        let intrinsic = option_intrinsic(&info.contract.option_type, price_usd, info.contract.strike);
+        let intrinsic = option_intrinsic(info.contract.option_type, price_usd, info.contract.strike);
         let intrinsic_creds =
             price_to_creds(intrinsic * f64::from(info.contract.contracts) * 100.0);
         let cost_basis = info.avg_cost * info.quantity; // for long: cost paid; for short: premium received
         let itm = intrinsic > 0.0;
-        let type_str = option_type_str(&info.contract.option_type);
+        let type_str = option_type_str(info.contract.option_type);
         let is_short = info.contract.side == OptionSide::Short;
 
         let (cash_delta, pnl, msg) = if is_short {
@@ -630,20 +630,20 @@ pub async fn sweep_expired_options(
 
 /// Fetches prices for a list of tickers concurrently and returns a ticker → USD price map.
 /// Tickers that fail to fetch are included with a value of 0.0.
-pub async fn fetch_prices_map(tickers: &[String]) -> HashMap<String, f64> {
+pub(crate) async fn fetch_prices_map(tickers: &[String]) -> HashMap<String, f64> {
     futures::future::join_all(
         tickers.iter().map(|t| { let t = t.clone(); async move { let p = fetch_price(&t).await.unwrap_or(0.0); (t, p) } })
     ).await.into_iter().collect()
 }
 
-pub async fn is_market_open() -> bool {
+pub(crate) async fn is_market_open() -> bool {
     fetch_quote_detail("SPY").await
         .is_some_and(|q| q.is_market_open())
 }
 
 /// Returns the expiry for a new pending order: end of today at 20:00 UTC if market
 /// hasn't closed yet, otherwise end of the next weekday at 20:00 UTC.
-pub fn order_expiry() -> DateTime<Utc> {
+pub(crate) fn order_expiry() -> DateTime<Utc> {
     let now = Utc::now();
     let today_close = now
         .date_naive()
@@ -668,7 +668,7 @@ pub fn order_expiry() -> DateTime<Utc> {
 }
 
 /// Sweep pending orders: execute those whose conditions are met, expire stale ones.
-pub async fn sweep_pending_orders(
+pub(crate) async fn sweep_pending_orders(
     users: &UsersMap,
     http: &Arc<serenity::Http>,
     bot_chat: &str,
@@ -759,7 +759,7 @@ pub async fn sweep_pending_orders(
         let msg = match order.side {
             OrderSide::Buy => {
                 let total_cost = price_per_unit * order.quantity;
-                let port_idx = user_data.stock.portfolios.iter().position(|p| p.name == order.portfolio_name);
+                let port_idx = user_data.stock.find_portfolio_idx(&order.portfolio_name);
                 match port_idx {
                     Some(idx) if user_data.stock.portfolios[idx].cash >= total_cost => {
                         let stock = &mut user_data.stock;
@@ -795,7 +795,7 @@ pub async fn sweep_pending_orders(
                 }
             }
             OrderSide::Sell => {
-                let port_idx = user_data.stock.portfolios.iter().position(|p| p.name == order.portfolio_name);
+                let port_idx = user_data.stock.find_portfolio_idx(&order.portfolio_name);
                 match port_idx {
                     Some(idx) => {
                         let held = user_data.stock.portfolios[idx].positions.iter()

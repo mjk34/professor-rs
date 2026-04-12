@@ -2,7 +2,7 @@
 
 use crate::serenity;
 
-pub fn parse_trade_fields(data: &serenity::ModalInteractionData) -> (String, String, String) {
+pub(crate) fn parse_trade_fields(data: &serenity::ModalInteractionData) -> (String, String, String) {
     let mut portfolio   = String::new();
     let mut amount      = String::new();
     let mut limit_price = String::new();
@@ -22,7 +22,7 @@ pub fn parse_trade_fields(data: &serenity::ModalInteractionData) -> (String, Str
 }
 
 #[derive(Debug)]
-pub struct BuyModal {
+pub(crate) struct BuyModal {
     pub portfolio: String,
     pub amount: String,
     pub limit_price: String,
@@ -82,7 +82,7 @@ impl poise::Modal for BuyModal {
 }
 
 #[derive(Debug)]
-pub struct SellModal {
+pub(crate) struct SellModal {
     pub portfolio: String,
     pub amount: String,
     pub limit_price: String,

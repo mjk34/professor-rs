@@ -38,22 +38,14 @@ pub fn format_large_num(n: f64) -> String {
     }
 }
 
-pub fn option_intrinsic(opt_type: &OptionType, price_usd: f64, strike: f64) -> f64 {
+pub fn option_intrinsic(opt_type: OptionType, price_usd: f64, strike: f64) -> f64 {
     match opt_type {
         OptionType::Call => (price_usd - strike).max(0.0),
         OptionType::Put  => (strike - price_usd).max(0.0),
     }
 }
 
-pub fn parse_option_type(s: &str) -> Option<OptionType> {
-    match s.to_lowercase().as_str() {
-        "call" | "c" => Some(OptionType::Call),
-        "put"  | "p" => Some(OptionType::Put),
-        _ => None,
-    }
-}
-
-pub const fn option_type_str(ot: &OptionType) -> &'static str {
+pub const fn option_type_str(ot: OptionType) -> &'static str {
     match ot {
         OptionType::Call => "CALL",
         OptionType::Put  => "PUT",
@@ -66,9 +58,9 @@ pub fn default_footer() -> serenity::CreateEmbedFooter {
 
 pub fn fmt_pnl(pnl: f64) -> String {
     if pnl >= 0.0 {
-        format!("▲ +${:.2}", creds_to_price(pnl))
+        format!("▲ +${:.2} ({:.0} creds)", creds_to_price(pnl), pnl)
     } else {
-        format!("▼ -${:.2}", creds_to_price(pnl.abs()))
+        format!("▼ -${:.2} ({:.0} creds)", creds_to_price(pnl.abs()), pnl.abs())
     }
 }
 
@@ -121,21 +113,21 @@ mod tests {
 
     #[test]
     fn option_intrinsic_call() {
-        assert_eq!(option_intrinsic(&OptionType::Call, 150.0, 100.0), 50.0);
-        assert_eq!(option_intrinsic(&OptionType::Call, 80.0, 100.0), 0.0); // OTM
+        assert_eq!(option_intrinsic(OptionType::Call, 150.0, 100.0), 50.0);
+        assert_eq!(option_intrinsic(OptionType::Call, 80.0, 100.0), 0.0); // OTM
     }
 
     #[test]
     fn option_intrinsic_put() {
-        assert_eq!(option_intrinsic(&OptionType::Put, 80.0, 100.0), 20.0);
-        assert_eq!(option_intrinsic(&OptionType::Put, 150.0, 100.0), 0.0); // OTM
+        assert_eq!(option_intrinsic(OptionType::Put, 80.0, 100.0), 20.0);
+        assert_eq!(option_intrinsic(OptionType::Put, 150.0, 100.0), 0.0); // OTM
     }
 
     #[test]
     fn fmt_pnl_positive_and_negative() {
-        assert_eq!(fmt_pnl(500.0), "▲ +$5.00");
-        assert_eq!(fmt_pnl(-300.0), "▼ -$3.00");
-        assert_eq!(fmt_pnl(0.0), "▲ +$0.00");
+        assert_eq!(fmt_pnl(500.0), "▲ +$5.00 (500 creds)");
+        assert_eq!(fmt_pnl(-300.0), "▼ -$3.00 (300 creds)");
+        assert_eq!(fmt_pnl(0.0), "▲ +$0.00 (0 creds)");
     }
 
     #[test]
@@ -149,17 +141,6 @@ mod tests {
     fn gold_hysa_rate_floor_and_normal() {
         assert_eq!(gold_hysa_rate(0.0), 0.5);   // floor
         assert!((gold_hysa_rate(5.0) - 4.6).abs() < 1e-9);
-    }
-
-    #[test]
-    fn parse_option_type_all_variants() {
-        assert_eq!(parse_option_type("call"), Some(OptionType::Call));
-        assert_eq!(parse_option_type("CALL"), Some(OptionType::Call));
-        assert_eq!(parse_option_type("c"), Some(OptionType::Call));
-        assert_eq!(parse_option_type("put"), Some(OptionType::Put));
-        assert_eq!(parse_option_type("PUT"), Some(OptionType::Put));
-        assert_eq!(parse_option_type("p"), Some(OptionType::Put));
-        assert_eq!(parse_option_type("invalid"), None);
     }
 
     #[test]
