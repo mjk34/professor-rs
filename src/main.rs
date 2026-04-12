@@ -172,14 +172,15 @@ async fn main() {
                 }
 
                 professor_task(users.clone(), http.clone(), bot_chat.clone(), bot_user_id);
-                pending_orders_task(users.clone(), http, bot_chat);
+                pending_orders_task(users.clone(), http.clone(), bot_chat);
 
                 // HTTP API for uwuwebu frontend
                 let web_port: u16 = env::var("UWUWEBU_BOT_PORT")
                     .ok()
                     .and_then(|v| v.parse().ok())
                     .unwrap_or(4875);
-                let web_router = web::router(users);
+                let web_state = web::WebState { users, http };
+                let web_router = web::router(web_state);
                 tokio::spawn(async move {
                     let listener = tokio::net::TcpListener::bind(("127.0.0.1", web_port))
                         .await

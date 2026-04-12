@@ -3,7 +3,7 @@
 
 use axum::{
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{HeaderValue, Method, StatusCode},
     response::IntoResponse,
     routing::get,
     Json, Router,
@@ -12,21 +12,36 @@ use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use tower_http::cors::CorsLayer;
 
 use crate::data::{AssetType, Portfolio, UserData};
 use crate::serenity;
 
 /// Shared state passed to all axum handlers.
-pub type WebState = Arc<DashMap<serenity::UserId, Arc<RwLock<UserData>>>>;
+#[derive(Clone)]
+pub struct WebState {
+    pub users: Arc<DashMap<serenity::UserId, Arc<RwLock<UserData>>>>,
+    pub http: Arc<serenity::Http>,
+}
 
 /// Default page size for paginated endpoints.
 const DEFAULT_PAGE_LIMIT: usize = 20;
 /// Maximum page size for paginated endpoints (leaderboard, trades).
 const MAX_PAGE_LIMIT: usize = 50;
-/// Maximum clips returned per request (clips are unbounded in UserData).
+/// Maximum clips returned per request (clips are unbounded in `UserData`).
 const MAX_CLIPS: usize = 100;
+/// Maximum Discord user IDs per batch lookup.
+const MAX_BATCH_IDS: usize = 50;
 
-pub fn router(users: WebState) -> Router {
+pub fn router(state: WebState) -> Router {
+    let cors = CorsLayer::new()
+        .allow_origin([
+            "http://localhost:3000".parse::<HeaderValue>().unwrap(),
+            "http://127.0.0.1:3000".parse::<HeaderValue>().unwrap(),
+        ])
+        .allow_methods([Method::GET])
+        .allow_headers([axum::http::header::CONTENT_TYPE]);
+
     Router::new()
         .route("/health", get(health))
         .route("/user/{discord_id}", get(get_user))
@@ -35,7 +50,9 @@ pub fn router(users: WebState) -> Router {
         .route("/user/{discord_id}/trades", get(get_trades))
         .route("/user/{discord_id}/clips", get(get_clips))
         .route("/leaderboard", get(get_leaderboard))
-        .with_state(users)
+        .route("/discord/users", get(get_discord_users))
+        .layer(cors)
+        .with_state(state)
 }
 
 async fn health() -> &'static str {
@@ -46,6 +63,8 @@ async fn health() -> &'static str {
 
 #[derive(Debug, Serialize)]
 struct ProfileDto {
+    username: Option<String>,
+    avatar_url: Option<String>,
     creds: i32,
     level: i32,
     xp: i32,
@@ -71,21 +90,28 @@ struct PortfolioEntry {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-fn resolve_user(users: &WebState, discord_id: u64) -> Result<Arc<RwLock<UserData>>, StatusCode> {
+fn resolve_user(state: &WebState, discord_id: u64) -> Result<Arc<RwLock<UserData>>, StatusCode> {
     let uid = serenity::UserId::new(discord_id);
-    users.get(&uid).map(|e| Arc::clone(e.value())).ok_or(StatusCode::NOT_FOUND)
+    state.users.get(&uid).map(|e| Arc::clone(e.value())).ok_or(StatusCode::NOT_FOUND)
 }
 
 // ── Handlers ─────────────────────────────────────────────────────────────────
 
 async fn get_user(
-    State(users): State<WebState>,
+    State(state): State<WebState>,
     Path(discord_id): Path<u64>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let arc = resolve_user(&users, discord_id)?;
+    let arc = resolve_user(&state, discord_id)?;
     let u = arc.read().await;
 
+    let (username, avatar_url) = match state.http.get_user(serenity::UserId::new(discord_id)).await {
+        Ok(user) => (Some(user.name.clone()), Some(user.face())),
+        Err(_) => (None, None),
+    };
+
     Ok(Json(ProfileDto {
+        username,
+        avatar_url,
         creds: u.get_creds(),
         level: u.get_level(),
         xp: u.get_xp(),
@@ -99,10 +125,10 @@ async fn get_user(
 }
 
 async fn get_portfolio(
-    State(users): State<WebState>,
+    State(state): State<WebState>,
     Path(discord_id): Path<u64>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let arc = resolve_user(&users, discord_id)?;
+    let arc = resolve_user(&state, discord_id)?;
     let u = arc.read().await;
 
     let portfolios = u.stock.portfolios.iter().map(portfolio_entry).collect();
@@ -126,6 +152,9 @@ enum LeaderboardSort {
     Creds,
     Level,
     Xp,
+    Tickets,
+    #[serde(rename = "daily_count")]
+    DailyCount,
 }
 
 #[derive(Deserialize)]
@@ -146,17 +175,19 @@ struct LeaderboardUser {
     creds: i32,
     level: i32,
     xp: i32,
+    tickets: i32,
+    daily_count: i32,
     luck: String,
 }
 
 async fn get_leaderboard(
-    State(users): State<WebState>,
+    State(state): State<WebState>,
     Query(params): Query<LeaderboardQuery>,
 ) -> impl IntoResponse {
     let limit = params.limit.unwrap_or(DEFAULT_PAGE_LIMIT).min(MAX_PAGE_LIMIT);
 
     let mut entries = Vec::new();
-    for entry in users.iter() {
+    for entry in state.users.iter() {
         let id = *entry.key();
         let arc = Arc::clone(entry.value());
         drop(entry);
@@ -166,14 +197,18 @@ async fn get_leaderboard(
             creds: u.get_creds(),
             level: u.get_level(),
             xp: u.get_xp(),
+            tickets: u.get_tickets(),
+            daily_count: u.get_daily_count(),
             luck: u.get_luck(),
         });
     }
 
     match params.sort {
+        LeaderboardSort::Creds => entries.sort_unstable_by(|a, b| b.creds.cmp(&a.creds)),
         LeaderboardSort::Level => entries.sort_unstable_by(|a, b| b.level.cmp(&a.level)),
         LeaderboardSort::Xp => entries.sort_unstable_by(|a, b| b.xp.cmp(&a.xp)),
-        LeaderboardSort::Creds => entries.sort_unstable_by(|a, b| b.creds.cmp(&a.creds)),
+        LeaderboardSort::Tickets => entries.sort_unstable_by(|a, b| b.tickets.cmp(&a.tickets)),
+        LeaderboardSort::DailyCount => entries.sort_unstable_by(|a, b| b.daily_count.cmp(&a.daily_count)),
     }
 
     entries.truncate(limit);
@@ -212,10 +247,10 @@ const fn asset_type_tag(at: &AssetType) -> &'static str {
 }
 
 async fn get_positions(
-    State(users): State<WebState>,
+    State(state): State<WebState>,
     Path(discord_id): Path<u64>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let arc = resolve_user(&users, discord_id)?;
+    let arc = resolve_user(&state, discord_id)?;
     let u = arc.read().await;
 
     let portfolios = u.stock.portfolios.iter().map(|p| {
@@ -260,11 +295,11 @@ struct TradeDto {
 }
 
 async fn get_trades(
-    State(users): State<WebState>,
+    State(state): State<WebState>,
     Path(discord_id): Path<u64>,
     Query(params): Query<TradesQuery>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let arc = resolve_user(&users, discord_id)?;
+    let arc = resolve_user(&state, discord_id)?;
     let u = arc.read().await;
     let limit = params.limit.unwrap_or(DEFAULT_PAGE_LIMIT).min(MAX_PAGE_LIMIT);
 
@@ -304,10 +339,10 @@ struct ClipDto {
 }
 
 async fn get_clips(
-    State(users): State<WebState>,
+    State(state): State<WebState>,
     Path(discord_id): Path<u64>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let arc = resolve_user(&users, discord_id)?;
+    let arc = resolve_user(&state, discord_id)?;
     let u = arc.read().await;
 
     let clips: Vec<ClipDto> = u.submits.iter().take(MAX_CLIPS).filter_map(|s| {
@@ -320,4 +355,55 @@ async fn get_clips(
     }).collect();
 
     Ok(Json(ClipsDto { clips }))
+}
+
+// ── Discord User Lookup ──────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct DiscordUsersQuery {
+    ids: String,
+}
+
+#[derive(Debug, Serialize)]
+struct DiscordUsersDto {
+    users: Vec<DiscordUserInfo>,
+}
+
+#[derive(Debug, Serialize)]
+struct DiscordUserInfo {
+    discord_id: String,
+    username: String,
+    avatar_url: String,
+}
+
+async fn get_discord_users(
+    State(state): State<WebState>,
+    Query(params): Query<DiscordUsersQuery>,
+) -> impl IntoResponse {
+    let ids: Vec<u64> = params.ids.split(',')
+        .filter_map(|s| s.trim().parse().ok())
+        .take(MAX_BATCH_IDS)
+        .collect();
+
+    let mut handles = Vec::with_capacity(ids.len());
+    for id in ids {
+        let http = Arc::clone(&state.http);
+        handles.push(tokio::spawn(async move {
+            let uid = serenity::UserId::new(id);
+            http.get_user(uid).await.ok().map(|user| DiscordUserInfo {
+                discord_id: id.to_string(),
+                username: user.name.clone(),
+                avatar_url: user.face(),
+            })
+        }));
+    }
+
+    let mut users = Vec::with_capacity(handles.len());
+    for handle in handles {
+        if let Ok(Some(info)) = handle.await {
+            users.push(info);
+        }
+    }
+
+    Json(DiscordUsersDto { users })
 }

@@ -20,6 +20,7 @@ reqwest = { version = "0.12", features = ["json"] }
 
 dashmap = { version = "6.0.1", features = ["serde"] }
 axum = "0.7"
+tower-http = { version = "0.6", features = ["cors"] }
 
 openssl-sys = "0.9"
 
