@@ -228,6 +228,14 @@ impl UserData {
         self.tickets
     }
 
+    pub const fn get_rolls(&self) -> i32 {
+        self.rolls
+    }
+
+    pub const fn get_daily_count(&self) -> i32 {
+        self.daily_count
+    }
+
     pub fn get_luck(&self) -> String {
         if self.daily_count == 0 {
             return "N/A".to_string();

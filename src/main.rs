@@ -30,6 +30,7 @@ mod professor;
 mod reminder;
 mod stock;
 mod trader;
+mod web;
 
 use chrono::{Datelike, Timelike, Utc, Weekday};
 use dashmap::DashMap;
@@ -171,7 +172,22 @@ async fn main() {
                 }
 
                 professor_task(users.clone(), http.clone(), bot_chat.clone(), bot_user_id);
-                pending_orders_task(users, http, bot_chat);
+                pending_orders_task(users.clone(), http, bot_chat);
+
+                // HTTP API for uwuwebu frontend
+                let web_port: u16 = env::var("UWUWEBU_BOT_PORT")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(4875);
+                let web_router = web::router(users);
+                tokio::spawn(async move {
+                    let listener = tokio::net::TcpListener::bind(("127.0.0.1", web_port))
+                        .await
+                        .expect("failed to bind web API port");
+                    tracing::info!(port = web_port, "web API listening");
+                    axum::serve(listener, web_router).await.ok();
+                });
+
                 Ok(data)
             })
         })
