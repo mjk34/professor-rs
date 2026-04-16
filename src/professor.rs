@@ -17,7 +17,7 @@ use std::sync::{Arc, LazyLock};
 
 pub(crate) const PROFESSOR_PORT: &str = "ProfessorPort";
 /// Maximum fraction of available portfolio cash the professor may deploy in a single trade.
-const MAX_TRADE_CASH_RATIO: f64 = 0.30;
+const MAX_TRADE_CASH_RATIO: f64 = 0.50;
 /// Minimum USD notional value for any professor-initiated trade (avoids dust trades).
 const MIN_TRADE_USD: f64 = 50.0;
 /// Maximum number of memory entries retained in the professor's rolling context window.
@@ -233,7 +233,7 @@ pub(crate) async fn trading_session(
          AVAILABLE FUNCTIONS:\n\
          apply_buy(ticker, asset_type: \"Stock\"|\"ETF\"|\"Crypto\", amount_usd)\n\
          apply_sell(ticker, sell_pct: 0.0-1.0)\n\n\
-         CONSTRAINTS: cash={cash_usd:.2}, max_per_trade={max_per_trade:.2}, max_trades=3, min_position=50\n\n\
+         CONSTRAINTS: cash={cash_usd:.2}, max_per_trade={max_per_trade:.2}, min_position=50\n\n\
          Only HIGH conviction trades — default to hold.\n\
          Return ONLY JSON: {{\"reason\":\"...\",\"trades\":[{{\"fn\":\"apply_buy\",\"ticker\":\"XOM\",\"asset_type\":\"Stock\",\"amount_usd\":120.0}}]}}\n\
          No trades: {{\"reason\":\"...\",\"trades\":[]}}\n\
