@@ -7,7 +7,7 @@ use crate::data::{self, AssetType, MemoryEntry, ProfessorMemory, TradeAction};
 use crate::helper::{creds_to_price, default_footer, fmt_qty, price_to_creds};
 use crate::trader::{apply_buy, apply_sell};
 use crate::{serenity, Context, Error};
-use chrono::Utc;
+use chrono::{Datelike, Utc};
 use poise::serenity_prelude::futures;
 use poise::serenity_prelude::ChannelId;
 use poise::serenity_prelude::CreateMessage;
@@ -17,13 +17,20 @@ use std::sync::{Arc, LazyLock};
 
 pub(crate) const PROFESSOR_PORT: &str = "ProfessorPort";
 /// Maximum fraction of available portfolio cash the professor may deploy in a single trade.
-const MAX_TRADE_CASH_RATIO: f64 = 0.30;
+/// Set to 0.50 to match the half-Kelly upper bound for A+ setups described in MEMORY.txt.
+const MAX_TRADE_CASH_RATIO: f64 = 0.50;
 /// Minimum USD notional value for any professor-initiated trade (avoids dust trades).
 const MIN_TRADE_USD: f64 = 50.0;
 /// Maximum number of memory entries retained in the professor's rolling context window.
 const MAX_MEMORY_ENTRIES: usize = 30;
 /// Claude model used for all Professor AI calls.
 const CLAUDE_MODEL: &str = "claude-sonnet-4-6";
+/// Persona schema version. Bump when MEMORY.txt is materially rewritten — the next session
+/// will detect the version drift and reseed the professor: liquidate all positions to cash,
+/// clear rolling memory entries, refresh persona text, and reset the SPY month anchor.
+pub(crate) const PROFESSOR_PERSONA_VERSION: u32 = 1;
+/// Benchmark ticker — the persona is graded on month-to-date return vs this index.
+const BENCHMARK_TICKER: &str = "SPY";
 
 /// Daily cache for `morning_pulse` — reused within the same UTC day to avoid redundant Claude calls.
 pub static PULSE_CACHE: LazyLock<tokio::sync::RwLock<Option<(chrono::NaiveDate, String)>>> =
@@ -215,6 +222,7 @@ pub(crate) fn parse_sentiment(pulse: &str) -> String {
     "neutral".to_string()
 }
 
+#[allow(clippy::too_many_arguments, reason = "single-callsite prompt assembler; a context struct would just add noise")]
 pub(crate) async fn trading_session(
     entries_str: &str,
     pulse: &str,
@@ -222,11 +230,15 @@ pub(crate) async fn trading_session(
     midday_scores: &str,
     portfolio_str: &str,
     cash_usd: f64,
+    port_mtd_pct: f64,
+    spy_mtd_pct: f64,
     memory: &ProfessorMemory,
 ) -> Option<ProfessorResponse> {
     let max_per_trade = cash_usd * MAX_TRADE_CASH_RATIO;
+    let spread = port_mtd_pct - spy_mtd_pct;
     let user_prompt = format!(
         "Your recent trade log (last 7 days):\n{entries_str}\n\n\
+         Month-to-date scorecard:\n  Portfolio: {port_mtd_pct:+.2}%\n  SPY:       {spy_mtd_pct:+.2}%\n  Spread:    {spread:+.2}% (positive = beating the benchmark)\n\n\
          Today's market:\n{pulse}\nSentiment: {sentiment}\n\n\
          Positions and midday scores:\n{midday_scores}\n\n\
          Portfolio:\n{portfolio_str}\n\n\
@@ -234,7 +246,7 @@ pub(crate) async fn trading_session(
          apply_buy(ticker, asset_type: \"Stock\"|\"ETF\"|\"Crypto\", amount_usd)\n\
          apply_sell(ticker, sell_pct: 0.0-1.0)\n\n\
          CONSTRAINTS: cash={cash_usd:.2}, max_per_trade={max_per_trade:.2}, max_trades=3, min_position=50\n\n\
-         Only HIGH conviction trades — default to hold.\n\
+         Only HIGH conviction edge — default to hold. Buying SPY is a valid trade when nothing else has better forward EV.\n\
          Return ONLY JSON: {{\"reason\":\"...\",\"trades\":[{{\"fn\":\"apply_buy\",\"ticker\":\"XOM\",\"asset_type\":\"Stock\",\"amount_usd\":120.0}}]}}\n\
          No trades: {{\"reason\":\"...\",\"trades\":[]}}\n\
          Keep \"reason\" under 350 characters, plain text, no markdown."
@@ -292,19 +304,17 @@ pub(crate) async fn professor_daily_session(
         None
     };
 
-    // Write lock acquired here, snapshot taken, lock released before any async calls
-    let (uwu_creds, claim_creds, memory, portfolio_snapshot, held_tickers, pre_trade_cash_usd, pre_trade_positions) = {
+    // ── Phase 1: initialize memory + portfolio if missing (short write lock, no awaits inside) ──
+    {
         let mut ud = u.write().await;
-
-        // Ensure professor_memory is initialized (handles data loaded before this field existed)
         if let Some(core) = core_memory_init {
             ud.professor_memory = Some(data::ProfessorMemory {
                 core_behavior: core,
                 entries: std::collections::VecDeque::new(),
+                core_behavior_version: PROFESSOR_PERSONA_VERSION,
+                ..Default::default()
             });
         }
-
-        // Ensure ProfessorPort exists; if missing, create it funded from wallet balance
         if !ud.stock.portfolios.iter().any(|p| p.name == PROFESSOR_PORT) {
             let wallet = ud.get_creds().max(0);
             ud.sub_creds(wallet);
@@ -313,6 +323,67 @@ pub(crate) async fn professor_daily_session(
             ud.stock.portfolios.push(port);
             tracing::info!(wallet = wallet, "Professor: created missing ProfessorPort");
         }
+    }
+
+    // ── Phase 2: persona reseed — when MEMORY.txt has been materially rewritten and
+    //    PROFESSOR_PERSONA_VERSION bumped, liquidate every position to cash, clear the
+    //    rolling memory entries (so prior bullish/bearish bias doesn't carry over), and
+    //    reset the month anchor for a clean SPY-benchmark restart.
+    let needs_reseed = u.read().await.professor_memory.as_ref()
+        .is_none_or(|m| m.core_behavior_version != PROFESSOR_PERSONA_VERSION);
+    if needs_reseed {
+        let held_for_liq: Vec<String> = u.read().await.stock.portfolios.iter()
+            .find(|p| p.name == PROFESSOR_PORT)
+            .map(|p| p.positions.iter()
+                .filter(|x| !matches!(&x.asset_type, AssetType::Option(_)))
+                .map(|x| x.ticker.clone()).collect())
+            .unwrap_or_default();
+
+        let liq_prices: HashMap<String, (f64, String)> = if held_for_liq.is_empty() {
+            HashMap::new()
+        } else {
+            futures::future::join_all(
+                held_for_liq.iter().map(|t| { let t = t.clone(); async move { (t.clone(), fetch_quote_detail(&t).await) } })
+            ).await.into_iter().filter_map(|(t, q)| {
+                let q = q?;
+                let p = q.regular_market_price?;
+                Some((t, (p, q.display_name())))
+            }).collect()
+        };
+
+        let mut ud = u.write().await;
+        if let Some(port_idx) = ud.stock.find_portfolio_idx(PROFESSOR_PORT) {
+            let liq_targets: Vec<(String, f64, String, f64)> = ud.stock.portfolios[port_idx].positions.iter()
+                .filter(|p| !matches!(&p.asset_type, AssetType::Option(_)))
+                .filter_map(|p| liq_prices.get(&p.ticker)
+                    .map(|(price, name)| (p.ticker.clone(), p.quantity, name.clone(), *price)))
+                .collect();
+            let total_targets = liq_targets.len();
+            let mut liq_count = 0_usize;
+            for (ticker, qty, name, price_usd) in &liq_targets {
+                let price_creds = price_to_creds(*price_usd);
+                let stock = &mut ud.stock;
+                let (portfolios, history) = (&mut stock.portfolios, &mut stock.trade_history);
+                let port = &mut portfolios[port_idx];
+                if apply_sell(port, history, ticker, name, *qty, price_creds, PROFESSOR_PORT).is_some() {
+                    liq_count += 1;
+                }
+            }
+            tracing::info!(liquidated = liq_count, total = total_targets, "[Professor] reseed: liquidated positions to cash");
+        }
+        if let Some(mem) = ud.professor_memory.as_mut() {
+            mem.entries.clear();
+            mem.core_behavior_version = PROFESSOR_PERSONA_VERSION;
+            mem.month_anchor_date = None;
+            mem.month_anchor_portfolio_value_usd = None;
+            mem.month_anchor_spy_price = None;
+            tracing::info!(version = PROFESSOR_PERSONA_VERSION, "[Professor] reseed: cleared rolling memory, reset month anchor");
+        }
+    }
+
+    // ── Phase 3: snapshot — daily income (uwu/claim), sweep wallet, capture pre-trade state ──
+    let (uwu_creds, claim_creds, memory, portfolio_snapshot, held_tickers, pre_trade_cash_usd, pre_trade_positions) = {
+        let mut ud = u.write().await;
 
         let uwu_creds = crate::basic::simulate_uwu(&mut ud);
         // Only attempt claim if uwu rolled — if cooldown hit, bonus_count didn't change
@@ -357,6 +428,10 @@ pub(crate) async fn professor_daily_session(
     let mut seen: std::collections::HashSet<String> = held_tickers.iter().cloned().collect();
     let mut all_tickers = held_tickers; // move — held_tickers not used after this point
     all_tickers.extend(watch_tickers.into_iter().filter(|t| seen.insert(t.clone())));
+    // Always include the benchmark — needed for month anchor + MTD spread regardless of holdings
+    if seen.insert(BENCHMARK_TICKER.to_string()) {
+        all_tickers.push(BENCHMARK_TICKER.to_string());
+    }
     let price_results = futures::future::join_all(
         all_tickers.iter().map(|t| { let t = t.clone(); async move { let result = fetch_quote_detail(&t).await; (t, result) } })
     ).await;
@@ -372,6 +447,36 @@ pub(crate) async fn professor_daily_session(
     let value_before: f64 = pre_trade_cash_usd + pre_trade_positions.iter()
         .map(|(t, q)| prices.get(t).map_or(0.0, |(p, _, _)| *p) * q)
         .sum::<f64>();
+
+    // ── Month anchor + MTD compute ──
+    // On the first session of a new calendar month, snapshot the portfolio's total value and
+    // SPY's price. Every subsequent session in that month measures month-to-date return for
+    // both, so the persona's "beat SPY this month" goal has live numbers to react to.
+    let today_naive = Utc::now().date_naive();
+    let spy_price_now = prices.get(BENCHMARK_TICKER).map(|(p, _, _)| *p);
+    let (port_mtd_pct, spy_mtd_pct) = {
+        let mut ud = u.write().await;
+        ud.professor_memory.as_mut().map_or((0.0_f64, 0.0_f64), |mem| {
+            let needs_anchor = mem.month_anchor_date
+                .is_none_or(|d| d.month() != today_naive.month() || d.year() != today_naive.year());
+            if needs_anchor {
+                mem.month_anchor_date = Some(today_naive);
+                mem.month_anchor_portfolio_value_usd = Some(value_before);
+                mem.month_anchor_spy_price = spy_price_now;
+                tracing::info!(date = %today_naive, port_value = value_before, spy = ?spy_price_now,
+                    "[Professor] month anchor set");
+            }
+            let port_mtd = match mem.month_anchor_portfolio_value_usd {
+                Some(a) if a > 0.0 => (value_before - a) / a * 100.0,
+                _ => 0.0,
+            };
+            let spy_mtd = match (mem.month_anchor_spy_price, spy_price_now) {
+                (Some(a), Some(cur)) if a > 0.0 => (cur - a) / a * 100.0,
+                _ => 0.0,
+            };
+            (port_mtd, spy_mtd)
+        })
+    };
 
     let positions_with_prices = {
         let ur = u.read().await;
@@ -395,7 +500,7 @@ pub(crate) async fn professor_daily_session(
         .collect::<Vec<_>>().join("\n")
     };
 
-    let response = trading_session(&entries_str, &pulse, &sentiment, &midday_scores, &portfolio_snapshot, pre_trade_cash_usd, &memory).await;
+    let response = trading_session(&entries_str, &pulse, &sentiment, &midday_scores, &portfolio_snapshot, pre_trade_cash_usd, port_mtd_pct, spy_mtd_pct, &memory).await;
 
     // Fetch prices for any trade tickers Claude returned that weren't already in the watch list
     if let Some(ref resp) = response {
@@ -557,9 +662,14 @@ pub(crate) async fn professor_daily_session(
         0.0
     };
     let total_change_str = format!("{total_change_pct:+.2}%");
+    let mtd_spread = port_mtd_pct - spy_mtd_pct;
+    let mtd_line = format!(
+        "Portfolio: {port_mtd_pct:+.2}%  |  SPY: {spy_mtd_pct:+.2}%  |  Spread: {mtd_spread:+.2}%"
+    );
 
     let desc = format!(
         "**Daily Income**\n/uwu: {uwu_line}\n/claim: {claim_line}\n\n\
+         **Month-to-Date vs SPY**\n{mtd_line}\n\n\
          **Market Today**\n{pulse}\n\n\
          **Portfolio Changes**\n{trade_lines}\n\n\
          *{reason}*\n\n\

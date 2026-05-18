@@ -164,6 +164,9 @@ async fn main() {
                     prof.professor_memory = Some(data::ProfessorMemory {
                         core_behavior: core_behavior.clone(),
                         entries: std::collections::VecDeque::new(),
+                        // Cold-start at current persona version — no reseed needed since there's nothing to liquidate.
+                        core_behavior_version: professor::PROFESSOR_PERSONA_VERSION,
+                        ..Default::default()
                     });
                     let port = data::Portfolio::new("ProfessorPort".to_string());
                     prof.stock.portfolios.push(port);

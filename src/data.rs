@@ -1,6 +1,6 @@
 //! Shared bot state, user data models, and global constants.
 use crate::serenity;
-use chrono::prelude::{DateTime, Utc};
+use chrono::prelude::{DateTime, NaiveDate, Utc};
 use dashmap::DashMap;
 use std::collections::VecDeque;
 use poise::serenity_prelude::RoleId;
@@ -21,6 +21,19 @@ pub struct MemoryEntry {
 pub struct ProfessorMemory {
     pub core_behavior: String,
     pub entries: VecDeque<MemoryEntry>,
+    /// Persona schema version — when this trails `PROFESSOR_PERSONA_VERSION`, the next session
+    /// performs a clean reseed (liquidate all positions, clear entries, refresh persona).
+    #[serde(default)]
+    pub core_behavior_version: u32,
+    /// First session date of the current calendar month — anchors month-to-date return tracking.
+    #[serde(default)]
+    pub month_anchor_date: Option<NaiveDate>,
+    /// Total portfolio USD value at the month anchor.
+    #[serde(default)]
+    pub month_anchor_portfolio_value_usd: Option<f64>,
+    /// SPY price at the month anchor.
+    #[serde(default)]
+    pub month_anchor_spy_price: Option<f64>,
 }
 
 /// Minimum level required to unlock Gold Status and the elevated HYSA rate.
