@@ -1,0 +1,13 @@
+# Advisories accepted until serenity ships a release on rustls >= 0.23.
+# All six arrive via serenity 0.12.5 -> tokio-tungstenite 0.21 -> rustls 0.22 and only affect
+# the Discord gateway websocket TLS client; serenity 0.12.5 is the newest 0.12 release, so
+# `cargo update` cannot lift them. Re-check (and delete entries) when serenity/poise update.
+[advisories]
+ignore = [
+    "RUSTSEC-2026-0349", # rustls: unauthenticated ServerHello can downgrade later key exchange
+    "RUSTSEC-2026-0346", # rustls: Debug impls expose session secrets (we never Debug-log sessions)
+    "RUSTSEC-2026-0104", # rustls-webpki: panic in CRL parsing (no CRLs configured)
+    "RUSTSEC-2026-0099", # rustls-webpki: wildcard name-constraint acceptance
+    "RUSTSEC-2026-0098", # rustls-webpki: URI name-constraint acceptance
+    "RUSTSEC-2026-0049", # rustls-webpki: CRL distribution-point matching (no CRLs configured)
+]

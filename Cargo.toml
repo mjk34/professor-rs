@@ -2,10 +2,11 @@
 name = "professor-rs"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.91" # Duration::from_mins
 
 [dependencies]
 poise = { version = "0.6.1", features = ["cache", "collector"] }
-tokio = { version = "1.39.3", features = ["rt-multi-thread", "macros"] }
+tokio = { version = "1.39.3", features = ["rt-multi-thread", "macros", "signal"] }
 
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
