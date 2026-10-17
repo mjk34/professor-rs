@@ -1,8 +1,9 @@
 //! /leaderboard command — creds and fortune rankings with pagination.
 
 use crate::{data, serenity, Context, Error};
-use crate::helper::default_footer;
+use crate::helper::{default_footer, fetch_users, user_name};
 use poise::serenity_prelude::{EditMessage, futures, UserId};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -18,13 +19,26 @@ impl Sort {
     }
 }
 
-/// (`user_id`, `sort_key`, `display_label`, `username`)
-type Entry = (UserId, i64, String, String);
+/// Rows shown per leaderboard page.
+const PAGE_SIZE: usize = 10;
 
-fn build_page(entries: &[Entry], page: usize) -> String {
-    let start = page * 10;
+/// (`user_id`, `sort_key`, `display_label`)
+type Entry = (UserId, i64, String);
+
+/// (username, avatar URL) per user. Filled lazily for the rows actually shown, so a
+/// leaderboard costs at most one page of user lookups per view instead of one per user.
+type UserMeta = HashMap<UserId, (String, String)>;
+
+const fn page_count(entries: &[Entry]) -> usize {
+    let pages = entries.len().div_ceil(PAGE_SIZE);
+    if pages == 0 { 1 } else { pages }
+}
+
+fn build_page(entries: &[Entry], meta: &UserMeta, page: usize) -> String {
+    let start = page * PAGE_SIZE;
     let mut text = String::from("﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n```\n");
-    for (rank, (_, _, label, name)) in entries.iter().enumerate().skip(start).take(10) {
+    for (rank, (id, _, label)) in entries.iter().enumerate().skip(start).take(PAGE_SIZE) {
+        let name = meta.get(id).map_or("Unknown", |(n, _)| n.as_str());
         let name_col: String = name.chars().take(16).collect();
         text.push_str(&format!("{:<4} {:^16} {:>18}\n", format!("#{}", rank + 1), name_col, label));
     }
@@ -46,14 +60,18 @@ fn make_components(active: Sort) -> Vec<serenity::CreateActionRow> {
     ])]
 }
 
-fn make_embed(entries: &[Entry], sort: Sort, page: usize, thumbnail: &str) -> serenity::CreateEmbed {
-    let total_pages = entries.len().div_ceil(10).max(1);
+fn make_embed(entries: &[Entry], meta: &UserMeta, sort: Sort, page: usize) -> serenity::CreateEmbed {
+    let total_pages = page_count(entries);
+    let thumbnail = entries.first()
+        .and_then(|(id, ..)| meta.get(id))
+        .map(|(_, avatar)| avatar.clone())
+        .unwrap_or_default();
     serenity::CreateEmbed::new()
         .title(sort.title())
         .color(data::EMBED_CYAN)
-        .thumbnail(thumbnail.to_string())
+        .thumbnail(thumbnail)
         .description("Here lists the most accomplished in UwUversity!")
-        .field("Rankings", build_page(entries, page), false)
+        .field("Rankings", build_page(entries, meta, page), false)
         .field("Page", format!("{}/{}", page + 1, total_pages), false)
         .footer(default_footer())
 }
@@ -70,18 +88,13 @@ fn empty_embed(sort: Sort) -> serenity::CreateEmbed {
         .footer(default_footer())
 }
 
-struct Board<'a> {
-    entries: &'a [Entry],
-    thumb:   &'a str,
+struct Boards {
+    creds:   Vec<Entry>,
+    fortune: Vec<Entry>,
 }
 
-struct Boards<'a> {
-    creds:   Board<'a>,
-    fortune: Board<'a>,
-}
-
-impl<'a> Boards<'a> {
-    const fn get(&self, sort: Sort) -> &Board<'a> {
+impl Boards {
+    fn get(&self, sort: Sort) -> &[Entry] {
         match sort {
             Sort::Creds   => &self.creds,
             Sort::Fortune => &self.fortune,
@@ -89,9 +102,29 @@ impl<'a> Boards<'a> {
     }
 }
 
-fn render(boards: &Boards<'_>, sort: Sort, page: usize) -> serenity::CreateEmbed {
-    let board = boards.get(sort);
-    if board.entries.is_empty() { empty_embed(sort) } else { make_embed(board.entries, sort, page, board.thumb) }
+/// Looks up names/avatars for the given page plus the top entry (thumbnail), skipping
+/// users already resolved.
+async fn resolve_page(ctx: &serenity::Context, meta: &mut UserMeta, entries: &[Entry], page: usize) {
+    let mut missing: Vec<UserId> = Vec::new();
+    for (id, ..) in entries.first().into_iter().chain(entries.iter().skip(page * PAGE_SIZE).take(PAGE_SIZE)) {
+        if !meta.contains_key(id) && !missing.contains(id) {
+            missing.push(*id);
+        }
+    }
+    let fetched = fetch_users(ctx, missing.iter().copied()).await;
+    for (id, user) in missing.into_iter().zip(fetched) {
+        let avatar = user.as_ref().and_then(serenity::User::avatar_url).unwrap_or_default();
+        meta.insert(id, (user_name(user.as_ref()), avatar));
+    }
+}
+
+async fn render(ctx: &serenity::Context, boards: &Boards, meta: &mut UserMeta, sort: Sort, page: usize) -> serenity::CreateEmbed {
+    let entries = boards.get(sort);
+    if entries.is_empty() {
+        return empty_embed(sort);
+    }
+    resolve_page(ctx, meta, entries, page).await;
+    make_embed(entries, meta, sort, page)
 }
 
 /// show server rankings — use buttons to switch between Creds and Fortune
@@ -115,67 +148,43 @@ pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
             (*id, creds, luck_score, luck_label)
         })).await;
 
-    // Fetch username + avatar URL for every user concurrently — one API call per user,
-    // covers both the display name and the thumbnail we need for the top-ranked user.
-    let meta: Vec<(String, String)> =
-        futures::future::join_all(stats.iter().map(|(id, ..)| {
-            let ctx = serenity_ctx.clone();
-            let id = *id;
-            async move {
-                match id.to_user(&ctx).await {
-                    Ok(u) => (u.name.clone(), u.avatar_url().unwrap_or_default()),
-                    Err(_) => ("Unknown".to_string(), String::new()),
-                }
-            }
-        })).await;
-
     // Build the sorted leaderboard vectors.
     let mut creds_info:   Vec<Entry> = Vec::new();
     let mut fortune_info: Vec<Entry> = Vec::new();
 
-    for ((id, creds, luck_score, luck_label), (name, _)) in stats.iter().zip(meta.iter()) {
-        creds_info.push((*id, i64::from(*creds), creds.to_string(), name.clone()));
+    for (id, creds, luck_score, luck_label) in stats {
+        creds_info.push((id, i64::from(creds), creds.to_string()));
 
-        if *luck_score > 0 {
+        if luck_score > 0 {
             // Numeric score shown alongside tier so ties within "Blessed" are distinguishable.
-            fortune_info.push((*id, i64::from(*luck_score), format!("{luck_label} ({luck_score})"), name.clone()));
+            fortune_info.push((id, i64::from(luck_score), format!("{luck_label} ({luck_score})")));
         }
     }
 
-    // Primary: sort key descending. Secondary: username ascending — deterministic tie-breaking.
-    creds_info.sort_by(|a, b| b.1.cmp(&a.1).then(a.3.cmp(&b.3)));
-    fortune_info.sort_by(|a, b| b.1.cmp(&a.1).then(a.3.cmp(&b.3)));
+    // Primary: sort key descending. Secondary: user id — deterministic tie-breaking without
+    // needing every username up front.
+    creds_info.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    fortune_info.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
 
     if creds_info.is_empty() {
         ctx.say("No users found.").await?;
         return Ok(());
     }
 
-    // Resolve thumbnails from already-fetched meta — no extra API calls needed.
-    let avatar_of = |id: UserId| -> String {
-        stats.iter().zip(meta.iter())
-            .find(|((uid, ..), _)| *uid == id)
-            .map(|(_, (_, url))| url.clone())
-            .unwrap_or_default()
-    };
-    let creds_thumb   = avatar_of(creds_info[0].0);
-    let fortune_thumb = fortune_info.first().map_or_else(|| creds_thumb.clone(), |(id, ..)| avatar_of(*id));
+    let boards = Boards { creds: creds_info, fortune: fortune_info };
+    let mut meta = UserMeta::new();
 
-    let boards = Boards {
-        creds:   Board { entries: &creds_info,   thumb: creds_thumb.as_str()   },
-        fortune: Board { entries: &fortune_info, thumb: fortune_thumb.as_str() },
-    };
+    let mut sort = Sort::Creds;
+    let mut page: usize = 0;
 
+    let first = render(&serenity_ctx, &boards, &mut meta, sort, page).await;
     let reply = ctx.send(poise::CreateReply::default()
-        .embed(make_embed(&creds_info, Sort::Creds, 0, &creds_thumb))
-        .components(make_components(Sort::Creds))
+        .embed(first)
+        .components(make_components(sort))
     ).await?;
     let mut msg = reply.into_message().await?;
 
     // Interaction loop — no spawn, no Arc<RwLock<Message>>, no silent unwrap panics.
-    let mut sort = Sort::Creds;
-    let mut page: usize = 0;
-
     loop {
         let Some(press) = msg
             .await_component_interaction(&serenity_ctx)
@@ -183,7 +192,7 @@ pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
             .await
         else {
             // Timeout — grey out the current view and strip buttons.
-            let embed = render(&boards, sort, page).color(data::EMBED_ERROR);
+            let embed = render(&serenity_ctx, &boards, &mut meta, sort, page).await.color(data::EMBED_ERROR);
             msg.edit(&serenity_ctx, EditMessage::default().embed(embed).components(vec![])).await.ok();
             break;
         };
@@ -191,7 +200,7 @@ pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
         press.create_response(&serenity_ctx, serenity::CreateInteractionResponse::Acknowledge).await.ok();
 
         // Compute page bounds from the current sort before applying the new button action.
-        let total_pages = boards.get(sort).entries.len().div_ceil(10).max(1);
+        let total_pages = page_count(boards.get(sort));
 
         match press.data.custom_id.as_str() {
             "lb_creds"   => { sort = Sort::Creds;   page = 0; }
@@ -201,9 +210,39 @@ pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
             _            => continue,
         }
 
-        let embed = render(&boards, sort, page);
+        let embed = render(&serenity_ctx, &boards, &mut meta, sort, page).await;
         msg.edit(&serenity_ctx, EditMessage::default().embed(embed).components(make_components(sort))).await.ok();
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entries(n: u64) -> Vec<Entry> {
+        (1..=n).map(|i| (UserId::new(i), 0, format!("v{i}"))).collect()
+    }
+
+    #[test]
+    fn page_count_bounds() {
+        assert_eq!(page_count(&[]), 1);
+        assert_eq!(page_count(&entries(10)), 1);
+        assert_eq!(page_count(&entries(11)), 2);
+    }
+
+    #[test]
+    fn build_page_ranks_slices_and_truncates_names() {
+        let list = entries(12);
+        let mut meta = UserMeta::new();
+        meta.insert(UserId::new(11), ("ジョン・スミス・ジョン・スミス・長い名前".to_string(), String::new()));
+        let page2 = build_page(&list, &meta, 1);
+        assert!(page2.contains("#11") && page2.contains("#12") && !page2.contains("#10 "));
+        assert!(page2.contains("Unknown")); // #12 not resolved
+        assert!(page2.contains(&"ジョン・スミス・ジョン・スミス・長い名前".chars().take(16).collect::<String>()));
+        assert!(!page2.contains("長い名前"));
+        // Past the end: empty table, no panic.
+        assert!(!build_page(&list, &meta, 5).contains('#'));
+    }
 }

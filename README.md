@@ -43,12 +43,25 @@ Claude Code Run Skills: `/sanity` → `/rust-polish` → `/preflight` → push c
 
 ### Economy
 - `/uwu` — claim your daily creds roll (21h cooldown, d20-based rewards)
-- `/claim` — bonus creds every 3 daily rolls
+- `/claim_bonus` — bonus creds every 3 daily rolls
 - `/wallet` — view your creds, level, XP, and luck stats
-- Voice activity rewards — earn creds passively for time spent in voice channels
+- `/buy_tickets` — spend creds on Battle Pass raffle tickets
+- `/leaderboard` — creds and rolling-fortune rankings
+- Voice activity rewards — earn creds passively for time spent in voice channels (not while deafened)
 
 ### Clips & Submissions
-- `/submit` — submit a game clip for Clip Night
-- `/my_clips` — view your submitted clips
-- `/server_clips` — browse all server submissions
-- `/next_clip` — pull a random unrated clip for review
+- `/submit_clip` — submit a YouTube or Medal clip for Clip Night
+- `/my_clips` — view and delete your submitted clips
+- `/server_clips` — *(mod)* browse all server submissions and top-rated clips
+- `/next_clip` — *(mod)* pull a random unrated clip for the room to vote on
+
+### Server
+- `/ping` — check the bot is alive
+- `/info` — server stats
+- `/voice_status` — who is in voice and for how long
+
+### Moderation
+- `/give_creds` / `/take_creds` — *(mod)* adjust creds for one or more mentioned users
+- Birthday reminders from `.eventdb` — advance notice to the mod channel, day-of ping in general
+
+Logging defaults to `info`; override with `RUST_LOG`.

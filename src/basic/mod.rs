@@ -7,11 +7,23 @@ mod leaderboard;
 #[doc(inline)] pub use leaderboard::leaderboard;
 
 use crate::{data, serenity, Context, Error};
-use crate::helper::{creds_to_price, default_footer};
+use crate::helper::{creds_to_price, default_footer, fetch_users, user_name};
 use poise::serenity_prelude::UserId;
-use serenity::Color;
 use std::collections::HashMap;
 use std::sync::Arc;
+
+/// Cuts `text` to at most `max` bytes at the last space (on a char boundary), adding "...".
+fn truncate_at_space(text: &str, max: usize) -> String {
+    if text.len() <= max {
+        return text.to_string();
+    }
+    let mut end = max;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    let cut = text[..end].rfind(' ').unwrap_or(end);
+    format!("{}...", &text[..cut])
+}
 
 fn fmt_hhmm(d: chrono::TimeDelta) -> String {
     let total_min = d.num_seconds().max(0) / 60; // clamp clock skew (now < joined)
@@ -73,7 +85,6 @@ pub async fn wallet(ctx: Context<'_>) -> Result<(), Error> {
 #[poise::command(slash_command, guild_only)]
 pub async fn voice_status(ctx: Context<'_>) -> Result<(), Error> {
     use crate::data::VoiceUser;
-    use poise::serenity_prelude::futures;
     let data = &ctx.data().voice_users;
 
     let mut out: Vec<(UserId, VoiceUser)> = data.iter().map(|x| (*x.key(), x.value().clone())).collect();
@@ -87,17 +98,15 @@ pub async fn voice_status(ctx: Context<'_>) -> Result<(), Error> {
             .description("No one in voice")
             .color(data::EMBED_ERROR)
     } else {
-        let users = futures::future::join_all(
-            out.iter().map(|(id, _)| id.to_user(&ctx))
-        ).await;
+        let users = fetch_users(ctx.serenity_context(), out.iter().map(|(id, _)| *id)).await;
 
         let mut embed = serenity::CreateEmbed::new()
             .title("Voice Status")
-            .color(Color::GOLD)
-            .thumbnail(ctx.guild().unwrap().icon_url().unwrap_or_default());
+            .color(data::EMBED_GOLD)
+            .thumbnail(ctx.guild().and_then(|g| g.icon_url()).unwrap_or_default());
 
         for ((_, vu), user_result) in out.iter().zip(users) {
-            let name = user_result.map_or_else(|_| "Unknown".to_string(), |u| u.name);
+            let name = user_name(user_result.as_ref());
             let mut user_info = fmt_hhmm(now - vu.joined);
             if let Some(mute_time) = vu.mute {
                 user_info += &format!(" | Mute: {}", fmt_hhmm(now - mute_time));
@@ -117,11 +126,11 @@ pub async fn voice_status(ctx: Context<'_>) -> Result<(), Error> {
 }
 
 /// show info about this server
-#[poise::command(slash_command)]
+#[poise::command(slash_command, guild_only)]
 pub async fn info(ctx: Context<'_>) -> Result<(), Error> {
-    let guild = match ctx.guild() {
-        Some(guild) => guild.clone(),
-        None => return Ok(()),
+    let Some(guild) = ctx.guild().map(|g| g.clone()) else {
+        ctx.say("Server info isn't available right now — try again in a moment.").await?;
+        return Ok(());
     };
 
     let guild_name = guild.name.clone();
@@ -145,12 +154,7 @@ pub async fn info(ctx: Context<'_>) -> Result<(), Error> {
             .collect::<Vec<String>>()
             .join(" ");
         const MAX_EMOJI_LEN: usize = 3700;
-        if raw.len() > MAX_EMOJI_LEN {
-            let cut = raw[..MAX_EMOJI_LEN].rfind(' ').unwrap_or(MAX_EMOJI_LEN);
-            format!("{}...", &raw[..cut])
-        } else {
-            raw
-        }
+        truncate_at_space(&raw, MAX_EMOJI_LEN)
     };
 
     ctx.send(poise::CreateReply::default().embed(
@@ -165,4 +169,24 @@ pub async fn info(ctx: Context<'_>) -> Result<(), Error> {
             .footer(default_footer()),
     )).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fmt_hhmm_formats_and_clamps() {
+        assert_eq!(fmt_hhmm(chrono::TimeDelta::minutes(5)), "00:05");
+        assert_eq!(fmt_hhmm(chrono::TimeDelta::minutes(61)), "01:01");
+        assert_eq!(fmt_hhmm(chrono::TimeDelta::hours(100)), "100:00");
+        assert_eq!(fmt_hhmm(chrono::TimeDelta::minutes(-3)), "00:00"); // clock skew
+    }
+
+    #[test]
+    fn truncate_at_space_cuts_on_word_and_char_boundaries() {
+        assert_eq!(truncate_at_space("short", 10), "short");
+        assert_eq!(truncate_at_space("aaa bbb ccc", 9), "aaa bbb...");
+        assert_eq!(truncate_at_space("ééééé", 3), "é..."); // byte 3 is mid-char
+    }
 }

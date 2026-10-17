@@ -9,10 +9,10 @@
 //!     [x] - `next_clip`                                                 !
 //!---------------------------------------------------------------------!
 
-use crate::data::{self, ClipData};
-use crate::helper::default_footer;
+use crate::data::{self, clip_title_display, ClipData, SubmissionStyle, MAX_CLIP_RATING};
+use crate::helper::{check_mod, default_footer, escape_markdown, fetch_users, user_name};
 use crate::{serenity, Context, Error};
-use poise::serenity_prelude::{futures, EditMessage, ReactionType};
+use poise::serenity_prelude::{EditMessage, ReactionType};
 use rand::seq::SliceRandom;
 use rand::thread_rng;
 use regex::Regex;
@@ -25,22 +25,30 @@ const MY_CLIPS_TIMEOUT: Duration = Duration::from_secs(30);
 /// Max idle time between votes in `/next_clip` before the current score is finalized.
 const VOTE_IDLE_TIMEOUT: Duration = Duration::from_mins(10);
 
-static YOUTUBE_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^(https?://)?(www\.)?(youtube\.com/watch\?v=|youtu\.be/)\S+$").expect("literal regex")
-});
-static MEDAL_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^https?://medal\.tv/clips/\S+$").expect("literal regex"));
+// Button custom ids, shared by the button builders and the press handlers.
+/// `/my_clips` delete button for slot N: `delete-clip-N`.
+const DELETE_CLIP_PREFIX: &str = "delete-clip-";
+/// `/next_clip` vote button for N stars: `vote-clip-N`.
+const VOTE_CLIP_PREFIX: &str = "vote-clip-";
+/// `/next_clip` button a moderator presses to end voting.
+const VOTE_DONE_ID: &str = "vote-done";
+/// Rated clips listed at the top of `/server_clips`.
+const TOP_RATED_COUNT: usize = 10;
 
-pub async fn check_mod(ctx: Context<'_>) -> Result<bool, Error> {
-    let mod_id = ctx.data().mod_id;
-    let Some(guild_id) = ctx.guild_id() else { return Ok(false); };
-    if let Ok(b) = ctx.author().has_role(ctx, guild_id, mod_id).await {
-        if b {
-            return Ok(true);
-        }
-    }
-    Ok(false)
-}
+/// Embed descriptions are capped at 4096 chars by Discord; leave headroom for page headers.
+const EMBED_PAGE_LIMIT: usize = 3900;
+
+/// Accepted `YouTube` links. Video ids, path segments and query strings are restricted to
+/// URL-safe characters with no markdown meaning — `\S+` let `)[text](https://evil)` ride
+/// along and form a masked link.
+static YOUTUBE_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^(https?://)?(www\.)?(youtube\.com/watch\?v=[\w-]+(&[\w=&.%-]*)?|youtu\.be/[\w-]+(\?[\w=&.%-]*)?)$")
+        .expect("literal regex")
+});
+/// Accepted Medal clip links (same character restrictions as [`YOUTUBE_REGEX`]).
+static MEDAL_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^https?://medal\.tv/clips/[\w-]+(/[\w-]+)*/?(\?[\w=&.%-]*)?$").expect("literal regex")
+});
 
 /// Mean of all votes. Summed as u32 — a u8 sum overflows past 51 five-star votes.
 fn average_vote(votes: &HashMap<serenity::UserId, u8>) -> f64 {
@@ -55,14 +63,52 @@ fn is_youtube_or_medal_url(url: &str) -> bool {
     YOUTUBE_REGEX.is_match(url) || MEDAL_REGEX.is_match(url)
 }
 
+/// Star rating from a vote button's custom id; `None` for anything outside the star range.
+fn parse_vote(custom_id: &str) -> Option<u8> {
+    custom_id
+        .strip_prefix(VOTE_CLIP_PREFIX)?
+        .parse::<u8>()
+        .ok()
+        .filter(|v| (1..=MAX_CLIP_RATING).contains(v))
+}
+
+/// Packs sections into embed-sized pages, keeping each section whole where possible and
+/// truncating (on a char boundary) any single section longer than `limit`.
+fn paginate(sections: Vec<String>, limit: usize) -> Vec<String> {
+    let mut pages: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut current_chars = 0;
+    for mut section in sections {
+        let mut chars = section.chars().count();
+        if chars > limit {
+            section = section.chars().take(limit.saturating_sub(1)).chain(std::iter::once('…')).collect();
+            chars = limit;
+        }
+        if current_chars > 0 && current_chars + chars > limit {
+            pages.push(std::mem::take(&mut current));
+            current_chars = 0;
+        }
+        current.push_str(&section);
+        current_chars += chars;
+    }
+    if !current.is_empty() {
+        pages.push(current);
+    }
+    pages
+}
+
 /// submit a youtube or medal clip for clip night!
 #[poise::command(slash_command)]
 pub async fn submit_clip(
     ctx: Context<'_>,
-    #[description = "the name of your clip"] title: String,
-    #[description = "the youtube or medal link of your clip"] link: String,
+    #[description = "the name of your clip"]
+    #[max_length = 100] // keep in sync with data::MAX_CLIP_TITLE_LEN
+    title: String,
+    #[description = "the youtube or medal link of your clip"]
+    #[max_length = 200] // generous for real YouTube/Medal URLs; caps embed length
+    link: String,
 ) -> Result<(), Error> {
-    if ctx.channel_id().get().to_string() != ctx.data().sub_chat {
+    if ctx.channel_id() != ctx.data().sub_chat {
         ctx.send(poise::CreateReply::default()
             .ephemeral(true)
             .embed(serenity::CreateEmbed::default()
@@ -94,7 +140,7 @@ pub async fn submit_clip(
 
     let avatar = user.avatar_url().unwrap_or_default();
 
-    let desc = format!("Title: \u{3000}**{title}**\nLink: \u{3000}**{link}**\n");
+    let desc = format!("Title: \u{3000}**{}**\nLink: \u{3000}**{link}**\n", clip_title_display(&title));
 
     let clip = ClipData::new(title, link);
 
@@ -134,8 +180,7 @@ pub async fn submit_clip(
 /// [!] MODERATOR - view all submitted clips sorted by users
 #[poise::command(slash_command, track_edits, check = "check_mod")]
 pub async fn server_clips(ctx: Context<'_>) -> Result<(), Error> {
-    let guild = match ctx.guild() { Some(g) => g.clone(), None => return Ok(()) };
-    let icon_url = guild.icon_url().unwrap_or_default();
+    let icon_url = ctx.guild().and_then(|g| g.icon_url()).unwrap_or_default();
     let serenity_ctx = ctx.serenity_context().clone();
 
     // Snapshot Arc refs — no shard locks held across any await point.
@@ -143,43 +188,27 @@ pub async fn server_clips(ctx: Context<'_>) -> Result<(), Error> {
         .map(|e| (*e.key(), Arc::clone(e.value())))
         .collect();
 
-    // Parallel: read clips + resolve username for every user concurrently.
-    let resolved: Vec<(String, Vec<ClipData>, Vec<String>)> =
-        futures::future::join_all(user_arcs.iter().map(|(id, u)| {
-            let ctx = serenity_ctx.clone();
-            let id = *id;
-            async move {
-                let ud = u.read().await;
-                let clips: Vec<ClipData> = ud.submits.iter().flatten().cloned().collect();
-                let submissions = ud.get_submissions(true, false);
-                drop(ud);
-                let name = match id.to_user(&ctx).await {
-                    Ok(u) => u.name,
-                    Err(_) => "Unknown".to_string(),
-                };
-                (name, clips, submissions)
-            }
-        })).await;
+    struct Submitter {
+        id: serenity::UserId,
+        /// Rated clips only — candidates for the top-rated list.
+        rated: Vec<ClipData>,
+        listing: Vec<String>,
+    }
 
-    // (author_name, clip) for sorting/top-10 — no second to_user call needed.
-    let mut all_clips: Vec<(String, ClipData)> = Vec::new();
-    let mut desc = String::new();
-
-    for (name, clips, submissions) in &resolved {
-        for clip in clips {
-            all_clips.push((name.clone(), clip.clone()));
-        }
-        if !submissions.is_empty() {
-            desc += &format!(
-                "\n**{}:**\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n",
-                name.replace('_', "")
-            );
-            desc += &submissions.join("\n ");
-            desc += "\n";
+    // Read clips first so usernames are only resolved (possibly over HTTP) for submitters.
+    let mut submitters: Vec<Submitter> = Vec::new();
+    for (id, u) in &user_arcs {
+        let ud = u.read().await;
+        if ud.has_submissions() {
+            submitters.push(Submitter {
+                id: *id,
+                rated: ud.submits.iter().flatten().filter(|c| c.rating.is_some()).cloned().collect(),
+                listing: ud.get_submissions(SubmissionStyle::Scored),
+            });
         }
     }
 
-    if all_clips.is_empty() {
+    if submitters.is_empty() {
         ctx.send(poise::CreateReply::default().embed(
             serenity::CreateEmbed::default()
                 .title("Server Clips")
@@ -191,36 +220,50 @@ pub async fn server_clips(ctx: Context<'_>) -> Result<(), Error> {
         return Ok(());
     }
 
-    let mut rated: Vec<&(String, ClipData)> =
-        all_clips.iter().filter(|(_, c)| c.rating.is_some()).collect();
+    let names: Vec<String> = fetch_users(&serenity_ctx, submitters.iter().map(|s| s.id)).await
+        .iter()
+        .map(|u| escape_markdown(&user_name(u.as_ref())))
+        .collect();
+
+    // (author_name, clip) for the top-10 list.
+    let mut rated: Vec<(&str, &ClipData)> = submitters.iter().zip(&names)
+        .flat_map(|(s, name)| s.rated.iter().map(move |c| (name.as_str(), c)))
+        .collect();
     rated.sort_by(|a, b| {
         b.1.rating.unwrap_or(0.0)
             .partial_cmp(&a.1.rating.unwrap_or(0.0))
             .unwrap_or(std::cmp::Ordering::Equal)
     });
 
+    let mut sections: Vec<String> = Vec::new();
     if !rated.is_empty() {
         let mut top_desc = "\n**Top Rated Clips:**\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n".to_string();
-        for (name, c) in rated.iter().take(10) {
-            top_desc += &format!(
-                "[{}/5] **[{}]({})** - {}\n",
-                c.rating.unwrap_or(0.0),
-                c.title,
-                c.link,
-                name.replace('_', "")
-            );
+        for (name, c) in rated.iter().take(TOP_RATED_COUNT) {
+            top_desc += &format!("[{}/{MAX_CLIP_RATING}] **{}** - {name}\n", c.rating.unwrap_or(0.0), c.markdown_link());
         }
-        desc = top_desc + "-\n" + &desc;
+        top_desc += "-\n";
+        sections.push(top_desc);
+    }
+    for (s, name) in submitters.iter().zip(&names) {
+        sections.push(format!(
+            "\n**{name}:**\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\n{}\n",
+            s.listing.join("\n ")
+        ));
     }
 
-    ctx.send(poise::CreateReply::default().embed(
-        serenity::CreateEmbed::default()
-            .title("Server Clips")
-            .thumbnail(&icon_url)
-            .description(desc)
-            .color(data::EMBED_MOD)
-            .footer(default_footer()),
-    )).await?;
+    let pages = paginate(sections, EMBED_PAGE_LIMIT);
+    let page_count = pages.len();
+    for (i, page) in pages.into_iter().enumerate() {
+        let title = if page_count > 1 { format!("Server Clips ({}/{page_count})", i + 1) } else { "Server Clips".to_string() };
+        ctx.send(poise::CreateReply::default().embed(
+            serenity::CreateEmbed::default()
+                .title(title)
+                .thumbnail(&icon_url)
+                .description(page)
+                .color(data::EMBED_MOD)
+                .footer(default_footer()),
+        )).await?;
+    }
 
     Ok(())
 }
@@ -233,9 +276,10 @@ pub async fn my_clips(ctx: Context<'_>) -> Result<(), Error> {
     let u = Arc::clone(ctx.data().users.get(&author.id).unwrap().value());
     let serenity_ctx = ctx.serenity_context().clone();
 
-    let (desc, button_count) = {
+    // (slot, submit date) per filled slot: buttons are labelled by slot, deletion is by date.
+    let (desc, filled_slots) = {
         let ud = u.read().await;
-        if ud.submits.is_empty() {
+        if !ud.has_submissions() {
             ctx.send(poise::CreateReply::default().embed(
                 serenity::CreateEmbed::default()
                     .title("My Clips")
@@ -247,15 +291,20 @@ pub async fn my_clips(ctx: Context<'_>) -> Result<(), Error> {
             )).await?;
             return Ok(());
         }
-        (ud.get_submissions(false, true).join("\n"), ud.submits.len())
+        let filled: Vec<(usize, chrono::DateTime<chrono::Utc>)> = ud.submits.iter().enumerate()
+            .filter_map(|(i, slot)| slot.as_ref().map(|c| (i, c.date)))
+            .collect();
+        (ud.get_submissions(SubmissionStyle::Numbered).join("\n"), filled)
     };
 
-    let buttons: Vec<_> = (0..button_count).map(|i| {
-        let emoji = ReactionType::Unicode(data::NUMBER_EMOJS[i].to_string());
-        serenity::CreateButton::new(format!("delete-clip-{i}"))
+    // One button per filled slot, labelled with that slot's keycap (matches the list above).
+    let buttons: Vec<_> = filled_slots.iter().filter_map(|&(i, _)| {
+        let emoji = ReactionType::Unicode((*data::NUMBER_EMOJS.get(i)?).to_string());
+        Some(
+        serenity::CreateButton::new(format!("{DELETE_CLIP_PREFIX}{i}"))
             .label("")
             .emoji(emoji)
-            .style(serenity::ButtonStyle::Secondary)
+            .style(serenity::ButtonStyle::Secondary))
     }).collect();
 
     let reply = ctx.send(poise::CreateReply::default()
@@ -290,11 +339,12 @@ pub async fn my_clips(ctx: Context<'_>) -> Result<(), Error> {
 
     press.create_response(&serenity_ctx, serenity::CreateInteractionResponse::Acknowledge).await.ok();
 
-    let Some(i) = press.data.custom_id.strip_prefix("delete-clip-")
+    let Some(i) = press.data.custom_id.strip_prefix(DELETE_CLIP_PREFIX)
         .and_then(|s| s.parse::<usize>().ok())
     else { return Ok(()); };
 
-    u.write().await.remove_submit(i);
+    let Some(&(_, date)) = filled_slots.iter().find(|(slot, _)| *slot == i) else { return Ok(()); };
+    u.write().await.remove_submit(date);
 
     msg.edit(&serenity_ctx, EditMessage::default()
         .embed(serenity::CreateEmbed::new()
@@ -313,8 +363,7 @@ pub async fn my_clips(ctx: Context<'_>) -> Result<(), Error> {
 /// [!] MODERATOR - CLIP NIGHT ONLY - get the next clip to view and rate
 #[poise::command(slash_command, track_edits, check = "check_mod")]
 pub async fn next_clip(ctx: Context<'_>) -> Result<(), Error> {
-    let guild = match ctx.guild() { Some(g) => g.clone(), None => return Ok(()) };
-    let icon_url = guild.icon_url().unwrap_or_default();
+    let icon_url = ctx.guild().and_then(|g| g.icon_url()).unwrap_or_default();
     let serenity_ctx = ctx.serenity_context().clone();
     let mod_id = ctx.data().mod_id;
 
@@ -324,13 +373,12 @@ pub async fn next_clip(ctx: Context<'_>) -> Result<(), Error> {
         .collect();
 
     // Collect unrated clip candidates (sequential read, but no DashMap locks held).
-    let mut candidates: Vec<(Arc<tokio::sync::RwLock<crate::data::UserData>>, usize)> = Vec::new();
+    // (owner, clip) — the clip is a snapshot; its date identifies it when the rating is saved.
+    let mut candidates: Vec<(Arc<tokio::sync::RwLock<crate::data::UserData>>, ClipData)> = Vec::new();
     for u in &user_arcs {
         let ud = u.read().await;
-        for (idx, slot) in ud.submits.iter().enumerate() {
-            if matches!(slot, Some(c) if c.rating.is_none()) {
-                candidates.push((Arc::clone(u), idx));
-            }
+        for clip in ud.submits.iter().flatten().filter(|c| c.rating.is_none()) {
+            candidates.push((Arc::clone(u), clip.clone()));
         }
     }
 
@@ -347,23 +395,11 @@ pub async fn next_clip(ctx: Context<'_>) -> Result<(), Error> {
         return Ok(());
     }
 
-    let (user_arc, clip_idx) = {
-        let choice = candidates.choose(&mut thread_rng()).unwrap(); // safe: non-empty
-        (Arc::clone(&choice.0), choice.1)
-    };
+    let (user_arc, clip) = candidates.choose(&mut thread_rng()).unwrap(); // safe: non-empty
 
-    let (clip_title, clip_link) = {
-        let ud = user_arc.read().await;
-        let Some(Some(clip)) = ud.submits.get(clip_idx) else {
-            ctx.say("That clip is no longer available.").await?;
-            return Ok(());
-        };
-        (clip.title.clone(), clip.link.clone())
-    };
-
-    let vote_buttons: Vec<_> = (1..=5).map(|i| {
-        let emoji = ReactionType::Unicode(data::NUMBER_EMOJS[i].to_string());
-        serenity::CreateButton::new(format!("vote-clip-{i}"))
+    let vote_buttons: Vec<_> = (1..=MAX_CLIP_RATING).map(|i| {
+        let emoji = ReactionType::Unicode(data::NUMBER_EMOJS[usize::from(i)].to_string());
+        serenity::CreateButton::new(format!("{VOTE_CLIP_PREFIX}{i}"))
             .label("")
             .emoji(emoji)
             .style(serenity::ButtonStyle::Secondary)
@@ -372,13 +408,18 @@ pub async fn next_clip(ctx: Context<'_>) -> Result<(), Error> {
     let components = vec![
         serenity::CreateActionRow::Buttons(vote_buttons),
         serenity::CreateActionRow::Buttons(vec![
-            serenity::CreateButton::new("vote-done")
+            serenity::CreateButton::new(VOTE_DONE_ID)
                 .label("Done")
                 .style(serenity::ButtonStyle::Danger),
         ]),
     ];
 
-    ctx.send(poise::CreateReply::default().content(format!("**{clip_title}**\n{clip_link}"))).await?;
+    // Plain message content (not an embed) so Discord previews the video. Mentions are
+    // disabled — the title is user text and could otherwise ping @everyone.
+    ctx.send(poise::CreateReply::default()
+        .content(format!("**{}**\n{}", clip_title_display(&clip.title), clip.link))
+        .allowed_mentions(serenity::CreateAllowedMentions::new())
+    ).await?;
     let reply = ctx.send(poise::CreateReply::default()
         .embed(serenity::CreateEmbed::default()
             .title("Next Clip")
@@ -392,33 +433,30 @@ pub async fn next_clip(ctx: Context<'_>) -> Result<(), Error> {
     let mut msg = reply.into_message().await?;
 
     // Voting loop — no spawn, no AtomicF64, no DashMap for voted_users.
-    let mut score = 0.0_f64;
     let mut voted_users: HashMap<serenity::UserId, u8> = HashMap::new();
 
-    let final_score = loop {
+    loop {
         let Some(press) = msg
             .await_component_interaction(&serenity_ctx)
             .timeout(VOTE_IDLE_TIMEOUT)
             .await
         else {
-            break score; // timeout — finalize with current score
+            break; // idle timeout — finalize with the votes so far
         };
 
         press.create_response(&serenity_ctx, serenity::CreateInteractionResponse::Acknowledge).await.ok();
 
-        if press.data.custom_id == "vote-done" {
+        if press.data.custom_id == VOTE_DONE_ID {
             let is_mod = press.member.as_ref()
                 .is_some_and(|m| m.roles.contains(&mod_id));
             if !is_mod { continue; }
-            break score;
+            break;
         }
 
-        let Some(i) = press.data.custom_id.strip_prefix("vote-clip-")
-            .and_then(|s| s.parse::<u8>().ok())
-        else { continue; };
+        let Some(vote) = parse_vote(&press.data.custom_id) else { continue; };
 
-        voted_users.insert(press.user.id, i);
-        score = average_vote(&voted_users);
+        voted_users.insert(press.user.id, vote);
+        let score = average_vote(&voted_users);
 
         msg.edit(&serenity_ctx, EditMessage::default()
             .embed(serenity::CreateEmbed::new()
@@ -428,16 +466,25 @@ pub async fn next_clip(ctx: Context<'_>) -> Result<(), Error> {
                 .colour(data::EMBED_DEFAULT)
                 .footer(default_footer())))
             .await.ok();
-    };
-
-    if let Some(Some(clip)) = user_arc.write().await.submits.get_mut(clip_idx) {
-        clip.rating = Some(final_score);
     }
+
+    // No votes (idle timeout or Done pressed straight away): leave the clip unrated so it
+    // stays in the clip-night queue instead of being filed as a 0/5.
+    let description = if voted_users.is_empty() {
+        "No votes — this clip stays in the queue.".to_string()
+    } else {
+        let final_score = average_vote(&voted_users);
+        // Voting can run for a long time; the owner may have deleted the clip meanwhile.
+        if !user_arc.write().await.rate_submit(clip.date, final_score) {
+            tracing::warn!("next_clip: clip was removed during voting — score discarded");
+        }
+        format!("Final Score: **{final_score:.2}**")
+    };
 
     msg.edit(&serenity_ctx, EditMessage::default()
         .embed(serenity::CreateEmbed::new()
             .title("Next Clip")
-            .description(format!("Final Score: **{final_score:.2}**"))
+            .description(description)
             .thumbnail(&icon_url)
             .image("https://cdn.discordapp.com/attachments/1196582162057662484/1205354792621309972/tenor_5.gif?ex=65d81120&is=65c59c20&hm=b7661397c96231060492b909d1d7f2025bcfa91c166618611f612e95551be35a&")
             .colour(data::EMBED_MOD)
@@ -467,6 +514,52 @@ mod tests {
         assert!(!is_youtube_or_medal_url("[click](https://evil)youtu.be/a"));
         assert!(!is_youtube_or_medal_url("https://youtu.be/a b"));
         assert!(!is_youtube_or_medal_url("https://medal.tv/clips/"));
+    }
+
+    #[test]
+    fn clip_url_rejects_markdown_suffix() {
+        assert!(!is_youtube_or_medal_url("https://youtu.be/x)**[FreeNitro](https://evil.example)"));
+        assert!(!is_youtube_or_medal_url("https://www.youtube.com/watch?v=x)[a](https://evil)"));
+        assert!(!is_youtube_or_medal_url("https://medal.tv/clips/a)[a](https://evil)"));
+    }
+
+    #[test]
+    fn clip_url_accepts_common_query_and_path_forms() {
+        assert!(is_youtube_or_medal_url("https://youtu.be/dQw4w9WgXcQ?si=AbC-12_x&t=30"));
+        assert!(is_youtube_or_medal_url("https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=30s"));
+        assert!(is_youtube_or_medal_url("https://medal.tv/clips/abc123/d1337xyz?invite=cr-MSx"));
+    }
+
+    #[test]
+    fn paginate_respects_limit_and_keeps_order() {
+        let sections: Vec<String> = ["aaaa", "bbbb", "cccc"].iter().map(ToString::to_string).collect();
+        assert_eq!(paginate(sections.clone(), 8), vec!["aaaabbbb", "cccc"]);
+        assert_eq!(paginate(sections, 100), vec!["aaaabbbbcccc"]);
+        // An oversized section is truncated rather than producing an unsendable page.
+        let pages = paginate(vec!["x".repeat(20)], 10);
+        assert_eq!(pages.len(), 1);
+        assert_eq!(pages[0].chars().count(), 10);
+        assert_eq!(paginate(Vec::new(), 10), Vec::<String>::new());
+    }
+
+    #[test]
+    fn parse_vote_accepts_only_star_range() {
+        assert_eq!(parse_vote("vote-clip-1"), Some(1));
+        assert_eq!(parse_vote("vote-clip-5"), Some(5));
+        assert_eq!(parse_vote("vote-clip-0"), None);
+        assert_eq!(parse_vote("vote-clip-9"), None);
+        assert_eq!(parse_vote("vote-clip-255"), None);
+        assert_eq!(parse_vote(VOTE_DONE_ID), None);
+        assert_eq!(parse_vote("delete-clip-1"), None);
+    }
+
+    #[test]
+    fn paginate_handles_multibyte_and_zero_limit() {
+        // Limits count chars, not bytes.
+        let pages = paginate(vec!["ﾟ".repeat(5), "é".repeat(5)], 5);
+        assert_eq!(pages, vec!["ﾟ".repeat(5), "é".repeat(5)]);
+        // A zero limit must not underflow.
+        assert_eq!(paginate(vec!["abc".to_string()], 0), vec!["…"]);
     }
 
     #[test]

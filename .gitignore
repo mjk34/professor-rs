@@ -6,3 +6,5 @@
 data.json
 data.json.tmp
 .claude/settings.local.json
+data.json.corrupt-*
+.eventdb.tmp
