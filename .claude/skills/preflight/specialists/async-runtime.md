@@ -30,7 +30,7 @@ Use the Glob tool to find all `.rs` files in `src/`, then use the Read tool to l
 Group by file:
 
 ```
-src/professor.rs
+src/reminder.rs
   [critical] line 88: std::thread::sleep inside async fn — use tokio::time::sleep
   [warning]  line 142: RwLock write guard held across .await point
 

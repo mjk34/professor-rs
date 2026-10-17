@@ -30,9 +30,9 @@ Use the Glob tool to find all `.rs` files in `src/`, then use the Read tool to l
 Group by file:
 
 ```
-src/stock/orders.rs
-  [warning]  line 55: function takes 6 args — consider an OrderParams struct
-  [style]    line 102: bool param `is_limit` — consider enum OrderKind { Market, Limit }
+src/mods.rs
+  [warning]  line 55: function takes 6 args — consider a TransferParams struct
+  [style]    line 102: bool param `is_give` — consider enum CreditOp { Give, Take }
 
 src/basic/economy.rs — clean
 ```

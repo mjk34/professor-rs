@@ -1,4 +1,4 @@
-//! Economy commands — /uwu, `/claim_bonus`, `/buy_tickets`, and Professor simulation helpers.
+//! Economy commands — /uwu, `/claim_bonus`, `/buy_tickets`.
 
 use crate::{data, serenity, Context, Error};
 use crate::helper::default_footer;
@@ -8,17 +8,13 @@ use rand::{thread_rng, Rng};
 use std::sync::Arc;
 use std::time::Duration;
 
-async fn send_gold_unlock(ctx: Context<'_>) -> Result<(), Error> {
-    let user = ctx.author();
+async fn send_level_up(ctx: Context<'_>, user: &serenity::User, level: i32) -> Result<(), Error> {
     ctx.send(poise::CreateReply::default().embed(
         serenity::CreateEmbed::new()
-            .title("⭐ Gold Status Unlocked!")
-            .description(format!(
-                "Congratulations <@{}>! You've reached **Level 10** and unlocked **Gold Status**!\n\nYou now earn a higher HYSA rate on uninvested portfolio cash.",
-                user.id
-            ))
+            .title("Level Up")
+            .description(format!("Wowzers, you powered up! <@{}> reached **Level {}**", user.id, level))
             .thumbnail(user.avatar_url().unwrap_or_default())
-            .color(data::EMBED_GOLD)
+            .color(data::EMBED_LEVEL)
             .footer(default_footer()),
     )).await?;
     Ok(())
@@ -29,20 +25,6 @@ async fn send_gold_unlock(ctx: Context<'_>) -> Result<(), Error> {
 pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
     let user = ctx.author();
     let u = Arc::clone(ctx.data().users.get(&user.id).unwrap().value());
-
-    {
-        let user_data = u.read().await;
-        if !user_data.check_daily() {
-            ctx.send(poise::CreateReply::default().embed(
-                serenity::CreateEmbed::new()
-                    .title("Daily")
-                    .description(format!("You've already rolled today! Next roll available <t:{}:R>.", user_data.next_daily_timestamp()))
-                    .color(data::EMBED_ERROR)
-                    .footer(default_footer()),
-            )).await?;
-            return Ok(());
-        }
-    }
 
     let d20 = thread_rng().gen_range(data::D20_RANGE);
     let check = thread_rng().gen_range(data::DC_CHECK_RANGE);
@@ -59,6 +41,40 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
         (fortune, "Yippee, you passed.".to_string(), "+".to_string(), data::EMBED_SUCCESS)
     } else {
         (fortune / 2, "*oof*, you failed...".to_string(), "+".to_string(), data::EMBED_ERROR)
+    };
+
+    // Check the cooldown and apply the roll under one write lock, before any await,
+    // so concurrent /uwu invocations can't both pass the check and pay out twice.
+    let claimed = {
+        let mut user_data = u.write().await;
+        if user_data.check_daily() {
+            if d20 == 1 {
+                user_data.sub_creds(total);
+            } else {
+                user_data.add_creds(total);
+            }
+            let levelup = user_data.update_xp(data::DAILY_XP);
+            user_data.add_rolls(d20);
+            user_data.push_roll(d20);
+            user_data.add_bonus();
+            user_data.update_daily();
+            Ok(levelup.then(|| user_data.get_level()))
+        } else {
+            Err(user_data.next_daily_timestamp())
+        }
+    };
+    let new_level = match claimed {
+        Ok(new_level) => new_level,
+        Err(next_daily) => {
+            ctx.send(poise::CreateReply::default().embed(
+                serenity::CreateEmbed::new()
+                    .title("Daily")
+                    .description(format!("You've already rolled today! Next roll available <t:{next_daily}:R>."))
+                    .color(data::EMBED_ERROR)
+                    .footer(default_footer()),
+            )).await?;
+            return Ok(());
+        }
     };
 
     let base_ref = ctx.data().d20f.get(28).map_or("", std::string::String::as_str);
@@ -106,34 +122,8 @@ pub async fn uwu(ctx: Context<'_>) -> Result<(), Error> {
             .footer(default_footer()),
     )).await?;
 
-    let mut user_data = u.write().await;
-
-    if d20 == 1 {
-        user_data.sub_creds(total);
-    } else {
-        user_data.add_creds(total);
-    }
-
-    let levelup = user_data.update_xp(data::DAILY_XP);
-    user_data.add_rolls(d20);
-    user_data.push_roll(d20);
-    user_data.add_bonus();
-    user_data.update_daily();
-
-    if levelup {
-        let new_level = user_data.get_level();
-        ctx.send(poise::CreateReply::default().embed(
-            serenity::CreateEmbed::new()
-                .title("Level Up")
-                .description(format!("Wowzers, you powered up! <@{}> reached **Level {}**", user.id, new_level))
-                .thumbnail(user.avatar_url().unwrap_or_default())
-                .color(data::EMBED_LEVEL)
-                .footer(default_footer()),
-        )).await?;
-
-        if new_level == data::GOLD_LEVEL_THRESHOLD {
-            send_gold_unlock(ctx).await?;
-        }
+    if let Some(level) = new_level {
+        send_level_up(ctx, user, level).await?;
     }
 
     Ok(())
@@ -145,14 +135,34 @@ pub async fn claim_bonus(ctx: Context<'_>) -> Result<(), Error> {
     let user = ctx.author();
     let u = Arc::clone(ctx.data().users.get(&user.id).unwrap().value());
 
-    let (bonus, can_claim) = {
-        let user_data = u.read().await;
-        (user_data.get_bonus(), user_data.check_claim())
+    let d20: i32 = thread_rng().gen_range(data::D20_RANGE);
+    let check: i32 = thread_rng().gen_range(data::DC_CHECK_RANGE);
+    let fortune: i32 = if d20 == 20 {
+        thread_rng().gen_range(data::BONUS_CRIT_SUCCESS)
+    } else if d20 == 1 {
+        1
+    } else {
+        let low  = data::BONUS_FORTUNE_BASE + (check - 1) * data::BONUS_FORTUNE_STEP;
+        let high = data::BONUS_FORTUNE_BASE + check * data::BONUS_FORTUNE_STEP;
+        let v = thread_rng().gen_range(low..high);
+        if d20 >= check { v } else { v / 2 }
     };
 
-    if can_claim {
-        let d20: i32 = thread_rng().gen_range(data::D20_RANGE);
-        let check: i32 = thread_rng().gen_range(data::DC_CHECK_RANGE);
+    // Check eligibility and apply the payout under one write lock, before any await,
+    // so concurrent invocations can't both claim the same bonus.
+    let claimed = {
+        let mut user_data = u.write().await;
+        if user_data.check_claim() {
+            user_data.add_creds(fortune);
+            user_data.reset_bonus();
+            let levelup = user_data.update_xp(data::BONUS_XP);
+            Ok(levelup.then(|| user_data.get_level()))
+        } else {
+            Err(user_data.get_bonus())
+        }
+    };
+
+    if let Ok(new_level) = claimed {
         let base_ref = ctx.data().d20f.get(28).map_or("", std::string::String::as_str);
 
         let reply = ctx.send(poise::CreateReply::default().embed(
@@ -167,17 +177,6 @@ pub async fn claim_bonus(ctx: Context<'_>) -> Result<(), Error> {
 
         tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
-        let fortune: i32 = if d20 == 20 {
-            thread_rng().gen_range(data::BONUS_CRIT_SUCCESS)
-        } else if d20 == 1 {
-            1
-        } else {
-            let low  = data::BONUS_FORTUNE_BASE + (check - 1) * data::BONUS_FORTUNE_STEP;
-            let high = data::BONUS_FORTUNE_BASE + check * data::BONUS_FORTUNE_STEP;
-            let v = thread_rng().gen_range(low..high);
-            if d20 >= check { v } else { v / 2 }
-        };
-
         let roll_ref = ctx.data().d20f.get((d20 - 1) as usize).map_or("", std::string::String::as_str);
         let roll_color = if d20 == 20 { data::EMBED_GOLD } else if d20 == 1 { data::EMBED_ERROR } else if d20 >= check { data::EMBED_SUCCESS } else { data::EMBED_FAIL };
 
@@ -191,30 +190,13 @@ pub async fn claim_bonus(ctx: Context<'_>) -> Result<(), Error> {
                 .footer(default_footer()),
         )).await?;
 
-        let mut user_data = u.write().await;
-        user_data.add_creds(fortune);
-        user_data.reset_bonus();
-
-        let levelup = user_data.update_xp(data::BONUS_XP);
-        if levelup {
-            let new_level = user_data.get_level();
-            ctx.send(poise::CreateReply::default().embed(
-                serenity::CreateEmbed::new()
-                    .title("Level Up")
-                    .description(format!("Wowzers, you powered up! <@{}> reached **Level {}**", user.id, new_level))
-                    .thumbnail(user.avatar_url().unwrap_or_default())
-                    .color(data::EMBED_LEVEL)
-                    .footer(default_footer()),
-            )).await?;
-
-            if new_level == data::GOLD_LEVEL_THRESHOLD {
-                send_gold_unlock(ctx).await?;
-            }
+        if let Some(level) = new_level {
+            send_level_up(ctx, user, level).await?;
         }
-    } else {
+    } else if let Err(bonus) = claimed {
         let desc: String = match bonus {
-            2 => format!("The ***Bonus*** will be ready after your next `/uwu`! (Count: {bonus}/3)"),
-            _ => format!("The ***Bonus*** is not ready! (Count: {bonus}/3)"),
+            n if n == data::BONUS_CLAIM_THRESHOLD - 1 => format!("The ***Bonus*** will be ready after your next `/uwu`! (Count: {bonus}/{})", data::BONUS_CLAIM_THRESHOLD),
+            _ => format!("The ***Bonus*** is not ready! (Count: {bonus}/{})", data::BONUS_CLAIM_THRESHOLD),
         };
 
         ctx.send(poise::CreateReply::default().embed(
@@ -342,6 +324,30 @@ pub async fn buy_tickets(ctx: Context<'_>) -> Result<(), Error> {
             _ => continue,
         };
 
+        // Prices were quoted from a snapshot up to 60s old — re-validate under the write lock
+        // so a concurrent spend can't overdraw creds or buy at a stale ticket price.
+        let charged = {
+            let mut ud = u.write().await;
+            let fresh = ud.get_tickets() == tickets && ud.get_creds() >= cost;
+            if fresh {
+                ud.sub_creds(cost);
+                ud.add_tickets(bought);
+            }
+            fresh
+        };
+
+        if !charged {
+            msg.edit(&serenity_ctx, EditMessage::default()
+                .embed(serenity::CreateEmbed::new()
+                    .title("Buy Tickets")
+                    .description("Your creds or tickets changed since this shop opened — run `/buy_tickets` again.")
+                    .colour(data::EMBED_ERROR)
+                    .footer(default_footer()))
+                .components(vec![]))
+                .await.ok();
+            break;
+        }
+
         msg.edit(&serenity_ctx, EditMessage::default()
             .embed(serenity::CreateEmbed::new()
                 .title("Buy Tickets")
@@ -351,71 +357,8 @@ pub async fn buy_tickets(ctx: Context<'_>) -> Result<(), Error> {
                 .footer(default_footer()))
             .components(vec![]))
             .await.ok();
-
-        let mut ud = u.write().await;
-        ud.sub_creds(cost);
-        ud.add_tickets(bought);
         break;
     }
 
     Ok(())
-}
-
-// ── Professor simulation helpers ─────────────────────────────────────────────
-// These replicate the core logic of /uwu and /claim_bonus without Discord ctx.
-// Used by the Professor AI background task.
-
-/// Simulate a /uwu roll for Professor.
-/// Returns creds awarded (negative on critical failure, 0 if cooldown not met).
-pub fn simulate_uwu(user_data: &mut data::UserData) -> i32 {
-    if !user_data.check_daily() { return 0; }
-    let d20: i32 = thread_rng().gen_range(data::D20_RANGE);
-    let check: i32 = thread_rng().gen_range(data::DC_CHECK_RANGE);
-    let low = data::DAILY_FORTUNE_BASE + (check - 1) * data::DAILY_FORTUNE_STEP;
-    let high = data::DAILY_FORTUNE_BASE + check * data::DAILY_FORTUNE_STEP;
-    let fortune: i32 = thread_rng().gen_range(low..high);
-
-    let total: i32 = if d20 == 20 {
-        thread_rng().gen_range(data::DAILY_CRIT_SUCCESS)
-    } else if d20 == 1 {
-        -thread_rng().gen_range(data::DAILY_CRIT_FAIL)
-    } else if d20 >= check {
-        fortune
-    } else {
-        fortune / 2
-    };
-
-    if total < 0 {
-        user_data.sub_creds(-total);
-    } else {
-        user_data.add_creds(total);
-    }
-    user_data.update_xp(data::DAILY_XP);
-    user_data.add_rolls(d20);
-    user_data.push_roll(d20);
-    user_data.add_bonus();
-    user_data.update_daily();
-    total
-}
-
-/// Simulate a `/claim_bonus` roll for Professor.
-/// Returns creds awarded (0 if `bonus_count` < 3).
-pub fn simulate_claim(user_data: &mut data::UserData) -> i32 {
-    if !user_data.check_claim() { return 0; }
-    let d20: i32 = thread_rng().gen_range(data::D20_RANGE);
-    let check: i32 = thread_rng().gen_range(data::DC_CHECK_RANGE);
-    let fortune: i32 = if d20 == 20 {
-        thread_rng().gen_range(data::BONUS_CRIT_SUCCESS)
-    } else if d20 == 1 {
-        1
-    } else {
-        let low  = data::BONUS_FORTUNE_BASE + (check - 1) * data::BONUS_FORTUNE_STEP;
-        let high = data::BONUS_FORTUNE_BASE + check * data::BONUS_FORTUNE_STEP;
-        let v = thread_rng().gen_range(low..high);
-        if d20 >= check { v } else { v / 2 }
-    };
-    user_data.add_creds(fortune);
-    user_data.update_xp(data::BONUS_XP);
-    user_data.reset_bonus();
-    fortune
 }

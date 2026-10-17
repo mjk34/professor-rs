@@ -68,7 +68,7 @@ Apply the same resolution process as Phase 2.5 to all `[critical]` and `[warning
 
 ```
 ### Async/Runtime
-  [critical] src/professor.rs (line 88): blocking sleep inside async fn — FIXED
+  [critical] src/reminder.rs (line 88): blocking sleep inside async fn — FIXED
 
 ### API Surface ✓
 
@@ -76,7 +76,7 @@ Apply the same resolution process as Phase 2.5 to all `[critical]` and `[warning
   [style] src/data.rs (line 210): 5-arg function — consider a config struct
 
 ### Test Strategy
-  [warning] src/stock/orders.rs: no integration test for order queue — DEFERRED: requires mock design
+  [warning] src/clips.rs: no integration test for clip voting — DEFERRED: requires mock design
 
 ### Pragmatic Audit
   [warning] M-LOG-STRUCTURED src/basic/economy.rs (line 44): string interpolation — FIXED

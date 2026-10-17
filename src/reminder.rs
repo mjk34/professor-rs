@@ -2,7 +2,7 @@
 use crate::data;
 use crate::helper::default_footer;
 use crate::serenity;
-use chrono::{Datelike, NaiveDate, TimeDelta, Utc};
+use chrono::{DateTime, Datelike, NaiveDate, TimeDelta, Utc};
 use poise::serenity_prelude::{ChannelId, CreateMessage};
 use std::env;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -13,6 +13,18 @@ const EVENT_FILE: &str = ".eventdb";
 const BIRTHDAY_REMINDER_DAYS_AHEAD: i64 = 14;
 /// Default timezone offset from UTC when `TZ_OFFSET_HOURS` is unset — EDT (UTC-4).
 const DEFAULT_TZ_OFFSET_HOURS: i64 = -4;
+
+/// Local calendar date for a UTC offset in hours (e.g. -4 for EDT).
+fn local_today(now_utc: DateTime<Utc>, offset_hours: i64) -> NaiveDate {
+    (now_utc + TimeDelta::hours(offset_hours)).date_naive()
+}
+
+/// Whether a row's reminded/pinged flags belong to an already-passed birthday and should reset.
+/// Only reset once the next occurrence is outside the reminder window — otherwise a birthday in
+/// early January (seen from late December) resets and re-sends its reminder every run.
+const fn flags_expired(birthday_passed_this_year: bool, days_until_next: i64) -> bool {
+    birthday_passed_this_year && days_until_next > BIRTHDAY_REMINDER_DAYS_AHEAD
+}
 
 async fn import_from_file(filename: &str) -> Vec<Vec<String>> {
     let file = match tokio::fs::File::open(filename).await {
@@ -63,8 +75,7 @@ pub(crate) async fn check_birthday(http: &serenity::Http) {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(DEFAULT_TZ_OFFSET_HOURS);
-    let now = Utc::now() - TimeDelta::hours(tz_offset);
-    let today = now.date_naive();
+    let today = local_today(Utc::now(), tz_offset);
     let year = today.year();
 
     for row in &mut database {
@@ -87,13 +98,6 @@ pub(crate) async fn check_birthday(http: &serenity::Http) {
         let mut reminded: bool = matches!(row[3].as_str(), "1");
         let mut pinged: bool = matches!(row[4].as_str(), "1");
 
-        if today > date_this_year && (reminded || pinged) {
-            row[3] = "0".to_string();
-            row[4] = "0".to_string();
-            reminded = false;
-            pinged = false;
-        }
-
         let next_occurrence = if today <= date_this_year {
             date_this_year
         } else if let Some(date) = date_next_year {
@@ -103,6 +107,13 @@ pub(crate) async fn check_birthday(http: &serenity::Http) {
         };
 
         let days_until = (next_occurrence - today).num_days();
+
+        if flags_expired(today > date_this_year, days_until) && (reminded || pinged) {
+            row[3] = "0".to_string();
+            row[4] = "0".to_string();
+            reminded = false;
+            pinged = false;
+        }
 
         if (0..=BIRTHDAY_REMINDER_DAYS_AHEAD).contains(&days_until) && !reminded {
             let Ok(mod_chat) = env::var("MOD_CHAT").unwrap_or_default().parse::<u64>() else {
@@ -169,4 +180,40 @@ pub(crate) async fn check_birthday(http: &serenity::Http) {
     }
 
     export_to_file(EVENT_FILE, database).await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    fn date(y: i32, m: u32, d: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(y, m, d).unwrap()
+    }
+
+    #[test]
+    fn local_today_applies_offset_sign_correctly() {
+        // 02:00 UTC on Jan 2 is still Jan 1 in EDT (UTC-4).
+        let now = Utc.with_ymd_and_hms(2026, 1, 2, 2, 0, 0).unwrap();
+        assert_eq!(local_today(now, -4), date(2026, 1, 1));
+        // 22:00 UTC on Jan 1 is already Jan 2 at UTC+4.
+        let now = Utc.with_ymd_and_hms(2026, 1, 1, 22, 0, 0).unwrap();
+        assert_eq!(local_today(now, 4), date(2026, 1, 2));
+    }
+
+    #[test]
+    fn flags_kept_for_new_year_birthday_inside_window() {
+        // Seen from Dec 22, a Jan 5 birthday "passed" this year but is 14 days out — keep flags.
+        let days_until = (date(2027, 1, 5) - date(2026, 12, 22)).num_days();
+        assert!(!flags_expired(true, days_until));
+    }
+
+    #[test]
+    fn flags_reset_after_birthday_passes() {
+        // The day after a Jan 5 birthday, the next one is ~a year out — reset.
+        let days_until = (date(2027, 1, 5) - date(2026, 1, 6)).num_days();
+        assert!(flags_expired(true, days_until));
+        // Upcoming birthday this year never resets.
+        assert!(!flags_expired(false, 30));
+    }
 }

@@ -11,7 +11,7 @@ Run in order. Stop and report on the first failure — don't continue past error
 
 If the user passes an argument (e.g. `/cargo build`), run that specific subcommand instead of the suite.
 
-Cross-compile note: if the user asks to build for musl, use `cargo build --target x86_64-unknown-linux-musl --features vendored`.
+Cross-compile note: if the user asks to build for musl, use `cargo build --target x86_64-unknown-linux-musl`.
 
 ---
 

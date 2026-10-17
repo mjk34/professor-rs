@@ -4,4 +4,5 @@
 .eventdb
 .vscode/
 data.json
+data.json.tmp
 .claude/settings.local.json

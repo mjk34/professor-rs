@@ -20,11 +20,16 @@ use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
+/// How long `/my_clips` waits for a delete-button press before disarming.
+const MY_CLIPS_TIMEOUT: Duration = Duration::from_secs(30);
+/// Max idle time between votes in `/next_clip` before the current score is finalized.
+const VOTE_IDLE_TIMEOUT: Duration = Duration::from_mins(10);
+
 static YOUTUBE_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(https?://)?(www\.)?(youtube\.com/watch\?v=|youtu\.be/).+").expect("literal regex")
+    Regex::new(r"^(https?://)?(www\.)?(youtube\.com/watch\?v=|youtu\.be/)\S+$").expect("literal regex")
 });
 static MEDAL_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"https?://medal\.tv/clips/.+").expect("literal regex"));
+    LazyLock::new(|| Regex::new(r"^https?://medal\.tv/clips/\S+$").expect("literal regex"));
 
 pub async fn check_mod(ctx: Context<'_>) -> Result<bool, Error> {
     let mod_id = ctx.data().mod_id;
@@ -35,6 +40,15 @@ pub async fn check_mod(ctx: Context<'_>) -> Result<bool, Error> {
         }
     }
     Ok(false)
+}
+
+/// Mean of all votes. Summed as u32 — a u8 sum overflows past 51 five-star votes.
+fn average_vote(votes: &HashMap<serenity::UserId, u8>) -> f64 {
+    if votes.is_empty() {
+        return 0.0;
+    }
+    let total: u32 = votes.values().map(|&v| u32::from(v)).sum();
+    f64::from(total) / votes.len() as f64
 }
 
 fn is_youtube_or_medal_url(url: &str) -> bool {
@@ -76,20 +90,16 @@ pub async fn submit_clip(
     }
 
     let user = ctx.author();
-    let data = &ctx.data().users;
-    let u = data.get_mut(&user.id).unwrap();
-    let mut user_data = u.write().await;
+    let u = Arc::clone(ctx.data().users.get(&user.id).unwrap().value());
 
     let avatar = user.avatar_url().unwrap_or_default();
 
-    let desc = format!(
-        "Title: \u{3000}**{}**\nLink: \u{3000}**{}**\n",
-        &title, &link
-    );
+    let desc = format!("Title: \u{3000}**{title}**\nLink: \u{3000}**{link}**\n");
 
     let clip = ClipData::new(title, link);
 
-    let check = user_data.add_submit(clip);
+    // Temporary guard: released before the Discord sends below.
+    let check = u.write().await.add_submit(clip);
 
     if !check {
         ctx.send(
@@ -263,7 +273,7 @@ pub async fn my_clips(ctx: Context<'_>) -> Result<(), Error> {
     let Some(press) = msg
         .await_component_interaction(&serenity_ctx)
         .author_id(author.id)
-        .timeout(Duration::from_secs(30))
+        .timeout(MY_CLIPS_TIMEOUT)
         .await
     else {
         msg.edit(&serenity_ctx, EditMessage::default()
@@ -388,7 +398,7 @@ pub async fn next_clip(ctx: Context<'_>) -> Result<(), Error> {
     let final_score = loop {
         let Some(press) = msg
             .await_component_interaction(&serenity_ctx)
-            .timeout(Duration::from_secs(10 * 60))
+            .timeout(VOTE_IDLE_TIMEOUT)
             .await
         else {
             break score; // timeout — finalize with current score
@@ -408,8 +418,7 @@ pub async fn next_clip(ctx: Context<'_>) -> Result<(), Error> {
         else { continue; };
 
         voted_users.insert(press.user.id, i);
-        let total: u8 = voted_users.values().sum();
-        score = f64::from(total) / voted_users.len() as f64;
+        score = average_vote(&voted_users);
 
         msg.edit(&serenity_ctx, EditMessage::default()
             .embed(serenity::CreateEmbed::new()
@@ -437,4 +446,38 @@ pub async fn next_clip(ctx: Context<'_>) -> Result<(), Error> {
         .await.ok();
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clip_url_accepts_youtube_and_medal() {
+        assert!(is_youtube_or_medal_url("https://www.youtube.com/watch?v=dQw4w9WgXcQ"));
+        assert!(is_youtube_or_medal_url("youtube.com/watch?v=abc"));
+        assert!(is_youtube_or_medal_url("https://youtu.be/abc123"));
+        assert!(is_youtube_or_medal_url("https://medal.tv/clips/abc123"));
+    }
+
+    #[test]
+    fn clip_url_rejects_lookalikes_and_injection() {
+        assert!(!is_youtube_or_medal_url("https://evil.example/?youtu.be/x"));
+        assert!(!is_youtube_or_medal_url("notyoutube.com/watch?v=x"));
+        assert!(!is_youtube_or_medal_url("[click](https://evil)youtu.be/a"));
+        assert!(!is_youtube_or_medal_url("https://youtu.be/a b"));
+        assert!(!is_youtube_or_medal_url("https://medal.tv/clips/"));
+    }
+
+    #[test]
+    fn average_vote_handles_empty_and_many_voters() {
+        let mut votes = HashMap::new();
+        assert_eq!(average_vote(&votes), 0.0);
+        for id in 1..=60u64 {
+            votes.insert(serenity::UserId::new(id), 5);
+        }
+        assert_eq!(average_vote(&votes), 5.0); // 300 total would overflow a u8 sum
+        votes.insert(serenity::UserId::new(1), 1); // re-vote replaces the earlier vote
+        assert!((average_vote(&votes) - 296.0 / 60.0).abs() < 5e-5);
+    }
 }

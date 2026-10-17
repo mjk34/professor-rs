@@ -25,7 +25,7 @@ Common suppressions for this project (already in main.rs — do not re-add):
 - `missing_errors_doc`, `missing_panics_doc`, `must_use_candidate` — not a public API
 - `wildcard_imports`, `items_after_statements`, `too_many_lines`, `manual_let_else` — project style
 - `string_add`, `format_push_string` — embed building idiom
-- `option_if_let_else`, `similar_names`, `redundant_else` — readability preference
+- `option_if_let_else`, `redundant_else` — readability preference
 
 Re-run until the output contains only expected/suppressed lints.
 

@@ -1,23 +1,28 @@
 {
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "INPUT=$(cat); echo \"$INPUT\" | grep -q 'git commit' && grep -rq '// \\[TEST\\]' src/ 2>/dev/null && echo 'WARNING: [TEST] guards are still active — re-enable market hours/cooldown checks before committing' || true"
-          }
-        ]
-      }
+  "permissions": {
+    "allow": [
+      "Bash(cargo check*)",
+      "Bash(cargo clippy*)",
+      "Bash(cargo test*)",
+      "Bash(cargo fmt*)",
+      "Bash(cargo audit*)"
     ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./.eventdb)",
+      "Read(./data.json)"
+    ]
+  },
+  "hooks": {
     "PostToolUse": [
       {
         "matcher": "Edit|Write",
         "hooks": [
           {
             "type": "command",
-            "command": "cargo check 2>&1 | tail -20"
+            "timeout": 180,
+            "statusMessage": "cargo check",
+            "command": "f=$(jq -r '.tool_input.file_path // empty'); case \"$f\" in *.rs) c=$(command -v cargo || echo \"$HOME/.cargo/bin/cargo\"); out=$(cd \"$CLAUDE_PROJECT_DIR\" && \"$c\" check --message-format=short 2>&1) || { echo \"$out\" | grep -E '^(error|warning)' | head -20 >&2; exit 2; } ;; esac"
           }
         ]
       }

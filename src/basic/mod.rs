@@ -3,7 +3,7 @@
 mod economy;
 mod leaderboard;
 
-#[doc(inline)] pub use economy::{buy_tickets, claim_bonus, simulate_claim, simulate_uwu, uwu};
+#[doc(inline)] pub use economy::{buy_tickets, claim_bonus, uwu};
 #[doc(inline)] pub use leaderboard::leaderboard;
 
 use crate::{data, serenity, Context, Error};
@@ -11,9 +11,10 @@ use crate::helper::{creds_to_price, default_footer};
 use poise::serenity_prelude::UserId;
 use serenity::Color;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 fn fmt_hhmm(d: chrono::TimeDelta) -> String {
-    let total_min = d.num_seconds() / 60;
+    let total_min = d.num_seconds().max(0) / 60; // clamp clock skew (now < joined)
     format!("{:0>2}:{:0>2}", total_min / 60, total_min % 60)
 }
 
@@ -42,37 +43,33 @@ pub async fn ping(ctx: Context<'_>) -> Result<(), Error> {
 #[poise::command(slash_command)]
 pub async fn wallet(ctx: Context<'_>) -> Result<(), Error> {
     let user = ctx.author();
-    let data = &ctx.data().users;
-    let u = data.get(&user.id).unwrap();
-    let user_data = u.read().await;
+    let u = Arc::clone(ctx.data().users.get(&user.id).unwrap().value());
+    // Scoped so the read guard is released before the Discord send below.
+    let desc = {
+        let user_data = u.read().await;
+        let daily = if user_data.check_daily() { "Available".to_string() } else { "Not Available".to_string() };
+        let claim = if user_data.check_claim() { "Available".to_string() } else { format!("{} / {}", user_data.get_bonus(), data::BONUS_CLAIM_THRESHOLD) };
+        let creds = user_data.get_creds();
 
-    let luck: String = if user_data.get_luck().is_empty() { "N/A".to_string() } else { user_data.get_luck() };
-    let daily = if user_data.check_daily() { "Available".to_string() } else { "Not Available".to_string() };
-    let claim = if user_data.check_claim() { "Available".to_string() } else { format!("{} / 3", user_data.get_bonus()) };
-
-    let level: i32 = user_data.get_level();
-    let xp: i32 = user_data.get_xp();
-    let next_level = user_data.get_next_level();
-    let creds: i32 = user_data.get_creds();
-    let tickets: i32 = user_data.get_tickets();
-    let gold_badge = if level >= data::GOLD_LEVEL_THRESHOLD { "  ⭐ **Gold Status**" } else { "" };
-
-    let desc = format!(
-        "**Level {}**{}  -  {}/{}\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\nDaily UwU........... . . . **{}**\nAverage Luck..... . . . **{}**\nClaim Bonus....... . . . **{}**\n\nTotal Creds: **{}** (${:.2}) \u{3000}\u{3000}\u{2000}Tickets: **{}**\n",
-        level, gold_badge, xp, next_level, daily, luck, claim, creds, creds_to_price(f64::from(creds)), tickets
-    );
+        format!(
+            "**Level {}**  -  {}/{}\n﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋﹋\nDaily UwU........... . . . **{}**\nAverage Luck..... . . . **{}**\nClaim Bonus....... . . . **{}**\n\nTotal Creds: **{}** (${:.2}) \u{3000}\u{3000}\u{2000}Tickets: **{}**\n",
+            user_data.get_level(), user_data.get_xp(), user_data.get_next_level(), daily, user_data.get_luck(), claim,
+            creds, creds_to_price(f64::from(creds)), user_data.get_tickets()
+        )
+    };
 
     ctx.send(poise::CreateReply::default().embed(
         serenity::CreateEmbed::new()
             .title("Wallet")
             .description(desc)
-            .thumbnail(user.avatar_url().unwrap_or_default().clone())
+            .thumbnail(user.avatar_url().unwrap_or_default())
             .color(data::EMBED_GOLD)
             .footer(default_footer()),
     )).await?;
     Ok(())
 }
 
+/// see who is in voice and for how long
 #[poise::command(slash_command, guild_only)]
 pub async fn voice_status(ctx: Context<'_>) -> Result<(), Error> {
     use crate::data::VoiceUser;
@@ -80,7 +77,7 @@ pub async fn voice_status(ctx: Context<'_>) -> Result<(), Error> {
     let data = &ctx.data().voice_users;
 
     let mut out: Vec<(UserId, VoiceUser)> = data.iter().map(|x| (*x.key(), x.value().clone())).collect();
-    out.sort_by(|a, b| a.1.joined.cmp(&b.1.joined));
+    out.sort_by_key(|(_, vu)| vu.joined);
 
     let now = chrono::Utc::now();
 
@@ -119,6 +116,7 @@ pub async fn voice_status(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
+/// show info about this server
 #[poise::command(slash_command)]
 pub async fn info(ctx: Context<'_>) -> Result<(), Error> {
     let guild = match ctx.guild() {

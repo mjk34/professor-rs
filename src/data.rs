@@ -1,6 +1,6 @@
 //! Shared bot state, user data models, and global constants.
 use crate::serenity;
-use chrono::prelude::{DateTime, NaiveDate, Utc};
+use chrono::prelude::{DateTime, Utc};
 use dashmap::DashMap;
 use std::collections::VecDeque;
 use poise::serenity_prelude::RoleId;
@@ -10,40 +10,6 @@ use std::sync::Arc;
 use std::{env, fs};
 use tokio::sync::RwLock;
 
-// Professor AI memory
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MemoryEntry {
-    pub date: DateTime<Utc>,
-    pub content: String,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct ProfessorMemory {
-    pub core_behavior: String,
-    pub entries: VecDeque<MemoryEntry>,
-    /// Persona schema version — when this trails `PROFESSOR_PERSONA_VERSION`, the next session
-    /// performs a clean reseed (liquidate all positions, clear entries, refresh persona).
-    #[serde(default)]
-    pub core_behavior_version: u32,
-    /// First session date of the current calendar month — anchors month-to-date return tracking.
-    #[serde(default)]
-    pub month_anchor_date: Option<NaiveDate>,
-    /// Total portfolio USD value at the month anchor.
-    #[serde(default)]
-    pub month_anchor_portfolio_value_usd: Option<f64>,
-    /// SPY price at the month anchor.
-    #[serde(default)]
-    pub month_anchor_spy_price: Option<f64>,
-}
-
-/// Minimum level required to unlock Gold Status and the elevated HYSA rate.
-pub const GOLD_LEVEL_THRESHOLD: i32 = 10;
-/// Annual HYSA interest rate (as a fraction) applied to uninvested cash for non-gold users.
-pub const BASE_HYSA_RATE: f64 = 0.1;
-/// Maximum number of trade history records retained per user before oldest entries are dropped.
-pub const TRADE_HISTORY_LIMIT: usize = 500;
-/// Maximum number of pending (queued) orders a user may have at once.
-pub const MAX_PENDING_ORDERS: usize = 20;
 /// Starting cred balance for every newly registered user (100,000 creds = $1,000 notional).
 pub const NEW_USER_STARTING_CREDS: i32 = 100_000;
 
@@ -74,16 +40,22 @@ pub const BONUS_XP: i32 = 150;
 pub const TICKET_BASE_COST: i32 = 2_000;
 /// Ticket cost increment per ticket already owned.
 pub const TICKET_COST_STEP: i32 = 300;
-/// Maximum portfolio name length.
-pub const MAX_PORTFOLIO_NAME_LEN: usize = 32;
-/// Maximum number of portfolios per user.
-pub const MAX_PORTFOLIOS: usize = 4;
-/// Maximum tickers on a watchlist.
-pub const MAX_WATCHLIST: usize = 20;
-/// Maximum fund/withdraw amount in USD.
-pub const MAX_FUND_USD: f64 = 100_000.0;
 /// Maximum tickets purchasable in one `/buy_tickets` transaction.
 pub const MAX_TICKET_PURCHASE: i32 = 100;
+
+// ── Progression constants ─────────────────────────────────────────────────────
+/// XP needed to go from level 0 to level 1.
+const XP_BASE: i32 = 500;
+/// Extra XP required per level already gained (cap = `XP_BASE + level * XP_PER_LEVEL`).
+const XP_PER_LEVEL: i32 = 80;
+/// Hours between daily rolls — 21 rather than 24 so the daily doesn't drift later each day.
+const DAILY_COOLDOWN_HOURS: i64 = 21;
+/// Dailies needed to unlock `/claim_bonus`.
+pub const BONUS_CLAIM_THRESHOLD: i32 = 3;
+/// Number of recent d20 rolls averaged for the rolling-luck score.
+const ROLLING_LUCK_WINDOW: usize = 7;
+/// Maximum clip submissions per user (also bounded by the 10 `NUMBER_EMOJS` keycaps).
+const MAX_CLIP_SUBMISSIONS: usize = 5;
 
 /// Discord keycap digit emoji 0–9, indexed by digit value. Used for ticket shop buttons.
 pub const NUMBER_EMOJS: [&str; 10] = [
@@ -141,11 +113,6 @@ pub struct UserData {
     pub submits: Vec<Option<ClipData>>,
     tickets: i32,
 
-    pub stock: StockProfile,
-
-    #[serde(default)]
-    pub professor_memory: Option<ProfessorMemory>,
-
     #[serde(default)]
     recent_rolls: VecDeque<i32>,
 }
@@ -161,7 +128,7 @@ impl UserData {
         }
 
         self.xp += xp;
-        let xp_cap = 500 + self.get_level() * 80;
+        let xp_cap = self.get_next_level();
 
         if self.xp >= xp_cap {
             self.xp -= xp_cap;
@@ -188,15 +155,15 @@ impl UserData {
 
     pub fn check_daily(&self) -> bool {
         let diff = Utc::now() - self.last_daily;
-        diff.num_hours() >= 21
+        diff.num_hours() >= DAILY_COOLDOWN_HOURS
     }
 
     pub fn next_daily_timestamp(&self) -> i64 {
-        (self.last_daily + chrono::Duration::hours(21)).timestamp()
+        (self.last_daily + chrono::Duration::hours(DAILY_COOLDOWN_HOURS)).timestamp()
     }
 
     pub fn add_bonus(&mut self) {
-        self.bonus_count = (self.bonus_count + 1).min(3);
+        self.bonus_count = (self.bonus_count + 1).min(BONUS_CLAIM_THRESHOLD);
     }
 
     pub const fn reset_bonus(&mut self) {
@@ -204,7 +171,7 @@ impl UserData {
     }
 
     pub const fn check_claim(&self) -> bool {
-        matches!(self.bonus_count, 3)
+        self.bonus_count == BONUS_CLAIM_THRESHOLD
     }
 
     pub const fn add_creds(&mut self, creds: i32) -> bool {
@@ -253,7 +220,7 @@ impl UserData {
     }
 
     pub fn push_roll(&mut self, d20: i32) {
-        if self.recent_rolls.len() >= 7 {
+        if self.recent_rolls.len() >= ROLLING_LUCK_WINDOW {
             self.recent_rolls.pop_front();
         }
         self.recent_rolls.push_back(d20);
@@ -286,11 +253,11 @@ impl UserData {
     }
 
     pub const fn get_next_level(&self) -> i32 {
-        500 + self.get_level() * 80
+        XP_BASE + self.get_level() * XP_PER_LEVEL
     }
 
     pub fn add_submit(&mut self, new_submit: ClipData) -> bool {
-        for i in 0..5 {
+        for i in 0..MAX_CLIP_SUBMISSIONS {
             let s = self.submits.get_mut(i);
             if let Some(s) = s {
                 if s.is_none() {
@@ -398,11 +365,14 @@ impl std::ops::Deref for SaveData {
     }
 }
 
+/// Shared map of every registered user's data.
+pub type UsersMap = Arc<DashMap<serenity::UserId, Arc<RwLock<UserData>>>>;
+
 /// User data, which is stored and accessible in all command invocations
 #[derive(Debug)]
 pub struct Data {
     /// Persistent data of users
-    pub users: Arc<DashMap<serenity::UserId, Arc<RwLock<UserData>>>>,
+    pub users: UsersMap,
     /// Duration of users in voice channel, updates by events
     pub voice_users: Arc<DashMap<serenity::UserId, VoiceUser>>,
     pub meme: Vec<String>,
@@ -415,23 +385,27 @@ pub struct Data {
     pub sub_chat: String,
     pub bad_fortune: Vec<String>,
     pub good_fortune: Vec<String>,
-    pub hysa_fed_rate: Arc<RwLock<f64>>,
-    pub bot_user_id: serenity::UserId,
 }
 
 impl Data {
-    pub async fn check_or_create_user(ctx: crate::Context<'_>) -> Result<(), crate::Error> {
-        let user_id = ctx.author().id;
-        {
-            let data = &ctx.data().users;
-            // let data = &mut ctx.data().users;
-            if data.contains_key(&user_id) {
-                return Ok(());
-            }
-
+    /// Returns the user's data handle, registering them with starting creds if new.
+    /// The flag is `true` when the account was just created. Uses the entry API so two
+    /// concurrent first commands can't both insert (and one overwrite the other).
+    pub fn get_or_create_user(&self, user_id: serenity::UserId) -> (Arc<RwLock<UserData>>, bool) {
+        let mut created = false;
+        let entry = self.users.entry(user_id).or_insert_with(|| {
+            created = true;
             let mut new_user = UserData::default();
             new_user.add_creds(NEW_USER_STARTING_CREDS);
-            data.insert(user_id, Arc::new(RwLock::new(new_user)));
+            Arc::new(RwLock::new(new_user))
+        });
+        (Arc::clone(entry.value()), created)
+    }
+
+    pub async fn check_or_create_user(ctx: crate::Context<'_>) -> Result<(), crate::Error> {
+        let (_, created) = ctx.data().get_or_create_user(ctx.author().id);
+        if !created {
+            return Ok(());
         }
 
         ctx.send(
@@ -459,7 +433,7 @@ impl Data {
 
     /// Attempts to load the Data from a file, otherwise return a default
     pub fn load() -> Self {
-        let data = fs::read_to_string("data.json").ok();
+        let data = fs::read_to_string(DATA_FILE).ok();
         let users_data: SaveData = if let Some(file) = data {
             match serde_json::from_str(&file) {
                 Ok(d) => d,
@@ -491,7 +465,7 @@ impl Data {
             env::var("MOD_ID")
                 .expect("Missing moderator ID")
                 .parse()
-                .unwrap(),
+                .expect("MOD_ID is not a valid role id"),
         );
 
         let gen_chat = env::var("GENERAL").expect("missing GENERAL id");
@@ -510,26 +484,27 @@ impl Data {
             sub_chat,
             bad_fortune,
             good_fortune,
-            hysa_fed_rate: Arc::new(RwLock::new(3.35)), // approximate fed funds rate at deployment; refreshed from FRED on startup
-            bot_user_id: serenity::UserId::new(
-                env::var("PROFESSOR")
-                    .expect("missing PROFESSOR id")
-                    .parse()
-                    .expect("PROFESSOR id is not a valid u64"),
-            ),
         }
     }
 }
 
-pub async fn save_users(
-    users: &Arc<DashMap<serenity::UserId, Arc<RwLock<UserData>>>>,
-) {
-    let users_save = DashMap::new();
+/// Serializes saves: `post_command` and the maintenance task can both call `save_users`.
+static SAVE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+/// Persistent user database, relative to the working directory.
+const DATA_FILE: &str = "data.json";
+/// Staging file for atomic saves — written fully, then renamed over `DATA_FILE`.
+const DATA_FILE_TMP: &str = "data.json.tmp";
 
-    for x in users.iter() {
-        let (id, u) = x.pair();
-        let u = u.read().await;
-        users_save.insert(*id, u.clone());
+pub async fn save_users(
+    users: &UsersMap,
+) {
+    let _save_guard = SAVE_LOCK.lock().await;
+
+    // Snapshot the handles first — DashMap shard locks must not be held across `.await`.
+    let handles: Vec<_> = users.iter().map(|e| (*e.key(), Arc::clone(e.value()))).collect();
+    let users_save = DashMap::new();
+    for (id, u) in handles {
+        users_save.insert(id, u.read().await.clone());
     }
 
     let users_save = SaveData { users: users_save };
@@ -541,8 +516,13 @@ pub async fn save_users(
             return;
         }
     };
-    if let Err(e) = tokio::fs::write("data.json", encoded).await {
-        tracing::error!(error = %e, "save: data.json write failed");
+    // Write-then-rename so a crash mid-write can't leave a truncated data.json behind.
+    if let Err(e) = tokio::fs::write(DATA_FILE_TMP, encoded).await {
+        tracing::error!(error = %e, "save: data.json.tmp write failed");
+        return;
+    }
+    if let Err(e) = tokio::fs::rename(DATA_FILE_TMP, DATA_FILE).await {
+        tracing::error!(error = %e, "save: data.json rename failed");
     }
 }
 
@@ -558,149 +538,6 @@ fn read_lines(filename: &str) -> Vec<String> {
             Vec::new()
         }
     }
-}
-
-// ──────────────────────────────────────────────
-// Stock / portfolio types
-// ──────────────────────────────────────────────
-
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
-pub struct StockProfile {
-    pub portfolios: Vec<Portfolio>,
-    pub trade_history: VecDeque<TradeRecord>,
-    pub watchlist: Vec<String>,
-    #[serde(default)]
-    pub pending_orders: Vec<PendingOrder>,
-    #[serde(default)]
-    pub next_order_id: u32,
-}
-
-impl StockProfile {
-    pub fn push_trade(&mut self, record: TradeRecord) {
-        self.trade_history.push_back(record);
-        if self.trade_history.len() > TRADE_HISTORY_LIMIT {
-            self.trade_history.pop_front();
-        }
-    }
-
-    pub fn find_portfolio_idx(&self, name: &str) -> Option<usize> {
-        self.portfolios.iter().position(|p| p.name.eq_ignore_ascii_case(name))
-    }
-
-    /// Queues a pending order, assigning the next order ID.
-    /// Returns `false` if `MAX_PENDING_ORDERS` is reached.
-    pub fn queue_order(&mut self, mut order: PendingOrder) -> bool {
-        if self.pending_orders.len() >= MAX_PENDING_ORDERS {
-            return false;
-        }
-        let id = self.next_order_id;
-        self.next_order_id = id.wrapping_add(1);
-        order.id = id;
-        self.pending_orders.push(order);
-        true
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Portfolio {
-    pub name: String,
-    pub cash: f64,
-    pub last_interest_credited: DateTime<Utc>,
-    pub positions: Vec<Position>,
-    pub created_at: DateTime<Utc>,
-}
-
-impl Portfolio {
-    pub fn new(name: String) -> Self {
-        Self {
-            name,
-            cash: 0.0,
-            last_interest_credited: Utc::now(),
-            positions: Vec::new(),
-            created_at: Utc::now(),
-        }
-    }
-
-    /// Sum of collateral locked across all naked short option positions.
-    pub fn locked_cash(&self) -> f64 {
-        self.positions.iter().filter_map(|p| {
-            if let AssetType::Option(c) = &p.asset_type {
-                if c.side == OptionSide::Short { return Some(c.collateral); }
-            }
-            None
-        }).sum()
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Position {
-    pub ticker: String,
-    pub asset_type: AssetType,
-    pub quantity: f64,
-    pub avg_cost: f64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum AssetType {
-    Stock,
-    #[expect(clippy::upper_case_acronyms, reason = "ETF is a well-known abbreviation, not a type name")]
-    ETF,
-    Crypto,
-    Option(OptionContract),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum OptionSide {
-    Long,
-    Short,
-}
-
-const fn default_long() -> OptionSide {
-    OptionSide::Long
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OptionContract {
-    pub strike: f64,
-    pub expiry: DateTime<Utc>,
-    pub option_type: OptionType,
-    pub contracts: u32,
-    #[serde(default = "default_long")]
-    pub side: OptionSide,
-    /// Total creds locked as margin collateral for naked short positions. 0 for covered/cash-secured.
-    #[serde(default)]
-    pub collateral: f64,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, poise::ChoiceParameter)]
-pub enum OptionType {
-    Call,
-    Put,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TradeRecord {
-    pub portfolio: String,
-    pub ticker: String,
-    pub asset_name: String,
-    pub action: TradeAction,
-    pub quantity: f64,
-    pub price_per_unit: f64,
-    pub total_creds: f64,
-    pub realized_pnl: Option<f64>,
-    pub timestamp: DateTime<Utc>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum TradeAction {
-    Buy,
-    Sell,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum OrderSide {
-    Buy,
-    Sell,
 }
 
 #[cfg(test)]
@@ -778,8 +615,7 @@ mod tests {
 
     #[test]
     fn luck_tiers_at_boundaries() {
-        let mut u = UserData::default();
-        u.daily_count = 1;
+        let mut u = UserData { daily_count: 1, ..Default::default() };
 
         u.rolls = 5;  assert_eq!(u.get_luck(), "Horrible"); // score = 5/2 = 2
         u.rolls = 12; assert_eq!(u.get_luck(), "Bad");      // score = 12/2 = 6
@@ -836,100 +672,5 @@ mod tests {
         assert_eq!(u.get_bonus(), 0);
         assert!(!u.check_claim());
     }
-
-    // ── Portfolio ─────────────────────────────────────────────────────────
-
-    fn make_short_option(collateral: f64) -> Position {
-        Position {
-            ticker: "TEST".to_string(),
-            asset_type: AssetType::Option(OptionContract {
-                strike: 100.0,
-                expiry: Utc::now(),
-                option_type: OptionType::Call,
-                contracts: 1,
-                side: OptionSide::Short,
-                collateral,
-            }),
-            quantity: 1.0,
-            avg_cost: 0.0,
-        }
-    }
-
-    fn make_long_option(collateral: f64) -> Position {
-        Position {
-            ticker: "TEST".to_string(),
-            asset_type: AssetType::Option(OptionContract {
-                strike: 100.0,
-                expiry: Utc::now(),
-                option_type: OptionType::Put,
-                contracts: 1,
-                side: OptionSide::Long,
-                collateral,
-            }),
-            quantity: 1.0,
-            avg_cost: 0.0,
-        }
-    }
-
-    fn make_stock_position() -> Position {
-        Position {
-            ticker: "AAPL".to_string(),
-            asset_type: AssetType::Stock,
-            quantity: 10.0,
-            avg_cost: 500.0,
-        }
-    }
-
-    #[test]
-    fn locked_cash_sums_only_short_collateral() {
-        let mut port = Portfolio::new("test".to_string());
-        port.positions.push(make_short_option(1000.0));
-        port.positions.push(make_short_option(500.0));
-        port.positions.push(make_long_option(999.0));  // should not count
-        port.positions.push(make_stock_position());     // should not count
-        assert_eq!(port.locked_cash(), 1500.0);
-    }
-
-    #[test]
-    fn locked_cash_empty_portfolio() {
-        let port = Portfolio::new("empty".to_string());
-        assert_eq!(port.locked_cash(), 0.0);
-    }
-
-    // ── StockProfile ──────────────────────────────────────────────────────
-
-    #[test]
-    fn push_trade_enforces_history_limit() {
-        let mut sp = StockProfile::default();
-        for i in 0..=TRADE_HISTORY_LIMIT {
-            sp.push_trade(TradeRecord {
-                portfolio: "p".to_string(),
-                ticker: format!("T{i}"),
-                asset_name: "name".to_string(),
-                action: TradeAction::Buy,
-                quantity: 1.0,
-                price_per_unit: 100.0,
-                total_creds: 100.0,
-                realized_pnl: None,
-                timestamp: Utc::now(),
-            });
-        }
-        assert_eq!(sp.trade_history.len(), TRADE_HISTORY_LIMIT);
-        // oldest entry (T0) should have been dropped
-        assert_eq!(sp.trade_history.front().unwrap().ticker, "T1");
-    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PendingOrder {
-    pub id: u32,
-    pub side: OrderSide,
-    pub ticker: String,
-    pub asset_name: String,
-    pub asset_type: AssetType,
-    pub portfolio_name: String,
-    pub quantity: f64,
-    /// None = market order (queued for next open); Some = limit price in USD
-    pub limit_price: Option<f64>,
-    pub expiry: DateTime<Utc>,
-}

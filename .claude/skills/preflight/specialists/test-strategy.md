@@ -30,11 +30,11 @@ Use the Glob tool to find all `.rs` files in `src/`, then use the Read tool to l
 Group by file:
 
 ```
-src/stock/orders.rs
-  [warning] no test for order expiry when market closes mid-queue
-  [warning] parse_quantity takes user input but has no proptest coverage
+src/clips.rs
+  [warning] no test for clip rating when voting times out
+  [warning] is_youtube_or_medal_url takes user input but has no proptest coverage
 
-src/trader/engine.rs — adequate coverage
+src/data.rs — adequate coverage
 ```
 
 Only flag real gaps. If coverage looks adequate for a file, say so in one line.
