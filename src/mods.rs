@@ -1,9 +1,10 @@
-//! Moderator commands: `give_creds`, `take_creds`.
+//! Moderator commands: `give_creds`, `take_creds`, `prune`.
 
 use crate::data;
 use crate::helper::{check_mod, default_footer, parse_user_mention, CREDS_PER_DOLLAR};
 use crate::{serenity, Context, Error};
-use poise::serenity_prelude::{futures, UserId};
+use poise::serenity_prelude::{futures, ChannelId, MessageId, UserId};
+use std::time::Duration;
 
 /// Maximum dollar amount (not creds) a moderator may transfer in one give/take.
 const MAX_DOLLAR_TRANSFER: u32 = 100_000;
@@ -203,6 +204,167 @@ pub async fn take_creds(
     modify_creds(ctx, mentioned, dollars, CreditOp::Take).await
 }
 
+/// Discord rejects bulk deletes of messages older than 14 days. An hour of margin keeps a
+/// message from ageing out between being fetched and being deleted.
+const BULK_DELETE_MAX_AGE_SECS: i64 = 14 * 24 * 60 * 60 - 60 * 60;
+/// Messages fetched (and bulk-deleted) per round trip — Discord's maximum for both.
+const PRUNE_BATCH: u8 = 100;
+/// How long the moderator has to confirm a prune before it's cancelled.
+const PRUNE_CONFIRM_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Splits message ids into those young enough for one bulk-delete call and older ones that
+/// must be deleted individually. Age comes from the snowflake, so no message fetch is needed.
+fn split_by_bulk_age(ids: &[MessageId], now_unix: i64) -> (Vec<MessageId>, Vec<MessageId>) {
+    ids.iter().partition(|id| now_unix - id.created_at().unix_timestamp() < BULK_DELETE_MAX_AGE_SECS)
+}
+
+#[derive(Debug, Default)]
+struct PruneOutcome {
+    deleted: usize,
+    failed: usize,
+    /// Why pruning stopped early, if it did.
+    stopped: Option<String>,
+}
+
+/// Deletes every message in `channel_id` older than the command, newest first: recent ones
+/// in bulk, older ones one at a time. Messages that can't be deleted (e.g. some system
+/// messages) are counted and skipped; if a whole batch fails with nothing deleted yet, the
+/// bot most likely lacks Manage Messages, so it stops instead of failing every message.
+async fn prune_channel(ctx: Context<'_>, channel_id: ChannelId) -> PruneOutcome {
+    let mut outcome = PruneOutcome::default();
+    let mut before: Option<MessageId> = None;
+
+    loop {
+        let mut query = serenity::GetMessages::new().limit(PRUNE_BATCH);
+        if let Some(id) = before {
+            query = query.before(id);
+        }
+        let batch = match channel_id.messages(ctx, query).await {
+            Ok(batch) => batch,
+            Err(e) => {
+                outcome.stopped = Some(format!("couldn't read channel history: {e}"));
+                break;
+            }
+        };
+        // Page by the oldest id seen, so undeletable messages can't be fetched forever.
+        let Some(oldest) = batch.last() else { break };
+        before = Some(oldest.id);
+
+        let ids: Vec<MessageId> = batch.iter().map(|m| m.id).collect();
+        let (recent, old) = split_by_bulk_age(&ids, chrono::Utc::now().timestamp());
+        let mut last_error = None;
+
+        if !recent.is_empty() {
+            match channel_id.delete_messages(ctx.http(), &recent).await {
+                Ok(()) => outcome.deleted += recent.len(),
+                Err(e) => {
+                    outcome.failed += recent.len();
+                    last_error = Some(e.to_string());
+                }
+            }
+        }
+        for id in old {
+            match channel_id.delete_message(ctx.http(), id).await {
+                Ok(()) => outcome.deleted += 1,
+                Err(e) => {
+                    outcome.failed += 1;
+                    last_error = Some(e.to_string());
+                }
+            }
+        }
+
+        if outcome.deleted == 0 {
+            if let Some(e) = last_error {
+                outcome.stopped = Some(format!("nothing could be deleted — does the bot have Manage Messages? ({e})"));
+                break;
+            }
+        }
+    }
+    outcome
+}
+
+fn prune_embed(desc: impl Into<String>, color: serenity::Color) -> serenity::CreateEmbed {
+    serenity::CreateEmbed::new()
+        .title("Prune")
+        .description(desc)
+        .color(color)
+        .footer(default_footer())
+}
+
+/// [!] MODERATOR - delete every message in this channel
+#[poise::command(slash_command, guild_only, check = "check_mod")]
+pub async fn prune(ctx: Context<'_>) -> Result<(), Error> {
+    let channel_id = ctx.channel_id();
+    // Ids are unique per invocation so a stale prompt's buttons can't confirm a newer one.
+    let confirm_id = format!("{}-prune-confirm", ctx.id());
+    let cancel_id = format!("{}-prune-cancel", ctx.id());
+
+    // Ephemeral: only the moderator sees the prompt, and it isn't part of channel history.
+    let reply = ctx.send(poise::CreateReply::default()
+        .ephemeral(true)
+        .embed(prune_embed(
+            format!("Delete **every message** in <#{channel_id}>? This can't be undone."),
+            data::EMBED_MOD,
+        ))
+        .components(vec![serenity::CreateActionRow::Buttons(vec![
+            serenity::CreateButton::new(&confirm_id).label("Prune").style(serenity::ButtonStyle::Danger),
+            serenity::CreateButton::new(&cancel_id).label("Cancel").style(serenity::ButtonStyle::Secondary),
+        ])])
+    ).await?;
+
+    let press = {
+        let (confirm_id, cancel_id) = (confirm_id.clone(), cancel_id.clone());
+        serenity::ComponentInteractionCollector::new(ctx)
+            .author_id(ctx.author().id)
+            .channel_id(channel_id)
+            .timeout(PRUNE_CONFIRM_TIMEOUT)
+            .filter(move |p| p.data.custom_id == confirm_id || p.data.custom_id == cancel_id)
+            .await
+    };
+    if let Some(p) = &press {
+        p.create_response(ctx, serenity::CreateInteractionResponse::Acknowledge).await.ok();
+    }
+    let confirmed = press.is_some_and(|p| p.data.custom_id == confirm_id);
+    if !confirmed {
+        reply.edit(ctx, poise::CreateReply::default()
+            .embed(prune_embed("Prune cancelled — nothing was deleted.", data::EMBED_ERROR))
+            .components(vec![])
+        ).await?;
+        return Ok(());
+    }
+
+    reply.edit(ctx, poise::CreateReply::default()
+        .embed(prune_embed(
+            format!("Pruning <#{channel_id}>… messages older than 14 days are deleted one by one, so this can take a while."),
+            data::EMBED_DEFAULT,
+        ))
+        .components(vec![])
+    ).await?;
+
+    let outcome = prune_channel(ctx, channel_id).await;
+    tracing::info!(
+        channel = %channel_id,
+        moderator = %ctx.author().id,
+        deleted = outcome.deleted,
+        failed = outcome.failed,
+        stopped = ?outcome.stopped,
+        "prune finished",
+    );
+
+    let mut desc = format!("Deleted **{}** message(s) from <#{channel_id}>.", outcome.deleted);
+    if outcome.failed > 0 {
+        desc += &format!("\n**{}** couldn't be deleted.", outcome.failed);
+    }
+    if let Some(reason) = &outcome.stopped {
+        desc += &format!("\nStopped early: {reason}");
+    }
+    let color = if outcome.stopped.is_some() { data::EMBED_ERROR } else { data::EMBED_CYAN };
+    // The interaction token expires after 15 minutes; a very long prune can outlive it.
+    if let Err(e) = reply.edit(ctx, poise::CreateReply::default().embed(prune_embed(desc, color))).await {
+        tracing::warn!(error = %e, "prune: couldn't post the result (interaction expired?)");
+    }
+    Ok(())
+}
 
 #[cfg(test)]
 mod tests {
@@ -222,6 +384,25 @@ mod tests {
         assert_eq!(ids, vec![UserId::new(1), UserId::new(2)]);
         assert_eq!(unparsed, 2); // "junk" once, plus the role mention
         assert_eq!(parse_mentions("   "), (vec![], 0));
+    }
+
+    /// Snowflake for a message sent at `unix_secs` (Discord epoch is 2015-01-01).
+    fn message_at(unix_secs: i64) -> MessageId {
+        const DISCORD_EPOCH_MS: i64 = 1_420_070_400_000;
+        MessageId::new(u64::try_from((unix_secs * 1000 - DISCORD_EPOCH_MS) << 22).unwrap())
+    }
+
+    #[test]
+    fn split_by_bulk_age_respects_fourteen_day_limit() {
+        let now = 1_800_000_000;
+        let day = 24 * 60 * 60;
+        let fresh = message_at(now - 60);
+        let edge = message_at(now - BULK_DELETE_MAX_AGE_SECS + 1);
+        let too_old = message_at(now - 14 * day);
+        let ancient = message_at(now - 400 * day);
+        let (recent, old) = split_by_bulk_age(&[fresh, edge, too_old, ancient], now);
+        assert_eq!(recent, vec![fresh, edge]);
+        assert_eq!(old, vec![too_old, ancient]);
     }
 
     #[test]

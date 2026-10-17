@@ -62,6 +62,7 @@ Claude Code Run Skills: `/sanity` → `/rust-polish` → `/preflight` → push c
 
 ### Moderation
 - `/give_creds` / `/take_creds` — *(mod)* adjust creds for one or more mentioned users
+- `/prune` — *(mod)* delete every message in the current channel (asks for confirmation; needs the bot to have Manage Messages)
 - Birthday reminders from `.eventdb` — advance notice to the mod channel, day-of ping in general
 
 Logging defaults to `info`; override with `RUST_LOG`.

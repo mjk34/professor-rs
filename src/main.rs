@@ -116,6 +116,7 @@ async fn main() {
                 clips::next_clip(),
                 mods::give_creds(),
                 mods::take_creds(),
+                mods::prune(),
             ],
             // Prefix commands exist only for the owner-only `~register`; everything else is slash.
             prefix_options: poise::PrefixFrameworkOptions {
